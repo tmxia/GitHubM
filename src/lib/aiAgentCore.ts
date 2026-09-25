@@ -2426,27 +2426,44 @@ async function getJobLogs(
   endLine?: number,
 ): Promise<string> {
   try {
-    // GitHub 返回 302 重定向到实际日志 URL，需要手动跟随
-    const redirectResp = await fetch(
-      `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
-      {
-        headers: {
-          Authorization: `token ${ctx.token}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "GitHubManagerApp",
-        },
-        redirect: "manual",
-      },
-    );
     let logText = "";
-    if (redirectResp.status === 302) {
-      const logUrl = redirectResp.headers.get("location") || "";
-      const logResp = await fetch(logUrl);
-      logText = await logResp.text();
-    } else if (redirectResp.status === 200) {
-      logText = await redirectResp.text();
+
+    // APK 环境：走 AndroidBridge 原生代理（绕过 WebView 对 302 跨域的限制）
+    const androidBridge =
+      (typeof window !== "undefined" && (window as any).AndroidBridge) || null;
+    if (androidBridge && typeof androidBridge.httpGetText === "function") {
+      const raw = androidBridge.httpGetText(
+        `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
+        ctx.token,
+      );
+      let parsed: { status?: number; body?: string; error?: string } = {};
+      try { parsed = JSON.parse(raw); } catch { /* ignore */ }
+      if (parsed.status !== 200) {
+        return `获取日志失败：HTTP ${parsed.status}${parsed.error ? ` (${parsed.error})` : ""}`;
+      }
+      logText = parsed.body || "";
     } else {
-      return `获取日志失败：HTTP ${redirectResp.status}`;
+      // Web 环境：原 fetch 逻辑
+      const redirectResp = await fetch(
+        `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
+        {
+          headers: {
+            Authorization: `Bearer ${ctx.token}`,
+            Accept: "application/vnd.github+json",
+            "User-Agent": "GitHubManagerApp",
+          },
+          redirect: "manual",
+        },
+      );
+      if (redirectResp.status === 302) {
+        const logUrl = redirectResp.headers.get("location") || "";
+        const logResp = await fetch(logUrl);
+        logText = await logResp.text();
+      } else if (redirectResp.status === 200) {
+        logText = await redirectResp.text();
+      } else {
+        return `获取日志失败：HTTP ${redirectResp.status}`;
+      }
     }
 
     const lines = logText.split("\n");

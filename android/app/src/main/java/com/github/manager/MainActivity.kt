@@ -240,7 +240,59 @@ class MainActivity : AppCompatActivity() {
          *
          * 调用：window.AndroidBridge.checkUpdate()
          */
+                /**
+         * 通过原生层发送 GET 请求并返回文本内容（用于绕过 WebView CORS 限制）。
+         *
+         * 场景：GET /actions/jobs/{id}/logs 会 302 到 Azure Blob，该域不带 CORS header，
+         * 前端 fetch 无法完成。此方法在原生层发请求，自动跟随 302，
+         * 且跟随时主动丢弃 Authorization（Azure 预签名 URL 不接受 GitHub token）。
+         *
+         * 调用：window.AndroidBridge.httpGetText(url, token)
+         * @return JSON 字符串: {"status": 200, "body": "..."} 或 {"status": -1, "error": "..."}
+         */
         @JavascriptInterface
+        fun httpGetText(url: String, token: String): String {
+            return try {
+                val (code, body) = httpGetFollow(url, token, 0)
+                org.json.JSONObject().apply {
+                    put("status", code)
+                    put("body", body)
+                }.toString()
+            } catch (e: Exception) {
+                org.json.JSONObject().apply {
+                    put("status", -1)
+                    put("error", e.message ?: "unknown")
+                }.toString()
+            }
+        }
+
+        private fun httpGetFollow(url: String, token: String, depth: Int): Pair<Int, String> {
+            if (depth > 5) throw IOException("Too many redirects")
+            val conn = java.net.URL(url).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 30000
+            conn.readTimeout = 60000
+            conn.setRequestProperty("User-Agent", "GitHubManagerApp")
+            if (token.isNotEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+            }
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val loc = conn.getHeaderField("Location") ?: throw IOException("Redirect without Location")
+                conn.disconnect()
+                return httpGetFollow(loc, "", depth + 1)
+            }
+            val body = if (code in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            }
+            conn.disconnect()
+            return code to body
+        }
+
+@JavascriptInterface
         fun checkUpdate() {
             checkUpdateInternal()
         }
