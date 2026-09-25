@@ -101,12 +101,12 @@ function AnsiLine({ raw }: { raw: string }) {
   if (m) {
     return (
       <span>
-        <span className="text-muted-foreground/50 select-none mr-2 text-[10px]">{m[1].replace('T', ' ').replace('Z', '')}</span>
-        <span>{m[2]}</span>
+        <span className="text-[#6e7681] select-none mr-2 text-[10px]">{m[1].replace('T', ' ').replace('Z', '')}</span>
+        <span className="text-[#e6edf3]">{m[2]}</span>
       </span>
     );
   }
-  return <span>{clean}</span>;
+  return <span className="text-[#e6edf3]">{clean}</span>;
 }
 
 // 日志面板
