@@ -91,13 +91,14 @@ function RunStatusBadge({ status, conclusion }: { status: string | null; conclus
 // ANSI 颜色码转 Tailwind className（精简版）
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B\[[0-9;]*[mGKHF]/g, '');
+  return str.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '');
 }
 
 function AnsiLine({ raw }: { raw: string }) {
   const clean = stripAnsi(raw);
   // 时间戳前缀（GitHub 日志格式 2024-01-01T00:00:00Z  内容）
-  const m = clean.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(.*)/);
+  const ltrimmed = clean.replace(/^[\s\uFEFF\u00A0]+/, '');
+  const m = ltrimmed.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(.*)/);
   if (m) {
     return (
       <span>
@@ -213,7 +214,7 @@ function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; 
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="w-full flex items-center gap-2 px-4 py-2 hover:bg-secondary/50 transition-colors text-left">
+      <CollapsibleTrigger className={`w-full flex items-center gap-2 px-4 py-2 transition-colors text-left border-l-2 ${open ? 'bg-primary/10 border-l-primary' : 'border-l-transparent hover:bg-secondary/50'}`}>
         <ChevronDown className={`w-3 h-3 text-muted-foreground shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         <RunStatusBadge status={job.status} conclusion={job.conclusion} />
         <span className="text-sm text-foreground flex-1 min-w-0 truncate">{job.name}</span>
