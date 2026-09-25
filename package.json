@@ -61,6 +61,7 @@
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-virtual": "^3.13.24",
+    "@tauri-apps/plugin-http": "^2.6.1",
     "@uiw/codemirror-theme-github": "^4.25.10",
     "@uiw/codemirror-themes-all": "^4.25.10",
     "@uiw/react-codemirror": "^4.25.10",

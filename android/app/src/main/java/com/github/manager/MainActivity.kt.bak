@@ -776,8 +776,6 @@ class MainActivity : AppCompatActivity() {
             // 解决 Vite 打包后相对路径资源在 WebView 中被跨域拦截导致的白屏问题
             @Suppress("SetJavaScriptEnabled")
             allowFileAccessFromFileURLs = true
-            // 允许 file:// 页面 fetch 外部 https 资源（GitHub API 等），否则跨域被内核拦截
-            allowUniversalAccessFromFileURLs = true
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
             useWideViewPort = true
