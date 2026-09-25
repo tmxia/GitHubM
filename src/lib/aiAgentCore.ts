@@ -2439,7 +2439,7 @@ async function getJobLogs(
       let parsed: { status?: number; body?: string; error?: string } = {};
       try { parsed = JSON.parse(raw); } catch { /* ignore */ }
       if (parsed.status !== 200) {
-        return `获取日志失败：HTTP ${parsed.status}${parsed.error ? ` (${parsed.error})` : ""}`;
+        return `获取日志失败[bridge]：HTTP ${parsed.status}${parsed.error ? ` (${parsed.error})` : ""}`;
       }
       logText = parsed.body || "";
     } else {
