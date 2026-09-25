@@ -7,7 +7,6 @@
 //     MCP 会话/工具 Schema 带缓存，MCP 不可达时本地工具兜底。
 import type { StreamMetrics } from '@/components/ai/aiTypes';
 import {
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
   GitHubMcpClient,
   loadCachedTools,
   saveCachedTools,
@@ -2427,48 +2426,27 @@ async function getJobLogs(
   endLine?: number,
 ): Promise<string> {
   try {
+    // GitHub 返回 302 重定向到实际日志 URL，需要手动跟随
+    const redirectResp = await fetch(
+      `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
+      {
+        headers: {
+          Authorization: `token ${ctx.token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "GitHubManagerApp",
+        },
+        redirect: "manual",
+      },
+    );
     let logText = "";
-    const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-    if (isTauri) {
-      // Tauri：Rust 层发请求，自动跟随 302，绕过 CORS
-      const resp = await tauriFetch(
-        `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `token ${ctx.token}`,
-            Accept: "application/vnd.github+json",
-            "User-Agent": "GitHubManagerApp",
-          },
-        },
-      );
-      if (resp.status !== 200) {
-        return `获取日志失败：HTTP ${resp.status}`;
-      }
-      logText = await resp.text();
+    if (redirectResp.status === 302) {
+      const logUrl = redirectResp.headers.get("location") || "";
+      const logResp = await fetch(logUrl);
+      logText = await logResp.text();
+    } else if (redirectResp.status === 200) {
+      logText = await redirectResp.text();
     } else {
-      // Web：保留原 manual 逻辑
-      const redirectResp = await fetch(
-        `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
-        {
-          headers: {
-            Authorization: `token ${ctx.token}`,
-            Accept: "application/vnd.github+json",
-            "User-Agent": "GitHubManagerApp",
-          },
-          redirect: "manual",
-        },
-      );
-      if (redirectResp.status === 302) {
-        const logUrl = redirectResp.headers.get("location") || "";
-        const logResp = await fetch(logUrl);
-        logText = await logResp.text();
-      } else if (redirectResp.status === 200) {
-        logText = await redirectResp.text();
-      } else {
-        return `获取日志失败：HTTP ${redirectResp.status}`;
-      }
+      return `获取日志失败：HTTP ${redirectResp.status}`;
     }
 
     const lines = logText.split("\n");
