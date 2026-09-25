@@ -1812,8 +1812,7 @@ async function httpGetTextWithAuth(url: string): Promise<string> {
     let parsed: { status?: number; body?: string; error?: string } = {};
     try { parsed = JSON.parse(raw); } catch { /* ignore */ }
     if (parsed.status !== 200) {
-      const dbg = `url=${(parsed as any).debug_url || "?"} tokenLen=${(parsed as any).debug_token_len ?? "?"}`;
-      throw new Error(`获取日志失败: ${parsed.status} [${dbg}]${parsed.error ? ` err=${parsed.error}` : ""}`);
+      throw new Error(`获取日志失败: ${parsed.status}${parsed.error ? ` (${parsed.error})` : ""}`);
     }
     return parsed.body || "";
   }

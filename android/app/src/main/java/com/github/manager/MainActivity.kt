@@ -173,15 +173,11 @@ class MainActivity : AppCompatActivity() {
                 org.json.JSONObject().apply {
                     put("status", code)
                     put("body", body)
-                    put("debug_url", url)
-                    put("debug_token_len", token.length)
                 }.toString()
             } catch (e: Exception) {
                 org.json.JSONObject().apply {
                     put("status", -1)
                     put("error", e.message ?: "unknown")
-                    put("debug_url", url)
-                    put("debug_token_len", token.length)
                 }.toString()
             }
         }

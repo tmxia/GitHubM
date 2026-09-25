@@ -164,22 +164,22 @@ function LogPanel({ jobId, owner, repo, isRunning }: LogPanelProps) {
   };
 
   return (
-    <div className="bg-[#0d1117] border border-border rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/20">
-        <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground flex-1">{i18n.t('日志输出')}</span>
+    <div className="bg-[#0d1117] border border-[#30363d] rounded-lg overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#30363d] bg-[#161b22]">
+        <Terminal className="w-3.5 h-3.5 text-[#8b949e]" />
+        <span className="text-xs text-[#c9d1d9] flex-1">{i18n.t('日志输出')}</span>
         {isRunning && (
-          <span className="flex items-center gap-1 text-[10px] text-warning">
+          <span className="flex items-center gap-1 text-[10px] text-[#d29922]">
             <Loader2 className="w-3 h-3 animate-spin" />{i18n.t('实时刷新')}</span>
         )}
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+          className="h-6 px-2 text-xs text-[#8b949e] hover:text-[#e6edf3] hover:bg-white/10 gap-1"
           onClick={handleCopy}
           disabled={loading || !logs}
         >
-          {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+          {copied ? <Check className="w-3 h-3 text-[#3fb950]" /> : <Copy className="w-3 h-3" />}
           {copied ? i18n.t('已复制') : i18n.t('复制')}
         </Button>
       </div>
@@ -188,7 +188,7 @@ function LogPanel({ jobId, owner, repo, isRunning }: LogPanelProps) {
         className="overflow-y-auto max-h-96 p-3 font-mono text-xs leading-relaxed text-[#e6edf3]"
       >
         {loading ? (
-          <div className="flex items-center gap-2 text-muted-foreground py-4">
+          <div className="flex items-center gap-2 text-[#8b949e] py-4">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{i18n.t('加载日志...')}</span>
           </div>
@@ -199,7 +199,7 @@ function LogPanel({ jobId, owner, repo, isRunning }: LogPanelProps) {
             </div>
           ))
         ) : (
-          <span className="text-muted-foreground">{i18n.t('暂无日志')}</span>
+          <span className="text-[#8b949e]">{i18n.t('暂无日志')}</span>
         )}
       </div>
     </div>
