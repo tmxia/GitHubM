@@ -159,6 +159,56 @@ class MainActivity : AppCompatActivity() {
     // ── JS 桥接口 ───────────────────────────────────────────────────
     inner class WebAppBridge {
 
+        /**
+         * 原生层 GET 文本（用于绕过 WebView file:// 的 CORS / Origin:null 限制）。
+         * 自动跟随 302 且重定向后丢弃 Authorization（Azure 预签名 URL 不接受 GitHub token）。
+         *
+         * 调用：window.AndroidBridge.httpGetText(url, token)
+         * 返回：JSON 字符串 {"status":200,"body":"..."} 或 {"status":-1,"error":"..."}
+         */
+        @JavascriptInterface
+        fun httpGetText(url: String, token: String): String {
+            return try {
+                val (code, body) = httpGetFollow(url, token, 0)
+                org.json.JSONObject().apply {
+                    put("status", code)
+                    put("body", body)
+                }.toString()
+            } catch (e: Exception) {
+                org.json.JSONObject().apply {
+                    put("status", -1)
+                    put("error", e.message ?: "unknown")
+                }.toString()
+            }
+        }
+
+        private fun httpGetFollow(url: String, token: String, depth: Int): Pair<Int, String> {
+            if (depth > 5) throw IOException("Too many redirects")
+            val conn = java.net.URL(url).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 30000
+            conn.readTimeout = 60000
+            conn.setRequestProperty("User-Agent", "GitHubManagerApp")
+            if (token.isNotEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+            }
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val loc = conn.getHeaderField("Location") ?: throw IOException("Redirect without Location")
+                conn.disconnect()
+                return httpGetFollow(loc, "", depth + 1)
+            }
+            val body = if (code in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            }
+            conn.disconnect()
+            return code to body
+        }
+
+
         /** React 首屏就绪后调用，与 3s 最小时间共同触发启动遮罩淡出 */
         @JavascriptInterface
         fun notifyReady() {

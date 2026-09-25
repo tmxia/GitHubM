@@ -1799,17 +1799,36 @@ export async function getRepoStargazers(
  * 获取指定 Job 的日志文本。
  * GitHub 返回 302 重定向到真实日志 URL，此函数跟随重定向后返回纯文本。
  */
+/**
+ * 获取需要认证的纯文本资源。
+ * APK 环境：file:// 页面直连 GitHub 会因 Origin:null 被拒，走 AndroidBridge 原生代理。
+ * Web 环境：直接 fetch 并跟随重定向。
+ */
+async function httpGetTextWithAuth(url: string): Promise<string> {
+  const bridge =
+    (typeof window !== "undefined" && (window as any).AndroidBridge) || null;
+  if (bridge && typeof bridge.httpGetText === "function") {
+    const raw = bridge.httpGetText(url, authToken || "");
+    let parsed: { status?: number; body?: string; error?: string } = {};
+    try { parsed = JSON.parse(raw); } catch { /* ignore */ }
+    if (parsed.status !== 200) {
+      throw new Error(`获取日志失败: ${parsed.status}${parsed.error ? ` (${parsed.error})` : ""}`);
+    }
+    return parsed.body || "";
+  }
+  const headers = buildHeaders() as Record<string, string>;
+  const res = await fetch(url, { headers, redirect: "follow" });
+  if (!res.ok) throw new Error(`获取日志失败: ${res.status}`);
+  return res.text();
+}
+
 export async function getJobLogs(
   owner: string,
   repo: string,
   jobId: number
 ): Promise<string> {
   const url = `${BASE_URL}/repos/${owner}/${repo}/actions/jobs/${jobId}/logs`;
-  const headers = buildHeaders() as Record<string, string>;
-  // GitHub 会重定向到实际日志地址
-  const res = await fetch(url, { headers, redirect: 'follow' });
-  if (!res.ok) throw new Error(`获取日志失败: ${res.status}`);
-  return res.text();
+  return httpGetTextWithAuth(url);
 }
 
 // ===== PR Review Comment（行内评审评论）=====
