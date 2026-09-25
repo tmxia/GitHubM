@@ -101,7 +101,7 @@ function AnsiLine({ raw }: { raw: string }) {
   if (m) {
     return (
       <span>
-        <span className="text-[#e6edf3] select-none mr-2 text-[10px]">{m[1].replace('T', ' ').replace('Z', '')}</span>
+        <span className="text-[#d0d7de] select-none mr-2 text-[10px]">{m[1].replace('T', ' ').replace('Z', '')}</span>
         <span className="text-[#e6edf3]">{m[2]}</span>
       </span>
     );
