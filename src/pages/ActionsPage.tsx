@@ -214,7 +214,7 @@ function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; 
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className={`w-full flex items-center gap-2 px-4 py-2 transition-colors text-left border-l-2 ${open ? 'bg-primary/10 border-l-primary' : 'border-l-transparent hover:bg-secondary/50'}`}>
+      <CollapsibleTrigger className="w-full flex items-center gap-2 px-4 py-2 hover:bg-secondary/50 transition-colors text-left">
         <ChevronDown className={`w-3 h-3 text-muted-foreground shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         <RunStatusBadge status={job.status} conclusion={job.conclusion} />
         <span className="text-sm text-foreground flex-1 min-w-0 truncate">{job.name}</span>
