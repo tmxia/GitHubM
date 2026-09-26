@@ -415,7 +415,7 @@ export default function RepoSecretsVariablesPage() {
       </div>
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as SecretScope)} className="space-y-3">
-        <TabsList className="bg-secondary border border-border">
+        <TabsList className="bg-secondary border border-border w-full grid grid-cols-3">
           <TabsTrigger value="actions" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground">
             Actions
           </TabsTrigger>
