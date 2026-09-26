@@ -829,23 +829,19 @@ export async function createOrphanBranch(
   repo: string,
   branchName: string
 ): Promise<{ ref: string; object: { sha: string } }> {
-  // 1) 创建空 tree
-  const tree = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/trees`, {
-    method: 'POST',
-    body: JSON.stringify({ tree: [] }),
-    headers: { 'Content-Type': 'application/json' },
-  });
-  // 2) 创建孤儿 commit（无 parent）
+  // Git 空 tree 的固定 SHA（任何仓库都一样）
+  const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+  // 1) 创建孤儿 commit（无 parent，指向空 tree）
   const commit = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/commits`, {
     method: 'POST',
     body: JSON.stringify({
       message: `Initialize empty branch: ${branchName}`,
-      tree: tree.sha,
+      tree: EMPTY_TREE_SHA,
       parents: [],
     }),
     headers: { 'Content-Type': 'application/json' },
   });
-  // 3) 创建分支 ref
+  // 2) 创建分支 ref
   return request<{ ref: string; object: { sha: string } }>(`/repos/${owner}/${repo}/git/refs`, {
     method: 'POST',
     body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: commit.sha }),
