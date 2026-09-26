@@ -502,9 +502,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               size="icon"
               className="text-muted-foreground hover:bg-secondary"
               onClick={(e) => {
-                (e.currentTarget as HTMLElement).blur();
+                const el = e.currentTarget as HTMLElement;
+                el.blur();
+                // 双保险：延迟再 blur，防止 Android WebView 保持 focus 状态
+                setTimeout(() => el.blur(), 50);
                 if (location.pathname === '/more') {
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  navigate('/');
                 } else {
                   navigate('/more');
                 }
