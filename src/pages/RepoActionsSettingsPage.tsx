@@ -173,7 +173,7 @@ export default function RepoActionsSettingsPage() {
       {/* 1) Actions 权限 */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-          <Zap className="w-4 h-4 text-primary" />
+          <Zap className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{i18n.t('Actions 权限')}</span>
         </div>
         <div className="p-4 space-y-3">
@@ -212,7 +212,7 @@ export default function RepoActionsSettingsPage() {
       {enabled && (
         <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-          <GitBranch className="w-4 h-4 text-primary" />
+          <GitBranch className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{i18n.t('Workflow 权限')}</span>
         </div>
         <div className="p-4 space-y-3">
@@ -250,7 +250,7 @@ export default function RepoActionsSettingsPage() {
       {enabled && allowedActions === 'selected' && (
         <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-          <Package className="w-4 h-4 text-primary" />
+          <Package className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{i18n.t('选定的 Actions')}</span>
         </div>
         <div className="p-4 space-y-3">
@@ -284,7 +284,7 @@ export default function RepoActionsSettingsPage() {
       {/* 4) 保留天数 */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-          <Package className="w-4 h-4 text-primary" />
+          <Package className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{i18n.t('产物和日志保留')}</span>
         </div>
         <div className="p-4 space-y-3">

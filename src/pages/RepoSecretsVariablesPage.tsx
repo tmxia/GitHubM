@@ -191,7 +191,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-primary" />
+            <Lock className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">{i18n.t('机密 (Secrets)')}</span>
           </div>
           <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddSecret}>
@@ -233,7 +233,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
+            <Shield className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">{i18n.t('变量 (Variables)')}</span>
           </div>
           <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddVariable}>
