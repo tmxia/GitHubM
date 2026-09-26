@@ -253,21 +253,21 @@ export default function RepoDetailPage() {
     if (!owner || !repoName) return;
     setUpdating(true);
     try {
-      const updated = await updateRepo(owner, repoName, {
+      const patch: Record<string, unknown> = {
         name: editRepoName.trim() || repoName,
-        description: editDesc,
+        description: editDesc || null,
         private: editPrivate,
-        homepage: editHomepage.trim(),
         has_issues: editHasIssues,
         has_wiki: editHasWiki,
         has_projects: editHasProjects,
-        has_downloads: editHasDownloads,
         allow_squash_merge: editAllowSquash,
         allow_merge_commit: editAllowMerge,
         allow_rebase_merge: editAllowRebase,
-        allow_auto_merge: editAllowAuto,
         delete_branch_on_merge: editDeleteBranchOnMerge,
-      });
+      };
+      // homepage 空字符串会被 GitHub 422 拒绝，只在非空时提交
+      if (editHomepage.trim()) patch.homepage = editHomepage.trim();
+      const updated = await updateRepo(owner, repoName, patch);
       setRepo(updated);
       // 更新缓存中的仓库信息
       const cacheKey = `repodetail:${owner}/${repoName}`;

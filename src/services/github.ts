@@ -263,8 +263,17 @@ async function request<T>(
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}`;
         try {
-          const errorBody = await response.json() as { message?: string };
+          const errorBody = await response.json() as {
+            message?: string;
+            errors?: Array<{ resource?: string; field?: string; code?: string; message?: string }>;
+          };
           errorMessage = errorBody.message || errorMessage;
+          if (Array.isArray(errorBody.errors) && errorBody.errors.length) {
+            const detail = errorBody.errors
+              .map((e) => [e.resource, e.field, e.code, e.message].filter(Boolean).join('/'))
+              .join('; ');
+            if (detail) errorMessage += ` [${detail}]`;
+          }
         } catch { /* 忽略 JSON 解析错误 */ }
         const error = new Error(errorMessage) as Error & { status: number };
         error.status = response.status;
@@ -285,8 +294,17 @@ async function request<T>(
   if (!response.ok) {
     let errorMessage = `HTTP ${response.status}`;
     try {
-      const errorBody = await response.json() as { message?: string };
+      const errorBody = await response.json() as {
+        message?: string;
+        errors?: Array<{ resource?: string; field?: string; code?: string; message?: string }>;
+      };
       errorMessage = errorBody.message || errorMessage;
+      if (Array.isArray(errorBody.errors) && errorBody.errors.length) {
+        const detail = errorBody.errors
+          .map((e) => [e.resource, e.field, e.code, e.message].filter(Boolean).join('/'))
+          .join('; ');
+        if (detail) errorMessage += ` [${detail}]`;
+      }
     } catch { /* 忽略 JSON 解析错误 */ }
     const error = new Error(errorMessage) as Error & { status: number };
     error.status = response.status;
