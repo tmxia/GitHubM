@@ -49,6 +49,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import {
   getWorkflows,
   getWorkflowRuns,
@@ -63,6 +64,7 @@ import {
   listUserPackageVersions,
   deleteUserPackageVersion,
   deleteUserPackage,
+  invalidateCache,
 } from '@/services/github';
 import type { GitHubWorkflow, GitHubWorkflowRun, GitHubWorkflowJob } from '@/types/types';
 import { toast } from 'sonner';
@@ -759,25 +761,36 @@ export default function ActionsPage() {
 function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
   const [packages, setPackages] = useState<import('@/types/types').GitHubPackage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [versions, setVersions] = useState<Record<string, import('@/types/types').GitHubPackageVersion[]>>({});
   const [loadingVersions, setLoadingVersions] = useState<Record<string, boolean>>({});
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'version'; pkg: import('@/types/types').GitHubPackage; vid: number; label: string }
+    | { kind: 'package'; pkg: import('@/types/types').GitHubPackage }
+    | null
+  >(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
     setError('');
     try {
+      // 清掉 packages 列表缓存，确保拿到最新
+      invalidateCache('/users/' + owner + '/packages');
       const all = await getUserPackages(owner, 'container');
-      // 过滤出属于当前仓库的包（包名前缀匹配仓库名，忽略大小写）
       const repoLower = repo.toLowerCase();
       const pkgs = all.filter((p) => p.name.toLowerCase().startsWith(`${repoLower}/`) || p.name.toLowerCase().includes(repoLower));
       setPackages(pkgs);
+      // 同步清掉版本缓存，强制重新拉
+      setVersions({});
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [owner, repo]);
 
@@ -786,6 +799,8 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
   const loadVersions = async (pkg: import('@/types/types').GitHubPackage) => {
     setLoadingVersions((prev) => ({ ...prev, [pkg.name]: true }));
     try {
+      // 清掉该包的版本缓存
+      invalidateCache('/users/' + owner + '/packages/' + pkg.package_type + '/' + pkg.name + '/versions');
       const vs = await listUserPackageVersions(owner, pkg.name, pkg.package_type);
       setVersions((prev) => ({ ...prev, [pkg.name]: vs }));
     } catch (e) {
@@ -804,32 +819,43 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     }
   };
 
-  const handleDeleteVersion = async (pkg: import('@/types/types').GitHubPackage, vid: number) => {
-    const id = `${pkg.name}/${vid}`;
-    if (!confirm(i18n.t('确定删除此版本吗？不可恢复。'))) return;
-    setDeleting(id);
-    try {
-      await deleteUserPackageVersion(owner, pkg.name, vid, pkg.package_type);
-      toast.success(i18n.t('已删除'));
-      await loadVersions(pkg);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
-    } finally {
-      setDeleting(null);
-    }
+  // 点删除 → 打开对话框
+  const requestDeleteVersion = (pkg: import('@/types/types').GitHubPackage, vid: number, label: string) => {
+    setDeleteTarget({ kind: 'version', pkg, vid, label });
+  };
+  const requestDeletePackage = (pkg: import('@/types/types').GitHubPackage) => {
+    setDeleteTarget({ kind: 'package', pkg });
   };
 
-  const handleDeletePackage = async (pkg: import('@/types/types').GitHubPackage) => {
-    if (!confirm(`${i18n.t('确定删除整个包')} "${pkg.name}" ${i18n.t('及其所有版本吗？此操作不可恢复。')}`)) return;
-    setDeleting(pkg.name);
-    try {
-      await deleteUserPackage(owner, pkg.name, pkg.package_type);
-      toast.success(i18n.t('包已删除'));
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
-    } finally {
-      setDeleting(null);
+  // 确认删除
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const t = deleteTarget;
+    if (t.kind === 'version') {
+      const id = `${t.pkg.name}/${t.vid}`;
+      setDeleting(id);
+      try {
+        await deleteUserPackageVersion(owner, t.pkg.name, t.vid, t.pkg.package_type);
+        toast.success(i18n.t('已删除'));
+        setDeleteTarget(null);
+        await loadVersions(t.pkg);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
+      } finally {
+        setDeleting(null);
+      }
+    } else {
+      setDeleting(t.pkg.name);
+      try {
+        await deleteUserPackage(owner, t.pkg.name, t.pkg.package_type);
+        toast.success(i18n.t('包已删除'));
+        setDeleteTarget(null);
+        await load();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
+      } finally {
+        setDeleting(null);
+      }
     }
   };
 
@@ -846,111 +872,164 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
       <div className="text-center py-8 text-destructive">
         <AlertCircle className="w-8 h-8 mx-auto mb-2" />
         <p className="text-sm">{error}</p>
-        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
-      </div>
-    );
-  }
-
-  if (packages.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
-        <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
-        <p className="text-sm">{i18n.t('暂无 GHCR 包')}</p>
-        <p className="text-xs mt-1 text-muted-foreground/70">{i18n.t('仓库推送到 GitHub Container Registry 的镜像包会显示在这里')}</p>
+        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => load()}>{i18n.t('重试')}</Button>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {packages.map((pkg) => {
-        const isOpen = !!expanded[pkg.name];
-        const pkgVersions = versions[pkg.name] || [];
-        const isLoadingV = !!loadingVersions[pkg.name];
-        const isDeletingPkg = deleting === pkg.name;
+      {/* 顶部工具条 */}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {packages.length > 0 ? `${packages.length} ${i18n.t('个包')}` : ''}
+        </p>
+        <Button
+          variant="ghost" size="sm"
+          className="h-8 text-xs text-muted-foreground border border-border hover:bg-secondary"
+          onClick={() => load(true)}
+          disabled={refreshing}
+        >
+          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+          {i18n.t('刷新')}
+        </Button>
+      </div>
 
-        return (
-          <div key={pkg.id} className="bg-card border border-border rounded-lg overflow-hidden">
-            {/* 包头部 */}
-            <button
-              type="button"
-              className="w-full px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3 text-left hover:bg-secondary/50 transition-colors"
-              onClick={() => togglePkg(pkg)}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <Package className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium text-foreground break-all" title={pkg.name}>{pkg.name}</span>
-                <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
-                  {pkg.package_type}
-                </Badge>
-                <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
-                  {pkg.visibility}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={pkg.html_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-accent"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
+      {packages.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
+          <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="text-sm">{i18n.t('暂无 GHCR 包')}</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">{i18n.t('仓库推送到 GitHub Container Registry 的镜像包会显示在这里')}</p>
+        </div>
+      ) : (
+        packages.map((pkg) => {
+          const isOpen = !!expanded[pkg.name];
+          const pkgVersions = versions[pkg.name] || [];
+          const isLoadingV = !!loadingVersions[pkg.name];
+          const isDeletingPkg = deleting === pkg.name;
 
-            {/* 版本列表 */}
-            {isOpen && (
-              <div className="divide-y divide-border">
-                {isLoadingV ? (
-                  <div className="p-3 space-y-2">{[1, 2].map((i) => <Skeleton key={i} className="h-10 bg-muted" />)}</div>
-                ) : pkgVersions.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground text-center">{i18n.t('暂无版本')}</p>
-                ) : (
-                  pkgVersions.map((v) => {
-                    const tags = v.metadata?.container?.tags || [];
-                    const tagLabel = tags.length > 0 ? tags.join(', ') : (v.name || `#${v.id}`);
-                    const vid = `${pkg.name}/${v.id}`;
-                    return (
-                      <div key={v.id} className="p-3 flex items-start gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-mono text-foreground break-all">{tagLabel}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {i18n.t('创建于')} {formatRelativeTime(v.created_at)}
-                            {v.updated_at !== v.created_at && ` · ${i18n.t('更新于')} ${formatRelativeTime(v.updated_at)}`}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost" size="icon"
-                          className="w-7 h-7 text-destructive/70 hover:bg-destructive/10 hover:text-destructive shrink-0"
-                          onClick={() => handleDeleteVersion(pkg, v.id)}
-                          disabled={deleting === vid}
-                        >
-                          {deleting === vid ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                        </Button>
-                      </div>
-                    );
-                  })
-                )}
-
-                {/* 删除整个包 */}
-                <div className="px-3 py-2 bg-secondary/20 flex justify-end">
-                  <Button
-                    variant="ghost" size="sm"
-                    className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10"
-                    onClick={() => handleDeletePackage(pkg)}
-                    disabled={isDeletingPkg}
-                  >
-                    {isDeletingPkg ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />{i18n.t('删除中...')}</> : <><Trash2 className="w-3 h-3 mr-1" />{i18n.t('删除整个包')}</>}
-                  </Button>
+          return (
+            <div key={pkg.id} className="bg-card border border-border rounded-lg overflow-hidden">
+              {/* 包头部 */}
+              <button
+                type="button"
+                className="w-full px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3 text-left hover:bg-secondary/50 transition-colors"
+                onClick={() => togglePkg(pkg)}
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <Package className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm font-medium text-foreground break-all" title={pkg.name}>{pkg.name}</span>
+                  <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
+                    {pkg.package_type}
+                  </Badge>
+                  <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
+                    {pkg.visibility}
+                  </Badge>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={pkg.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-muted-foreground hover:text-accent"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
+
+              {/* 版本列表 */}
+              {isOpen && (
+                <div className="divide-y divide-border">
+                  {isLoadingV ? (
+                    <div className="p-3 space-y-2">{[1, 2].map((i) => <Skeleton key={i} className="h-10 bg-muted" />)}</div>
+                  ) : pkgVersions.length === 0 ? (
+                    <p className="p-4 text-sm text-muted-foreground text-center">{i18n.t('暂无版本')}</p>
+                  ) : (
+                    pkgVersions.map((v) => {
+                      const tags = v.metadata?.container?.tags || [];
+                      const tagLabel = tags.length > 0 ? tags.join(', ') : (v.name || `#${v.id}`);
+                      const vid = `${pkg.name}/${v.id}`;
+                      return (
+                        <div key={v.id} className="p-3 flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-mono text-foreground break-all">{tagLabel}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {i18n.t('创建于')} {formatRelativeTime(v.created_at)}
+                              {v.updated_at !== v.created_at && ` · ${i18n.t('更新于')} ${formatRelativeTime(v.updated_at)}`}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost" size="icon"
+                            className="w-7 h-7 text-destructive/70 hover:bg-destructive/10 hover:text-destructive shrink-0"
+                            onClick={() => requestDeleteVersion(pkg, v.id, tagLabel)}
+                            disabled={deleting === vid}
+                          >
+                            {deleting === vid ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          </Button>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* 删除整个包 */}
+                  <div className="px-3 py-2 bg-secondary/20 flex justify-end">
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10"
+                      onClick={() => requestDeletePackage(pkg)}
+                      disabled={isDeletingPkg}
+                    >
+                      {isDeletingPkg ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />{i18n.t('删除中...')}</> : <><Trash2 className="w-3 h-3 mr-1" />{i18n.t('删除整个包')}</>}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      {/* 删除确认对话框 */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-destructive" />
+              {deleteTarget?.kind === 'version' ? i18n.t('删除版本') : i18n.t('删除整个包')}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground text-sm space-y-2">
+              {deleteTarget?.kind === 'version' ? (
+                <>
+                  <span>{i18n.t('确定要删除该版本吗？此操作不可恢复。')}</span>
+                  <code className="block font-mono text-foreground bg-secondary px-2 py-1.5 rounded text-xs break-all mt-2">
+                    {deleteTarget.label}
+                  </code>
+                </>
+              ) : deleteTarget?.kind === 'package' ? (
+                <>
+                  <span>{i18n.t('确定要删除整个包及其所有版本吗？此操作不可恢复。')}</span>
+                  <code className="block font-mono text-foreground bg-secondary px-2 py-1.5 rounded text-xs break-all mt-2">
+                    {deleteTarget.pkg.name}
+                  </code>
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border hover:bg-secondary" disabled={!!deleting}>{i18n.t('取消')}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={!!deleting}
+            >
+              {deleting ? i18n.t('删除中...') : i18n.t('确认删除')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
