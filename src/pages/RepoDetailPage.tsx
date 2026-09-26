@@ -253,6 +253,12 @@ export default function RepoDetailPage() {
     if (!owner || !repoName) return;
     setUpdating(true);
     try {
+      if (!editAllowMerge && !editAllowSquash && !editAllowRebase) {
+        toast.error(i18n.t('至少需要保留一种合并策略'));
+        setUpdating(false);
+        return;
+      }
+
       const patch: Record<string, unknown> = {
         name: editRepoName.trim() || repoName,
         description: editDesc || null,
