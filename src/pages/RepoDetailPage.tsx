@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Zap,
   Key,
   Star,
   GitFork,
@@ -415,6 +416,21 @@ export default function RepoDetailPage() {
 
           {/* 右侧操作按钮区 —— 根据 isOwner 动态显示 */}
           <div className="flex items-center gap-1 shrink-0">
+            {isOwner && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                    onClick={() => navigate(`/repos/${owner}/${repoName}/actions-settings`)}
+                  >
+                    <Zap className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('Actions 设置')}</TooltipContent>
+              </Tooltip>
+            )}
             {isOwner && (
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -1957,3 +1957,82 @@ export async function createDeployKey(
 export async function deleteDeployKey(owner: string, repo: string, keyId: number): Promise<void> {
   await request<unknown>(`/repos/${owner}/${repo}/keys/${keyId}`, { method: 'DELETE' });
 }
+
+// ===== 仓库 Actions 权限设置 =====
+
+export interface ActionsPermissions {
+  enabled: boolean;
+  allowed_actions?: 'all' | 'local_only' | 'selected';
+  selected_actions_url?: string;
+}
+
+export async function getActionsPermissions(owner: string, repo: string): Promise<ActionsPermissions> {
+  return request<ActionsPermissions>(`/repos/${owner}/${repo}/actions/permissions`);
+}
+
+export async function updateActionsPermissions(
+  owner: string,
+  repo: string,
+  data: { enabled: boolean; allowed_actions?: 'all' | 'local_only' | 'selected' }
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface WorkflowPermissions {
+  default_workflow_permissions?: 'read' | 'write';
+  can_approve_pull_request_reviews?: boolean;
+}
+
+export async function getWorkflowPermissions(owner: string, repo: string): Promise<WorkflowPermissions> {
+  return request<WorkflowPermissions>(`/repos/${owner}/${repo}/actions/permissions/workflow`);
+}
+
+export async function updateWorkflowPermissions(
+  owner: string,
+  repo: string,
+  data: { default_workflow_permissions: 'read' | 'write'; can_approve_pull_request_reviews?: boolean }
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions/workflow`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface SelectedActions {
+  github_owned_allowed?: boolean;
+  verified_allowed?: boolean;
+  patterns_allowed?: string[];
+}
+
+export async function getSelectedActions(owner: string, repo: string): Promise<SelectedActions> {
+  return request<SelectedActions>(`/repos/${owner}/${repo}/actions/permissions/selected-actions`);
+}
+
+export async function updateSelectedActions(
+  owner: string,
+  repo: string,
+  data: { github_owned_allowed: boolean; verified_allowed: boolean; patterns_allowed?: string[] }
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions/selected-actions`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface ArtifactLogRetention {
+  days?: number;
+}
+
+export async function getArtifactLogRetention(owner: string, repo: string): Promise<ArtifactLogRetention> {
+  return request<ArtifactLogRetention>(`/repos/${owner}/${repo}/actions/permissions/artifact-and-log-retention`);
+}
+
+export async function updateArtifactLogRetention(owner: string, repo: string, days: number): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions/artifact-and-log-retention`, {
+    method: 'PUT',
+    body: JSON.stringify({ days }),
+  });
+}
