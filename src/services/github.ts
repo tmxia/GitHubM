@@ -2226,7 +2226,7 @@ export async function listUserPackageVersions(
 ): Promise<import('@/types/types').GitHubPackageVersion[]> {
   // GitHub API 路径里的包名斜杠需要保留（不编码）
   return request<import('@/types/types').GitHubPackageVersion[]>(
-    `/users/${username}/packages/${packageType}/${packageName}/versions`
+    `/users/${username}/packages/${packageType}/${encodeURIComponent(packageName)}/versions`
   );
 }
 
@@ -2235,7 +2235,7 @@ export async function deleteUserPackageVersion(
   username: string, packageName: string, versionId: number, packageType = 'container'
 ): Promise<void> {
   await request<unknown>(
-    `/users/${username}/packages/${packageType}/${packageName}/versions/${versionId}`,
+    `/users/${username}/packages/${packageType}/${encodeURIComponent(packageName)}/versions/${versionId}`,
     { method: 'DELETE' }
   );
 }
@@ -2245,7 +2245,7 @@ export async function deleteUserPackage(
   username: string, packageName: string, packageType = 'container'
 ): Promise<void> {
   await request<unknown>(
-    `/users/${username}/packages/${packageType}/${packageName}`,
+    `/users/${username}/packages/${packageType}/${encodeURIComponent(packageName)}`,
     { method: 'DELETE' }
   );
 }
