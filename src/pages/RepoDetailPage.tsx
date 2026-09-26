@@ -395,8 +395,8 @@ export default function RepoDetailPage() {
           <ChevronRight className="w-3 h-3" />
           <span className="text-foreground truncate">{repo.full_name}</span>
         </div>
-        <div className="flex items-start gap-2">
-          <div className="flex-1 min-w-0">
+        <div className="flex flex-col gap-2">
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold text-foreground text-balance">{repo.full_name}</h1>
               <Badge variant="outline" className="border-border text-muted-foreground text-xs">
@@ -416,7 +416,7 @@ export default function RepoDetailPage() {
           </div>
 
           {/* 右侧操作按钮区 —— 根据 isOwner 动态显示 */}
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0 justify-end">
             {isOwner && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -465,12 +465,14 @@ export default function RepoDetailPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  asChild
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={() => window.open(repo.html_url, '_blank', 'noopener,noreferrer')}
                 >
-                  <ExternalLink className="w-4 h-4" />
+                  <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('在 GitHub 中查看')}</TooltipContent>
