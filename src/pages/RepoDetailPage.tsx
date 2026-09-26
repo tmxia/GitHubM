@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Key,
   Star,
   GitFork,
   AlertCircle,
@@ -408,6 +409,21 @@ export default function RepoDetailPage() {
 
           {/* 右侧操作按钮区 —— 根据 isOwner 动态显示 */}
           <div className="flex items-center gap-1 shrink-0">
+            {isOwner && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                    onClick={() => navigate(`/repos/${owner}/${repoName}/deploy-keys`)}
+                  >
+                    <Key className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('部署密钥')}</TooltipContent>
+              </Tooltip>
+            )}
             <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -808,7 +824,7 @@ export default function RepoDetailPage() {
               <DialogTitle className="text-foreground flex items-center gap-2">
                 <Settings className="w-4 h-4 text-primary" />{i18n.t('仓库设置')}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 -mr-1">
               <div className="space-y-1.5">
                 <Label className="text-sm font-normal text-foreground">{i18n.t('仓库名称')}</Label>
                 <Input value={editRepoName} onChange={(e) => setEditRepoName(e.target.value)} placeholder={repoName} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />

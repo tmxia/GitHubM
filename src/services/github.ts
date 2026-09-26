@@ -1902,3 +1902,40 @@ export async function submitPullRequestReview(
     }
   );
 }
+
+// ===== 部署密钥（Deploy Keys） =====
+
+export interface GitHubDeployKey {
+  id: number;
+  key: string;
+  url: string;
+  title: string;
+  verified: boolean;
+  created_at: string;
+  read_only: boolean;
+  added_by?: string;
+  last_used?: string | null;
+}
+
+export async function getDeployKeys(owner: string, repo: string): Promise<GitHubDeployKey[]> {
+  return request<GitHubDeployKey[]>(`/repos/${owner}/${repo}/keys`);
+}
+
+export async function getDeployKey(owner: string, repo: string, keyId: number): Promise<GitHubDeployKey> {
+  return request<GitHubDeployKey>(`/repos/${owner}/${repo}/keys/${keyId}`);
+}
+
+export async function createDeployKey(
+  owner: string,
+  repo: string,
+  data: { title: string; key: string; read_only?: boolean }
+): Promise<GitHubDeployKey> {
+  return request<GitHubDeployKey>(`/repos/${owner}/${repo}/keys`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteDeployKey(owner: string, repo: string, keyId: number): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/keys/${keyId}`, { method: 'DELETE' });
+}
