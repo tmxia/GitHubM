@@ -750,10 +750,10 @@ export default function RepoDetailPage() {
 
         {/* 仓库详细信息弹窗 */}
       <Dialog open={repoInfoOpen} onOpenChange={setRepoInfoOpen}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border">
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border p-4 gap-3">
           <DialogHeader>
             <DialogTitle className="text-foreground flex items-center gap-2">
-              <Info className="w-4 h-4 text-primary" />
+              <Info className="w-5 h-5 text-primary" />
               {i18n.t('仓库详细信息')}
             </DialogTitle>
           </DialogHeader>
@@ -912,7 +912,7 @@ export default function RepoDetailPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
+            <Button variant="ghost" size="sm" className="h-9 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -109,7 +109,7 @@ export default function RepoDeployKeysPage() {
           </h1>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={loading}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setAddOpen(true)}>
@@ -204,7 +204,7 @@ export default function RepoDeployKeysPage() {
           <DialogFooter className="gap-2">
             <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setAddOpen(false)} disabled={saving}>{i18n.t('取消')}</Button>
             <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAdd} disabled={saving}>
-              {saving ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />{i18n.t('添加中...')}</> : i18n.t('添加')}
+              {saving ? <><RefreshCw className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('添加中...')}</> : i18n.t('添加')}
             </Button>
           </DialogFooter>
         </DialogContent>

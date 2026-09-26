@@ -313,7 +313,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
           <DialogFooter className="gap-2">
             <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setSecretOpen(false)} disabled={savingSecret}>{i18n.t('取消')}</Button>
             <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSaveSecret} disabled={savingSecret}>
-              {savingSecret ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
+              {savingSecret ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -352,7 +352,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
           <DialogFooter className="gap-2">
             <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setVarOpen(false)} disabled={savingVar}>{i18n.t('取消')}</Button>
             <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSaveVariable} disabled={savingVar}>
-              {savingVar ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
+              {savingVar ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -408,7 +408,7 @@ export default function RepoSecretsVariablesPage() {
           </h1>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setRefreshKey((k) => k + 1)}>
-          <RefreshCw className="w-4 h-4 mr-2" />
+          <RefreshCw className="w-3.5 h-3.5 mr-1" />
           {i18n.t('刷新')}
           </Button>
         </div>

@@ -158,11 +158,11 @@ export default function RepoActionsSettingsPage() {
           </h1>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={saving}>
-          <RefreshCw className="w-4 h-4 mr-2" />
+          <RefreshCw className="w-3.5 h-3.5 mr-1" />
           {i18n.t('刷新')}
           </Button>
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleSave} disabled={saving}>
-          {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
+          {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
           </Button>
         </div>
       </div>

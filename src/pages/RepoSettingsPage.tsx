@@ -176,7 +176,7 @@ export default function RepoSettingsPage() {
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : <><Save className="w-4 h-4 mr-2" />{i18n.t('保存更改')}</>}
+          {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : <><Save className="w-3.5 h-3.5 mr-1" />{i18n.t('保存更改')}</>}
         </Button>
       </div>
 
@@ -319,7 +319,7 @@ export default function RepoSettingsPage() {
             className="border border-destructive/60 text-destructive hover:bg-destructive/10 h-9 shrink-0"
             onClick={() => { setDeleteConfirmName(''); setDeleteOpen(true); }}
           >
-            <Trash2 className="w-4 h-4 mr-1.5" />{i18n.t('删除此仓库')}
+            <Trash2 className="w-3.5 h-3.5 mr-1" />{i18n.t('删除此仓库')}
           </Button>
         </div>
       </div>

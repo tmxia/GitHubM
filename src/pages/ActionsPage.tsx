@@ -583,7 +583,7 @@ export default function ActionsPage() {
                   className="text-muted-foreground hover:bg-secondary h-9"
                   onClick={() => loadRuns(1)}
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className="w-3.5 h-3.5" />
                 </Button>
               </div>
               <div className="bg-card border border-border rounded-lg overflow-hidden">
