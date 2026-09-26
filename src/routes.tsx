@@ -33,6 +33,7 @@ import StarredPage from './pages/StarredPage';
 import RepoForksPage from './pages/RepoForksPage';
 import RepoDeployKeysPage from './pages/RepoDeployKeysPage';
 import RepoActionsSettingsPage from './pages/RepoActionsSettingsPage';
+import RepoSecretsVariablesPage from './pages/RepoSecretsVariablesPage';
 import StargazersPage from './pages/StargazersPage';
 import PrDiffPage from './pages/PrDiffPage';
 import AiAssistantPage from './pages/AiAssistantPage';
@@ -88,6 +89,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('仓库 Forks'), path: '/repos/:owner/:repo/forks', element: <RepoForksPage /> },
   { name: i18n.t('部署密钥'), path: '/repos/:owner/:repo/deploy-keys', element: <RepoDeployKeysPage /> },
   { name: i18n.t('Actions 设置'), path: '/repos/:owner/:repo/actions-settings', element: <RepoActionsSettingsPage /> },
+  { name: i18n.t('机密和变量'), path: '/repos/:owner/:repo/secrets-variables', element: <RepoSecretsVariablesPage /> },
   { name: i18n.t('仓库收藏者'), path: '/repos/:owner/:repo/stargazers', element: <StargazersPage /> },
   { name: i18n.t('设置'), path: '/settings', element: <SettingsPage /> },
   { name: 'GraphQL Playground', path: '/graphql-playground', element: <GraphQLPlaygroundPage /> },

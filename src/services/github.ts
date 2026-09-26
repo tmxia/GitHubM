@@ -2036,3 +2036,113 @@ export async function updateArtifactLogRetention(owner: string, repo: string, da
     body: JSON.stringify({ days }),
   });
 }
+
+// ===== 仓库 Secrets / Variables（Actions / Dependabot / Codespaces）=====
+
+export type SecretScope = 'actions' | 'dependabot' | 'codespaces';
+
+function scopePath(scope: SecretScope): string {
+  return scope === 'dependabot' ? 'dependabot' : scope === 'codespaces' ? 'codespaces' : 'actions';
+}
+
+// ── Variables（明文）───────────────────────────────
+
+export interface GitHubVariable {
+  name: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VariablesListResp {
+  total_count: number;
+  variables: GitHubVariable[];
+}
+
+export async function getRepoVariables(
+  owner: string, repo: string, scope: SecretScope = 'actions'
+): Promise<GitHubVariable[]> {
+  const resp = await request<VariablesListResp>(`/repos/${owner}/${repo}/${scopePath(scope)}/variables`);
+  return resp.variables || [];
+}
+
+export async function getRepoVariable(
+  owner: string, repo: string, name: string, scope: SecretScope = 'actions'
+): Promise<GitHubVariable> {
+  return request<GitHubVariable>(`/repos/${owner}/${repo}/${scopePath(scope)}/variables/${encodeURIComponent(name)}`);
+}
+
+export async function createRepoVariable(
+  owner: string, repo: string, name: string, value: string, scope: SecretScope = 'actions'
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/${scopePath(scope)}/variables`, {
+    method: 'POST',
+    body: JSON.stringify({ name, value }),
+  });
+}
+
+export async function updateRepoVariable(
+  owner: string, repo: string, name: string, value: string, scope: SecretScope = 'actions'
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/${scopePath(scope)}/variables/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name, value }),
+  });
+}
+
+export async function deleteRepoVariable(
+  owner: string, repo: string, name: string, scope: SecretScope = 'actions'
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/${scopePath(scope)}/variables/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ── Secrets（需要 sealed box 加密后上传）───────────
+
+export interface GitHubSecret {
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SecretsListResp {
+  total_count: number;
+  secrets: GitHubSecret[];
+}
+
+export interface SecretPublicKey {
+  key_id: string;
+  key: string;
+}
+
+export async function getRepoSecrets(
+  owner: string, repo: string, scope: SecretScope = 'actions'
+): Promise<GitHubSecret[]> {
+  const resp = await request<SecretsListResp>(`/repos/${owner}/${repo}/${scopePath(scope)}/secrets`);
+  return resp.secrets || [];
+}
+
+export async function getRepoSecretPublicKey(
+  owner: string, repo: string, scope: SecretScope = 'actions'
+): Promise<SecretPublicKey> {
+  return request<SecretPublicKey>(`/repos/${owner}/${repo}/${scopePath(scope)}/secrets/public-key`);
+}
+
+export async function putRepoSecret(
+  owner: string, repo: string, name: string,
+  encryptedValue: string, keyId: string, scope: SecretScope = 'actions'
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/${scopePath(scope)}/secrets/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ encrypted_value: encryptedValue, key_id: keyId }),
+  });
+}
+
+export async function deleteRepoSecret(
+  owner: string, repo: string, name: string, scope: SecretScope = 'actions'
+): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/${scopePath(scope)}/secrets/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
