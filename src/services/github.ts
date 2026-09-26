@@ -2146,3 +2146,32 @@ export async function deleteRepoSecret(
     method: 'DELETE',
   });
 }
+
+// ===== Actions 缓存管理 =====
+
+export interface GitHubActionCache {
+  id: number;
+  ref: string;
+  key: string;
+  version: string;
+  size_in_bytes: number;
+  created_at: string;
+  last_accessed_at: string;
+}
+
+export async function getActionCaches(
+  owner: string, repo: string, page = 1, per_page = 30
+): Promise<GitHubActionCache[]> {
+  const resp = await request<{ total_count: number; actions_caches: GitHubActionCache[] }>(
+    `/repos/${owner}/${repo}/actions/caches?per_page=${per_page}&page=${page}`
+  );
+  return resp.actions_caches || [];
+}
+
+export async function deleteActionCache(owner: string, repo: string, cacheId: number): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/caches/${cacheId}`, { method: 'DELETE' });
+}
+
+export async function deleteActionCacheByKey(owner: string, repo: string, key: string): Promise<void> {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/caches?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+}

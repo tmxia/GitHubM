@@ -20,6 +20,9 @@ import {
   Terminal,
   Copy,
   Check,
+
+  Package,
+  HardDrive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,6 +58,9 @@ import {
   getJobLogs,
   getBranches,
   formatRelativeTime,
+  getActionCaches,
+  deleteActionCache,
+  deleteActionCacheByKey,
 } from '@/services/github';
 import type { GitHubWorkflow, GitHubWorkflowRun, GitHubWorkflowJob } from '@/types/types';
 import { toast } from 'sonner';
@@ -385,6 +391,7 @@ export default function ActionsPage() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedRun, setSelectedRun] = useState<GitHubWorkflowRun | null>(null);
+  const [activeTab, setActiveTab] = useState<'workflows' | 'caches'>('workflows');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [triggering, setTriggering] = useState<number | null>(null);
@@ -477,6 +484,26 @@ export default function ActionsPage() {
         <h1 className="text-xl font-bold text-foreground">{i18n.t('Actions 工作流')}</h1>
       </div>
 
+      {/* Tab 切换 */}
+      <div className="flex items-center gap-1 border-b border-border -mb-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('workflows')}
+          className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'workflows' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+        >
+          {i18n.t('工作流')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('caches')}
+          className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'caches' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+        >
+          {i18n.t('缓存')}
+        </button>
+      </div>
+
+      {activeTab === 'workflows' && (
+        <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* 工作流列表 */}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -609,6 +636,12 @@ export default function ActionsPage() {
           )}
         </div>
       </div>
+        </>
+      )}
+
+      {activeTab === 'caches' && (
+        <CachePanel owner={owner!} repo={repo!} />
+      )}
     </div>
 
     {/* 触发工作流 Dialog */}
@@ -717,5 +750,147 @@ export default function ActionsPage() {
       </DialogContent>
     </Dialog>
     </>
+  );
+}
+
+// ── 缓存管理面板 ────────────────────────────
+function CachePanel({ owner, repo }: { owner: string; repo: string }) {
+  const [caches, setCaches] = useState<import('@/services/github').GitHubActionCache[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await getActionCaches(owner, repo, 1, 100);
+      setCaches(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : i18n.t('加载失败'));
+    } finally {
+      setLoading(false);
+    }
+  }, [owner, repo]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalBytes = caches.reduce((sum, c) => sum + c.size_in_bytes, 0);
+  const formatBytes = (b: number) => {
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+    return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  };
+
+  const handleDelete = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await deleteActionCache(owner, repo, id);
+      toast.success(i18n.t('已删除'));
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm(i18n.t('确定清空该仓库的全部 Actions 缓存吗？此操作不可恢复。'))) return;
+    setClearing(true);
+    try {
+      for (const c of caches) {
+        await deleteActionCacheByKey(owner, repo, c.key).catch(() => {});
+      }
+      toast.success(i18n.t('已清空全部缓存'));
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : i18n.t('清空失败'));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 概览 */}
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <HardDrive className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">{i18n.t('缓存管理')}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary" onClick={load} disabled={loading}>
+              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              {i18n.t('刷新')}
+            </Button>
+            {caches.length > 0 && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10" onClick={handleClearAll} disabled={clearing}>
+                <Trash2 className="w-3 h-3 mr-1" />
+                {clearing ? i18n.t('清空中...') : i18n.t('清空全部')}
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="px-4 py-3 text-sm">
+          {loading ? (
+            <Skeleton className="h-4 w-48 bg-muted" />
+          ) : (
+            <>
+              <span className="text-muted-foreground">{i18n.t('总用量：')}</span>
+              <span className="text-foreground font-medium">{formatBytes(totalBytes)}</span>
+              <span className="text-muted-foreground ml-3">{i18n.t('共')} {caches.length} {i18n.t('条')}</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 列表 */}
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 bg-muted rounded-lg" />)}
+        </div>
+      ) : error ? (
+        <div className="text-center py-8 text-destructive">
+          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+          <p className="text-sm">{error}</p>
+        </div>
+      ) : caches.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
+          <HardDrive className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="text-sm">{i18n.t('暂无缓存')}</p>
+        </div>
+      ) : (
+        <div className="border border-border rounded-lg bg-card overflow-hidden divide-y divide-border">
+          {caches.map((c) => (
+            <div key={c.id} className="p-3 flex items-start gap-3">
+              <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
+                <HardDrive className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground break-all">{c.key}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {formatBytes(c.size_in_bytes)} · {i18n.t('分支')} <span className="font-mono">{c.ref}</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {i18n.t('创建于')} {formatRelativeTime(c.created_at)} · {i18n.t('最后访问')} {formatRelativeTime(c.last_accessed_at)}
+                </p>
+              </div>
+              <Button
+                variant="ghost" size="icon"
+                className="w-7 h-7 text-destructive/70 hover:bg-destructive/10 hover:text-destructive shrink-0"
+                onClick={() => handleDelete(c.id)}
+                disabled={deletingId === c.id}
+              >
+                {deletingId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
