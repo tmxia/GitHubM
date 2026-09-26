@@ -501,7 +501,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               variant="ghost"
               size="icon"
               className="text-muted-foreground hover:bg-secondary"
-              onClick={() => navigate('/more')}
+              onClick={() => {
+                if (location.pathname === '/more') {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                  navigate('/more');
+                }
+              }}
               aria-label="全部功能"
             >
               <LayoutGrid className="w-4 h-4" />
