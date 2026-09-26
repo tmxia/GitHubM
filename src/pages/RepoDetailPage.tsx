@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Info,
+  Copy,
   Shield,
   Zap,
   Key,
@@ -63,9 +65,8 @@ import {
 } from '@/services/github';
 import type { GitHubRepo, GitHubCommit } from '@/types/types';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
-import RepoSelector from '@/components/ai/RepoSelector';
 import { toast } from 'sonner';
-import { decodeBase64Content } from '@/lib/utils';
+import { decodeBase64Content, copyToClipboard } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
@@ -116,7 +117,7 @@ export default function RepoDetailPage() {
   const [editAllowAuto, setEditAllowAuto] = useState(false);
   const [editDeleteBranchOnMerge, setEditDeleteBranchOnMerge] = useState(false);
   // README 编辑
-  const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false);
+  const [repoInfoOpen, setRepoInfoOpen] = useState(false);
   const [readmeDialogOpen, setReadmeDialogOpen] = useState(false);
   const [readmeDraft, setReadmeDraft] = useState('');
   const [readmeSha, setReadmeSha] = useState('');
@@ -411,9 +412,9 @@ export default function RepoDetailPage() {
               {isOwner && (
                 <button
                   type="button"
-                  onClick={() => setRepoSwitcherOpen(true)}
+                  onClick={() => setRepoInfoOpen(true)}
                   className="bg-primary/15 text-primary border border-primary/30 text-xs px-2.5 py-0.5 rounded-full hover:bg-primary/25 transition-colors"
-                  title={i18n.t('点击切换仓库')}
+                  title={i18n.t('查看仓库详细信息')}
                 >
                   {i18n.t('我的仓库')}
                 </button>
@@ -815,21 +816,172 @@ export default function RepoDetailPage() {
         </TabsContent>
       </Tabs>
 
-        {/* 仓库切换器 */}
-      <Dialog open={repoSwitcherOpen} onOpenChange={setRepoSwitcherOpen}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+        {/* 仓库详细信息弹窗 */}
+      <Dialog open={repoInfoOpen} onOpenChange={setRepoInfoOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border">
           <DialogHeader>
             <DialogTitle className="text-foreground flex items-center gap-2">
-              <LayoutGrid className="w-4 h-4 text-primary" />
-              {i18n.t('切换仓库')}
+              <Info className="w-4 h-4 text-primary" />
+              {i18n.t('仓库详细信息')}
             </DialogTitle>
           </DialogHeader>
-          <RepoSelector
-            onSelect={(r) => {
-              setRepoSwitcherOpen(false);
-              navigate(`/repos/${r.full_name}`);
-            }}
-          />
+          {repo && (
+            <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
+              {/* 基本信息 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Info className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('基本信息')}</span>
+                </div>
+                <div className="p-4 space-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('全名')}</span>
+                    <span className="text-foreground font-mono text-xs break-all">{repo.full_name}</span>
+                  </div>
+                  {repo.description && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-20 shrink-0">{i18n.t('描述')}</span>
+                      <span className="text-foreground text-pretty">{repo.description}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('可见性')}</span>
+                    <span className="text-foreground flex items-center gap-1">
+                      {repo.private ? <><Lock className="w-3 h-3" />{i18n.t('私有')}</> : <><Globe className="w-3 h-3" />{i18n.t('公开')}</>}
+                      {repo.archived && <span className="text-warning ml-2">· {i18n.t('已归档')}</span>}
+                      {repo.fork && <span className="text-muted-foreground ml-2">· Fork</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('默认分支')}</span>
+                    <span className="text-foreground font-mono">{repo.default_branch}</span>
+                  </div>
+                  {repo.homepage && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-20 shrink-0">{i18n.t('主页')}</span>
+                      <a href={repo.homepage} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all">{repo.homepage}</a>
+                    </div>
+                  )}
+                  {repo.language && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-20 shrink-0">{i18n.t('主要语言')}</span>
+                      <span className="text-foreground flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getLanguageColor(repo.language) }} />
+                        {repo.language}
+                      </span>
+                    </div>
+                  )}
+                  {repo.license && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-20 shrink-0">{i18n.t('许可证')}</span>
+                      <span className="text-foreground">{repo.license.name}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('大小')}</span>
+                    <span className="text-foreground">{(repo.size / 1024).toFixed(2)} MB</span>
+                  </div>
+                  {repo.topics && repo.topics.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-20 shrink-0">{i18n.t('标签')}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {repo.topics.map((t) => (
+                          <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 统计 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Star className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('统计')}</span>
+                </div>
+                <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground text-xs">{i18n.t('Star')}</p>
+                    <p className="text-foreground font-medium">{formatNumber(repo.stargazers_count)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">{i18n.t('Watch')}</p>
+                    <p className="text-foreground font-medium">{formatNumber(repo.watchers_count)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Fork</p>
+                    <p className="text-foreground font-medium">{formatNumber(repo.forks_count)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">{i18n.t('开放 Issue')}</p>
+                    <p className="text-foreground font-medium">{formatNumber(repo.open_issues_count)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 时间 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('时间')}</span>
+                </div>
+                <div className="p-4 space-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('创建')}</span>
+                    <span className="text-foreground">{formatRelativeTime(repo.created_at)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('更新')}</span>
+                    <span className="text-foreground">{formatRelativeTime(repo.updated_at)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">{i18n.t('最后推送')}</span>
+                    <span className="text-foreground">{formatRelativeTime(repo.pushed_at)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 克隆地址 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Code className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('克隆地址')}</span>
+                </div>
+                <div className="p-4 space-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">HTTPS</span>
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <code className="text-foreground font-mono text-xs break-all flex-1">{repo.clone_url}</code>
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-7 h-7 text-muted-foreground hover:bg-secondary shrink-0"
+                        onClick={() => { copyToClipboard(repo.clone_url); toast.success(i18n.t('已复制')); }}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">SSH</span>
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <code className="text-foreground font-mono text-xs break-all flex-1">{repo.ssh_url}</code>
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-7 h-7 text-muted-foreground hover:bg-secondary shrink-0"
+                        onClick={() => { copyToClipboard(repo.ssh_url); toast.success(i18n.t('已复制')); }}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
