@@ -758,7 +758,7 @@ export default function RepoDetailPage() {
             </DialogTitle>
           </DialogHeader>
           {repo && (
-            <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
               {/* 基本信息 */}
               <div className="bg-card border border-border rounded-lg overflow-hidden">
                 <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
