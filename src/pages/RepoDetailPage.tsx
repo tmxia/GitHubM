@@ -558,7 +558,7 @@ export default function RepoDetailPage() {
               {isOwner && (
                 <div className="flex justify-end -mt-4 -mr-4 mb-1">
                   <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={openReadmeEdit}>
-                    <Pencil className="w-3 h-3" />{i18n.t('编辑')}
+                    <Pencil className="w-2 h-2" />{i18n.t('编辑')}
                   </Button>
                 </div>
               )}
