@@ -137,7 +137,12 @@ export default function RepoDeployKeysPage() {
           <p className="text-sm">{i18n.t('暂无部署密钥')}</p>
         </div>
       ) : (
-        <div className="border border-border rounded-lg bg-card divide-y divide-border">
+        <div className="border border-border rounded-lg bg-card divide-y divide-border overflow-hidden">
+          <div className="px-4 py-3 bg-secondary/30 flex items-center gap-3">
+            <Key className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">{i18n.t('已添加的密钥')}</span>
+            <Badge variant="outline" className="border-border text-muted-foreground text-xs">{keys.length}</Badge>
+          </div>
           {keys.map((k) => (
             <div key={k.id} className="p-4 flex items-start gap-3">
               <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
