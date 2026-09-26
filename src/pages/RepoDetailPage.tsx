@@ -27,6 +27,7 @@ import {
   BookOpen,
   LayoutGrid,
   Network,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +55,8 @@ import {
   getLanguageColor,
   deleteRepo,
   updateRepo,
+  updateFileContent,
+  createFileContent,
 } from '@/services/github';
 import type { GitHubRepo, GitHubCommit } from '@/types/types';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
@@ -67,6 +70,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { pageCache } from '@/lib/page-cache';
 import i18n from "@/i18n";
+
+// UTF-8 安全的 Base64 编码（GitHub contents API 要求）
+function encodeBase64Utf8(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
 
 export default function RepoDetailPage() {
   const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
@@ -89,6 +100,11 @@ export default function RepoDetailPage() {
   const [editPrivate, setEditPrivate] = useState(false);
   const [editRepoName, setEditRepoName] = useState('');
   const [updating, setUpdating] = useState(false);
+  // README 编辑
+  const [readmeDialogOpen, setReadmeDialogOpen] = useState(false);
+  const [readmeDraft, setReadmeDraft] = useState('');
+  const [readmeSha, setReadmeSha] = useState('');
+  const [savingReadme, setSavingReadme] = useState(false);
 
   // 判断当前用户是否为仓库所有者
   const isOwner = !!(currentUser && owner && currentUser.login.toLowerCase() === owner.toLowerCase());
@@ -237,6 +253,46 @@ export default function RepoDetailPage() {
       if (editRepoName.trim() && editRepoName.trim() !== repoName) navigate(`/repos/${owner}/${editRepoName.trim()}`);
     } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('更新失败')); }
     finally { setUpdating(false); }
+  };
+
+  const openReadmeEdit = async () => {
+    if (!owner || !repoName) return;
+    try {
+      const data = (await getReadme(owner, repoName)) as unknown as {
+        content?: string;
+        sha?: string;
+      };
+      const decoded = data?.content ? decodeBase64Content(data.content) : '';
+      setReadmeDraft(decoded);
+      setReadmeSha(data?.sha || '');
+      setReadmeDialogOpen(true);
+    } catch (e) {
+      toast.error('读取 README 失败');
+    }
+  };
+
+  const saveReadme = async () => {
+    if (!owner || !repoName) return;
+    setSavingReadme(true);
+    try {
+      const payload = {
+        message: 'Update README.md',
+        content: encodeBase64Utf8(readmeDraft),
+      };
+      if (readmeSha) {
+        await updateFileContent(owner, repoName, 'README.md', { ...payload, sha: readmeSha });
+      } else {
+        await createFileContent(owner, repoName, 'README.md', payload);
+      }
+      toast.success('README 已保存');
+      setReadme(readmeDraft);
+      setReadmeDialogOpen(false);
+      pageCache.delete(`repodetail:${owner}/${repoName}`);
+    } catch (e) {
+      toast.error('保存失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setSavingReadme(false);
+    }
   };
 
   const openEditDialog = () => {
@@ -499,6 +555,13 @@ export default function RepoDetailPage() {
         <TabsContent value="readme">
           <Card className="bg-card border-border">
             <CardContent className="p-6">
+              {isOwner && (
+                <div className="flex justify-end mb-3">
+                  <Button variant="outline" size="sm" className="h-7 text-xs border-border" onClick={openReadmeEdit}>
+                    <Pencil className="w-3.5 h-3.5 mr-1.5" />{i18n.t('编辑')}
+                  </Button>
+                </div>
+              )}
               {readme ? (
                 <MarkdownRenderer content={readme} />
               ) : (
@@ -648,6 +711,31 @@ export default function RepoDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+        {/* README 编辑弹窗 */}
+        <Dialog open={readmeDialogOpen} onOpenChange={setReadmeDialogOpen}>
+          <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="text-foreground flex items-center gap-2">
+                <Pencil className="w-4 h-4" />编辑 README.md
+              </DialogTitle>
+            </DialogHeader>
+            <Textarea
+              value={readmeDraft}
+              onChange={(e) => setReadmeDraft(e.target.value)}
+              className="bg-secondary border-border text-foreground font-mono text-xs min-h-[400px] max-h-[60vh]"
+              placeholder={"# 标题\n\n支持 Markdown 语法"}
+            />
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setReadmeDialogOpen(false)} disabled={savingReadme}>
+                取消
+              </Button>
+              <Button size="sm" onClick={saveReadme} disabled={savingReadme}>
+                {savingReadme ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />保存中…</> : '保存'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
       {/* ── 删除仓库确认对话框（仅 owner 可触发） ── */}
       {isOwner && (
