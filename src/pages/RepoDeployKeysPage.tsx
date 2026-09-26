@@ -112,7 +112,7 @@ export default function RepoDeployKeysPage() {
           <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
-          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddOpen(true)}>
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setAddOpen(true)}>
           <Plus className="w-3.5 h-3.5 mr-1" />
           {i18n.t('添加部署密钥')}
           </Button>

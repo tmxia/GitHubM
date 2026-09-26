@@ -199,11 +199,8 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
           </Button>
         </div>
         <div className="p-4">
-          <p className="text-xs text-muted-foreground mb-3">
-            {i18n.t('机密加密存储，创建后无法再次查看，只能覆盖或删除')}
-          </p>
           {secrets.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">{i18n.t('暂无机密')}</p>
+            <p className="text-sm text-muted-foreground text-center py-6">{i18n.t('暂无机密')}</p>
           ) : (
             <div className="divide-y divide-border border border-border rounded-md">
               {secrets.map((s) => (
@@ -241,11 +238,8 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
           </Button>
         </div>
         <div className="p-4">
-          <p className="text-xs text-muted-foreground mb-3">
-            {i18n.t('变量以明文存储，可随时查看和编辑')}
-          </p>
           {variables.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">{i18n.t('暂无变量')}</p>
+            <p className="text-sm text-muted-foreground text-center py-6">{i18n.t('暂无变量')}</p>
           ) : (
             <div className="divide-y divide-border border border-border rounded-md">
               {variables.map((v) => (

@@ -161,7 +161,7 @@ export default function RepoActionsSettingsPage() {
           <RefreshCw className="w-4 h-4 mr-2" />
           {i18n.t('刷新')}
           </Button>
-          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-9" onClick={handleSave} disabled={saving}>
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleSave} disabled={saving}>
           {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
           </Button>
         </div>
