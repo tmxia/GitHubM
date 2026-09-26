@@ -401,7 +401,7 @@ export default function RepoSecretsVariablesPage() {
         <span className="text-foreground">{i18n.t('机密和变量')}</span>
       </div>
 
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-3 w-full min-w-0">
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             <Shield className="w-5 h-5 text-primary" />
             {i18n.t('机密和变量')}
@@ -414,15 +414,15 @@ export default function RepoSecretsVariablesPage() {
         </div>
       </div>
 
-      <Tabs value={scope} onValueChange={(v) => setScope(v as SecretScope)} className="space-y-3">
-        <TabsList className="bg-secondary border border-border w-full grid grid-cols-3">
-          <TabsTrigger value="actions" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground">
+      <Tabs value={scope} onValueChange={(v) => setScope(v as SecretScope)} className="space-y-3 w-full max-w-full">
+        <TabsList className="bg-secondary border border-border w-full grid grid-cols-[repeat(3,minmax(0,1fr))]">
+          <TabsTrigger value="actions" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground min-w-0">
             Actions
           </TabsTrigger>
-          <TabsTrigger value="dependabot" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground">
+          <TabsTrigger value="dependabot" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground min-w-0">
             Dependabot
           </TabsTrigger>
-          <TabsTrigger value="codespaces" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground">
+          <TabsTrigger value="codespaces" className="data-[state=active]:bg-card data-[state=active]:text-foreground text-muted-foreground min-w-0">
             Codespaces
           </TabsTrigger>
         </TabsList>
