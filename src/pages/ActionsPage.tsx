@@ -241,19 +241,11 @@ function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; 
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs gap-1.5"
+              className={`h-7 text-xs gap-1.5 border transition-colors ${showLogs ? 'bg-primary/10 hover:bg-primary/20' : 'bg-transparent hover:bg-secondary'}`}
               style={
                 showLogs
-                  ? {
-                      backgroundColor: 'rgba(124, 58, 237, 0.15)',
-                      color: '#a78bfa',
-                      border: '1px solid rgba(124, 58, 237, 0.5)',
-                    }
-                  : {
-                      backgroundColor: '#21262d',
-                      color: '#e6edf3',
-                      border: '1px solid #30363d',
-                    }
+                  ? { color: 'hsl(var(--primary))', borderColor: 'hsl(var(--primary) / 0.4)' }
+                  : { color: 'hsl(var(--foreground))', borderColor: 'hsl(var(--border))' }
               }
               onClick={() => setShowLogs(!showLogs)}
             >
