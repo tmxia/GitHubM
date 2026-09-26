@@ -556,9 +556,9 @@ export default function RepoDetailPage() {
           <Card className="bg-card border-border">
             <CardContent className="p-6">
               {isOwner && (
-                <div className="flex justify-end mb-3">
-                  <Button variant="outline" size="sm" className="h-7 text-xs border-border" onClick={openReadmeEdit}>
-                    <Pencil className="w-3.5 h-3.5 mr-1.5" />{i18n.t('编辑')}
+                <div className="flex justify-end -mt-4 -mr-4 mb-1">
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={openReadmeEdit}>
+                    <Pencil className="w-3 h-3" />{i18n.t('编辑')}
                   </Button>
                 </div>
               )}
