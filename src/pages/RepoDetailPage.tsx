@@ -911,9 +911,9 @@ export default function RepoDetailPage() {
               </div>
             </div>
           )}
-          <DialogFooter className="!flex !flex-col !gap-0">
+          <div className="pt-1">
             <Button variant="ghost" size="sm" className="w-full h-9 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

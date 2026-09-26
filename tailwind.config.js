@@ -3,6 +3,9 @@ import containerQuery from '@tailwindcss/container-queries';
 import intersect from 'tailwindcss-intersect';
 
 export default {
+    future: {
+        hoverOnlyWhenSupported: true,
+    },
     darkMode: ['class'],
     content: [
         './index.html',
