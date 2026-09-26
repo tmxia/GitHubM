@@ -1175,6 +1175,50 @@ export async function deletePackageVersion(
   );
 }
 
+// ── 仓库级 Packages API（区别于 user-based）───────────
+
+/** 列出仓库的容器包 */
+export async function listRepoPackages(
+  owner: string, repo: string, packageType = 'container'
+): Promise<import('@/types/types').GitHubPackage[]> {
+  return request<import('@/types/types').GitHubPackage[]>(
+    `/repos/${owner}/${repo}/packages?package_type=${packageType}`
+  ).catch(() => [] as import('@/types/types').GitHubPackage[]);
+}
+
+/** 列出某个仓库包的所有版本 */
+export async function listRepoPackageVersions(
+  owner: string, repo: string, packageType: string, packageName: string
+): Promise<import('@/types/types').GitHubPackageVersion[]> {
+  const enc = encodeURIComponent(packageName);
+  return request<import('@/types/types').GitHubPackageVersion[]>(
+    `/repos/${owner}/${repo}/packages/${packageType}/${enc}/versions`
+  );
+}
+
+/** 删除某个仓库包的版本 */
+export async function deleteRepoPackageVersion(
+  owner: string, repo: string, packageType: string, packageName: string, versionId: number
+): Promise<void> {
+  const enc = encodeURIComponent(packageName);
+  await request<unknown>(
+    `/repos/${owner}/${repo}/packages/${packageType}/${enc}/versions/${versionId}`,
+    { method: 'DELETE' }
+  );
+}
+
+/** 删除整个仓库包 */
+export async function deleteRepoPackage(
+  owner: string, repo: string, packageType: string, packageName: string
+): Promise<void> {
+  const enc = encodeURIComponent(packageName);
+  await request<unknown>(
+    `/repos/${owner}/${repo}/packages/${packageType}/${enc}`,
+    { method: 'DELETE' }
+  );
+}
+
+
 // ===== GitHub Projects (Classic) =====
 export async function getRepoProjects(
   owner: string,

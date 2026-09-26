@@ -23,7 +23,8 @@ import {
 
   Package,
   HardDrive,
-} from 'lucide-react';
+
+  ExternalLink,} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -61,6 +62,10 @@ import {
   getActionCaches,
   deleteActionCache,
   deleteActionCacheByKey,
+  listRepoPackages,
+  listRepoPackageVersions,
+  deleteRepoPackageVersion,
+  deleteRepoPackage,
 } from '@/services/github';
 import type { GitHubWorkflow, GitHubWorkflowRun, GitHubWorkflowJob } from '@/types/types';
 import { toast } from 'sonner';
@@ -498,7 +503,7 @@ export default function ActionsPage() {
           onClick={() => setActiveTab('caches')}
           className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'caches' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
         >
-          {i18n.t('缓存')}
+          {i18n.t('GHCR 管理')}
         </button>
       </div>
 
@@ -640,7 +645,7 @@ export default function ActionsPage() {
       )}
 
       {activeTab === 'caches' && (
-        <CachePanel owner={owner!} repo={repo!} />
+        <GhcrPanel owner={owner!} repo={repo!} />
       )}
     </div>
 
@@ -753,20 +758,22 @@ export default function ActionsPage() {
   );
 }
 
-// ── 缓存管理面板 ────────────────────────────
-function CachePanel({ owner, repo }: { owner: string; repo: string }) {
-  const [caches, setCaches] = useState<import('@/services/github').GitHubActionCache[]>([]);
+// ── GHCR 包管理面板 ────────────────────────────
+function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
+  const [packages, setPackages] = useState<import('@/types/types').GitHubPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [clearing, setClearing] = useState(false);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [versions, setVersions] = useState<Record<string, import('@/types/types').GitHubPackageVersion[]>>({});
+  const [loadingVersions, setLoadingVersions] = useState<Record<string, boolean>>({});
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await getActionCaches(owner, repo, 1, 100);
-      setCaches(data);
+      const pkgs = await listRepoPackages(owner, repo, 'container');
+      setPackages(pkgs);
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
@@ -776,121 +783,174 @@ function CachePanel({ owner, repo }: { owner: string; repo: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalBytes = caches.reduce((sum, c) => sum + c.size_in_bytes, 0);
-  const formatBytes = (b: number) => {
-    if (b < 1024) return `${b} B`;
-    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-    if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
-    return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  const loadVersions = async (pkg: import('@/types/types').GitHubPackage) => {
+    setLoadingVersions((prev) => ({ ...prev, [pkg.name]: true }));
+    try {
+      const vs = await listRepoPackageVersions(owner, repo, pkg.package_type, pkg.name);
+      setVersions((prev) => ({ ...prev, [pkg.name]: vs }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : i18n.t('加载版本失败'));
+    } finally {
+      setLoadingVersions((prev) => ({ ...prev, [pkg.name]: false }));
+    }
   };
 
-  const handleDelete = async (id: number) => {
-    setDeletingId(id);
+  const togglePkg = async (pkg: import('@/types/types').GitHubPackage) => {
+    const key = pkg.name;
+    const next = !expanded[key];
+    setExpanded((prev) => ({ ...prev, [key]: next }));
+    if (next && !versions[key]) {
+      await loadVersions(pkg);
+    }
+  };
+
+  const handleDeleteVersion = async (pkg: import('@/types/types').GitHubPackage, vid: number) => {
+    const id = `${pkg.name}/${vid}`;
+    if (!confirm(i18n.t('确定删除此版本吗？不可恢复。'))) return;
+    setDeleting(id);
     try {
-      await deleteActionCache(owner, repo, id);
+      await deleteRepoPackageVersion(owner, repo, pkg.package_type, pkg.name, vid);
       toast.success(i18n.t('已删除'));
+      await loadVersions(pkg);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleDeletePackage = async (pkg: import('@/types/types').GitHubPackage) => {
+    if (!confirm(`${i18n.t('确定删除整个包')} "${pkg.name}" ${i18n.t('及其所有版本吗？此操作不可恢复。')}`)) return;
+    setDeleting(pkg.name);
+    try {
+      await deleteRepoPackage(owner, repo, pkg.package_type, pkg.name);
+      toast.success(i18n.t('包已删除'));
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
     } finally {
-      setDeletingId(null);
+      setDeleting(null);
     }
   };
 
-  const handleClearAll = async () => {
-    if (!confirm(i18n.t('确定清空该仓库的全部 Actions 缓存吗？此操作不可恢复。'))) return;
-    setClearing(true);
-    try {
-      for (const c of caches) {
-        await deleteActionCacheByKey(owner, repo, c.key).catch(() => {});
-      }
-      toast.success(i18n.t('已清空全部缓存'));
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : i18n.t('清空失败'));
-    } finally {
-      setClearing(false);
-    }
-  };
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 bg-muted rounded-lg" />)}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8 text-destructive">
+        <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+        <p className="text-sm">{error}</p>
+        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
+      </div>
+    );
+  }
+
+  if (packages.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
+        <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
+        <p className="text-sm">{i18n.t('暂无 GHCR 包')}</p>
+        <p className="text-xs mt-1 text-muted-foreground/70">{i18n.t('仓库推送到 GitHub Container Registry 的镜像包会显示在这里')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
-      {/* 概览 */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium text-foreground">{i18n.t('缓存管理')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary" onClick={load} disabled={loading}>
-              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
-              {i18n.t('刷新')}
-            </Button>
-            {caches.length > 0 && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10" onClick={handleClearAll} disabled={clearing}>
-                <Trash2 className="w-3 h-3 mr-1" />
-                {clearing ? i18n.t('清空中...') : i18n.t('清空全部')}
-              </Button>
+      {packages.map((pkg) => {
+        const isOpen = !!expanded[pkg.name];
+        const pkgVersions = versions[pkg.name] || [];
+        const isLoadingV = !!loadingVersions[pkg.name];
+        const isDeletingPkg = deleting === pkg.name;
+
+        return (
+          <div key={pkg.id} className="bg-card border border-border rounded-lg overflow-hidden">
+            {/* 包头部 */}
+            <button
+              type="button"
+              className="w-full px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3 text-left hover:bg-secondary/50 transition-colors"
+              onClick={() => togglePkg(pkg)}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Package className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium text-foreground truncate">{pkg.name}</span>
+                <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
+                  {pkg.package_type}
+                </Badge>
+                <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
+                  {pkg.visibility}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={pkg.html_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-accent"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+
+            {/* 版本列表 */}
+            {isOpen && (
+              <div className="divide-y divide-border">
+                {isLoadingV ? (
+                  <div className="p-3 space-y-2">{[1, 2].map((i) => <Skeleton key={i} className="h-10 bg-muted" />)}</div>
+                ) : pkgVersions.length === 0 ? (
+                  <p className="p-4 text-sm text-muted-foreground text-center">{i18n.t('暂无版本')}</p>
+                ) : (
+                  pkgVersions.map((v) => {
+                    const tags = v.metadata?.container?.tags || [];
+                    const tagLabel = tags.length > 0 ? tags.join(', ') : (v.name || `#${v.id}`);
+                    const vid = `${pkg.name}/${v.id}`;
+                    return (
+                      <div key={v.id} className="p-3 flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-mono text-foreground break-all">{tagLabel}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {i18n.t('创建于')} {formatRelativeTime(v.created_at)}
+                            {v.updated_at !== v.created_at && ` · ${i18n.t('更新于')} ${formatRelativeTime(v.updated_at)}`}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost" size="icon"
+                          className="w-7 h-7 text-destructive/70 hover:bg-destructive/10 hover:text-destructive shrink-0"
+                          onClick={() => handleDeleteVersion(pkg, v.id)}
+                          disabled={deleting === vid}
+                        >
+                          {deleting === vid ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* 删除整个包 */}
+                <div className="px-3 py-2 bg-secondary/20 flex justify-end">
+                  <Button
+                    variant="ghost" size="sm"
+                    className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10"
+                    onClick={() => handleDeletePackage(pkg)}
+                    disabled={isDeletingPkg}
+                  >
+                    {isDeletingPkg ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />{i18n.t('删除中...')}</> : <><Trash2 className="w-3 h-3 mr-1" />{i18n.t('删除整个包')}</>}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
-        </div>
-        <div className="px-4 py-3 text-sm">
-          {loading ? (
-            <Skeleton className="h-4 w-48 bg-muted" />
-          ) : (
-            <>
-              <span className="text-muted-foreground">{i18n.t('总用量：')}</span>
-              <span className="text-foreground font-medium">{formatBytes(totalBytes)}</span>
-              <span className="text-muted-foreground ml-3">{i18n.t('共')} {caches.length} {i18n.t('条')}</span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* 列表 */}
-      {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 bg-muted rounded-lg" />)}
-        </div>
-      ) : error ? (
-        <div className="text-center py-8 text-destructive">
-          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
-          <p className="text-sm">{error}</p>
-        </div>
-      ) : caches.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
-          <HardDrive className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">{i18n.t('暂无缓存')}</p>
-        </div>
-      ) : (
-        <div className="border border-border rounded-lg bg-card overflow-hidden divide-y divide-border">
-          {caches.map((c) => (
-            <div key={c.id} className="p-3 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
-                <HardDrive className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground break-all">{c.key}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatBytes(c.size_in_bytes)} · {i18n.t('分支')} <span className="font-mono">{c.ref}</span>
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {i18n.t('创建于')} {formatRelativeTime(c.created_at)} · {i18n.t('最后访问')} {formatRelativeTime(c.last_accessed_at)}
-                </p>
-              </div>
-              <Button
-                variant="ghost" size="icon"
-                className="w-7 h-7 text-destructive/70 hover:bg-destructive/10 hover:text-destructive shrink-0"
-                onClick={() => handleDelete(c.id)}
-                disabled={deletingId === c.id}
-              >
-                {deletingId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
