@@ -55,6 +55,16 @@ export interface GitHubRepo {
     push: boolean;
     pull: boolean;
   };
+  homepage?: string | null;
+  has_issues?: boolean;
+  has_wiki?: boolean;
+  has_projects?: boolean;
+  has_downloads?: boolean;
+  allow_squash_merge?: boolean;
+  allow_merge_commit?: boolean;
+  allow_rebase_merge?: boolean;
+  allow_auto_merge?: boolean;
+  delete_branch_on_merge?: boolean;
 }
 
 export interface GitHubIssue {

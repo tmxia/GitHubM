@@ -67,6 +67,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { pageCache } from '@/lib/page-cache';
 import i18n from "@/i18n";
@@ -100,6 +101,16 @@ export default function RepoDetailPage() {
   const [editPrivate, setEditPrivate] = useState(false);
   const [editRepoName, setEditRepoName] = useState('');
   const [updating, setUpdating] = useState(false);
+  const [editHomepage, setEditHomepage] = useState('');
+  const [editHasIssues, setEditHasIssues] = useState(true);
+  const [editHasWiki, setEditHasWiki] = useState(true);
+  const [editHasProjects, setEditHasProjects] = useState(true);
+  const [editHasDownloads, setEditHasDownloads] = useState(true);
+  const [editAllowSquash, setEditAllowSquash] = useState(true);
+  const [editAllowMerge, setEditAllowMerge] = useState(true);
+  const [editAllowRebase, setEditAllowRebase] = useState(true);
+  const [editAllowAuto, setEditAllowAuto] = useState(false);
+  const [editDeleteBranchOnMerge, setEditDeleteBranchOnMerge] = useState(false);
   // README 编辑
   const [readmeDialogOpen, setReadmeDialogOpen] = useState(false);
   const [readmeDraft, setReadmeDraft] = useState('');
@@ -241,7 +252,21 @@ export default function RepoDetailPage() {
     if (!owner || !repoName) return;
     setUpdating(true);
     try {
-      const updated = await updateRepo(owner, repoName, { name: editRepoName.trim() || repoName, description: editDesc, private: editPrivate });
+      const updated = await updateRepo(owner, repoName, {
+        name: editRepoName.trim() || repoName,
+        description: editDesc,
+        private: editPrivate,
+        homepage: editHomepage.trim(),
+        has_issues: editHasIssues,
+        has_wiki: editHasWiki,
+        has_projects: editHasProjects,
+        has_downloads: editHasDownloads,
+        allow_squash_merge: editAllowSquash,
+        allow_merge_commit: editAllowMerge,
+        allow_rebase_merge: editAllowRebase,
+        allow_auto_merge: editAllowAuto,
+        delete_branch_on_merge: editDeleteBranchOnMerge,
+      });
       setRepo(updated);
       // 更新缓存中的仓库信息
       const cacheKey = `repodetail:${owner}/${repoName}`;
@@ -300,6 +325,16 @@ export default function RepoDetailPage() {
     setEditDesc(repo.description || '');
     setEditPrivate(repo.private);
     setEditRepoName(repo.name);
+    setEditHomepage(repo.homepage || '');
+    setEditHasIssues(repo.has_issues ?? true);
+    setEditHasWiki(repo.has_wiki ?? true);
+    setEditHasProjects(repo.has_projects ?? true);
+    setEditHasDownloads(repo.has_downloads ?? true);
+    setEditAllowSquash(repo.allow_squash_merge ?? true);
+    setEditAllowMerge(repo.allow_merge_commit ?? true);
+    setEditAllowRebase(repo.allow_rebase_merge ?? true);
+    setEditAllowAuto(repo.allow_auto_merge ?? false);
+    setEditDeleteBranchOnMerge(repo.delete_branch_on_merge ?? false);
     setEditDialogOpen(true);
   };
 
@@ -773,20 +808,78 @@ export default function RepoDetailPage() {
               <DialogTitle className="text-foreground flex items-center gap-2">
                 <Settings className="w-4 h-4 text-primary" />{i18n.t('仓库设置')}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-3">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               <div className="space-y-1.5">
                 <Label className="text-sm font-normal text-foreground">{i18n.t('仓库名称')}</Label>
                 <Input value={editRepoName} onChange={(e) => setEditRepoName(e.target.value)} placeholder={repoName} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
               </div>
+
               <div className="space-y-1.5">
                 <Label className="text-sm font-normal text-foreground">{i18n.t('仓库描述')}</Label>
                 <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder={i18n.t('简短描述这个仓库...')} rows={3} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
               </div>
-              <div className="flex items-center gap-3">
-                <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${!editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(false)}>
-                  <Globe className="w-3.5 h-3.5" />{i18n.t('公开')}</button>
-                <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(true)}>
-                  <Lock className="w-3.5 h-3.5" />{i18n.t('私有')}</button>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm font-normal text-foreground">{i18n.t('主页')}</Label>
+                <Input value={editHomepage} onChange={(e) => setEditHomepage(e.target.value)} placeholder="https://example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm font-normal text-foreground">{i18n.t('可见性')}</Label>
+                <div className="flex items-center gap-3">
+                  <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${!editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(false)}>
+                    <Globe className="w-3.5 h-3.5" />{i18n.t('公开')}</button>
+                  <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(true)}>
+                    <Lock className="w-3.5 h-3.5" />{i18n.t('私有')}</button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground mb-3">{i18n.t('功能')}</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="has-issues" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Issues')}</Label>
+                    <Switch id="has-issues" checked={editHasIssues} onCheckedChange={setEditHasIssues} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="has-wiki" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Wiki')}</Label>
+                    <Switch id="has-wiki" checked={editHasWiki} onCheckedChange={setEditHasWiki} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="has-projects" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Projects')}</Label>
+                    <Switch id="has-projects" checked={editHasProjects} onCheckedChange={setEditHasProjects} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="has-downloads" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Downloads')}</Label>
+                    <Switch id="has-downloads" checked={editHasDownloads} onCheckedChange={setEditHasDownloads} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground mb-3">{i18n.t('合并选项')}</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="allow-merge" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许合并提交 (Merge commit)')}</Label>
+                    <Switch id="allow-merge" checked={editAllowMerge} onCheckedChange={setEditAllowMerge} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="allow-squash" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许压缩合并 (Squash)')}</Label>
+                    <Switch id="allow-squash" checked={editAllowSquash} onCheckedChange={setEditAllowSquash} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="allow-rebase" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许变基合并 (Rebase)')}</Label>
+                    <Switch id="allow-rebase" checked={editAllowRebase} onCheckedChange={setEditAllowRebase} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="allow-auto" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许自动合并')}</Label>
+                    <Switch id="allow-auto" checked={editAllowAuto} onCheckedChange={setEditAllowAuto} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="delete-branch" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('合并后自动删除分支')}</Label>
+                    <Switch id="delete-branch" checked={editDeleteBranchOnMerge} onCheckedChange={setEditDeleteBranchOnMerge} />
+                  </div>
+                </div>
               </div>
             </div>
             <DialogFooter className="gap-2">
