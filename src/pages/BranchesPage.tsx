@@ -41,9 +41,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   getBranches,
   createBranch,
+  createOrphanBranch,
   deleteBranch,
   compareBranches,
   getRepo,
@@ -71,6 +73,7 @@ export default function BranchesPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchFrom, setNewBranchFrom] = useState('');
+  const [includeBaseContent, setIncludeBaseContent] = useState(true);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -168,16 +171,21 @@ export default function BranchesPage() {
     }
     setCreating(true);
     try {
-      // 获取基础分支的 SHA
-      const baseBranch = branches.find((b) => b.name === newBranchFrom);
-      if (!baseBranch) {
-        toast.error(i18n.t('找不到基础分支'));
-        return;
+      if (includeBaseContent) {
+        // 从选定分支分出来（含内容）
+        const baseBranch = branches.find((b) => b.name === newBranchFrom);
+        if (!baseBranch) {
+          toast.error(i18n.t('找不到基础分支'));
+          return;
+        }
+        await createBranch(owner, repo, {
+          ref: newBranchName.trim(),
+          sha: baseBranch.commit.sha,
+        });
+      } else {
+        // 创建孤儿分支（空内容）
+        await createOrphanBranch(owner, repo, newBranchName.trim());
       }
-      await createBranch(owner, repo, {
-        ref: newBranchName.trim(),
-        sha: baseBranch.commit.sha,
-      });
       toast.success(`分支 ${newBranchName} 创建成功！`);
       setCreateDialogOpen(false);
       setNewBranchName('');
@@ -250,8 +258,8 @@ export default function BranchesPage() {
               </div>
               <div className="space-y-1">
                 <Label className="text-sm font-normal text-foreground">{i18n.t('基于分支')}</Label>
-                <Select value={newBranchFrom} onValueChange={setNewBranchFrom}>
-                  <SelectTrigger className="bg-secondary border-border text-foreground">
+                <Select value={newBranchFrom} onValueChange={setNewBranchFrom} disabled={!includeBaseContent}>
+                  <SelectTrigger className="bg-secondary border-border text-foreground disabled:opacity-50">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-popover border-border max-h-48">
@@ -262,6 +270,25 @@ export default function BranchesPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* 包含基分支内容开关 */}
+              <div className="flex items-start justify-between gap-3 p-3 rounded-md border border-border bg-secondary/30">
+                <div className="flex-1 min-w-0">
+                  <Label htmlFor="include-base" className="text-sm font-medium text-foreground cursor-pointer">
+                    {i18n.t('包含基分支内容')}
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1 text-pretty">
+                    {includeBaseContent
+                      ? i18n.t('新分支从所选分支的最新提交分出，包含所有文件和历史')
+                      : i18n.t('创建空白分支：无任何文件、无父提交，历史完全独立')}
+                  </p>
+                </div>
+                <Switch
+                  id="include-base"
+                  checked={includeBaseContent}
+                  onCheckedChange={setIncludeBaseContent}
+                />
               </div>
               <div className="flex gap-3 pt-2">
                 <Button

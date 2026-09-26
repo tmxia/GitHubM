@@ -820,6 +820,39 @@ export async function createBranch(
   );
 }
 
+/**
+ * 创建孤儿分支（空分支，无父提交，无文件）
+ * 三步：空 tree → 无 parent 的 commit → 创建 ref
+ */
+export async function createOrphanBranch(
+  owner: string,
+  repo: string,
+  branchName: string
+): Promise<{ ref: string; object: { sha: string } }> {
+  // 1) 创建空 tree
+  const tree = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/trees`, {
+    method: 'POST',
+    body: JSON.stringify({ tree: [] }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+  // 2) 创建孤儿 commit（无 parent）
+  const commit = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/commits`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message: `Initialize empty branch: ${branchName}`,
+      tree: tree.sha,
+      parents: [],
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+  // 3) 创建分支 ref
+  return request<{ ref: string; object: { sha: string } }>(`/repos/${owner}/${repo}/git/refs`, {
+    method: 'POST',
+    body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: commit.sha }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 export async function deleteBranch(
   owner: string,
   repo: string,
