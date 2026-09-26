@@ -171,12 +171,12 @@ export default function RepoActionsSettingsPage() {
           </p>
 
       {/* 1) Actions 权限 */}
-      <div className="bg-card border border-border rounded-lg">
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">{i18n.t('Actions 权限')}</span>
+        </div>
         <div className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-medium text-foreground">{i18n.t('Actions 权限')}</h2>
-          </div>
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="actions-enabled" className="text-sm font-normal text-foreground cursor-pointer">
               {i18n.t('启用 GitHub Actions')}
@@ -210,12 +210,12 @@ export default function RepoActionsSettingsPage() {
 
       {/* 2) Workflow 权限 */}
       {enabled && (
-        <div className="bg-card border border-border rounded-lg">
-          <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <GitBranch className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-medium text-foreground">{i18n.t('Workflow 权限')}</h2>
-            </div>
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+          <GitBranch className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">{i18n.t('Workflow 权限')}</span>
+        </div>
+        <div className="p-4 space-y-3">
             <p className="text-xs text-muted-foreground">{i18n.t('GITHUB_TOKEN 的默认权限')}</p>
             <div className="flex flex-col gap-2">
               {([
@@ -248,12 +248,12 @@ export default function RepoActionsSettingsPage() {
 
       {/* 3) 选定的 Actions */}
       {enabled && allowedActions === 'selected' && (
-        <div className="bg-card border border-border rounded-lg">
-          <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <Package className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-medium text-foreground">{i18n.t('选定的 Actions')}</h2>
-            </div>
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+          <Package className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">{i18n.t('选定的 Actions')}</span>
+        </div>
+        <div className="p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="gh-owned" className="text-sm font-normal text-foreground cursor-pointer">
                 {i18n.t('允许 GitHub 官方 Actions（如 actions/checkout）')}
@@ -282,12 +282,12 @@ export default function RepoActionsSettingsPage() {
       )}
 
       {/* 4) 保留天数 */}
-      <div className="bg-card border border-border rounded-lg">
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+          <Package className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">{i18n.t('产物和日志保留')}</span>
+        </div>
         <div className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Package className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-medium text-foreground">{i18n.t('产物和日志保留')}</h2>
-          </div>
           <p className="text-xs text-muted-foreground">{i18n.t('Artifacts 和日志的保留天数（1-400）')}</p>
           <div className="space-y-1.5">
             <Label className="text-sm font-normal text-foreground">{i18n.t('保留天数')}</Label>

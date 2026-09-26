@@ -188,17 +188,17 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       {/* ── Secrets 区块 ── */}
-      <div className="bg-card border border-border rounded-lg">
-        <div className="p-4">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-medium text-foreground">{i18n.t('机密 (Secrets)')}</h3>
-            </div>
-            <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddSecret}>
-              <Plus className="w-3 h-3 mr-1" />{i18n.t('新建机密')}
-            </Button>
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium text-foreground">{i18n.t('机密 (Secrets)')}</span>
           </div>
+          <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddSecret}>
+          <Plus className="w-3 h-3 mr-1" />{i18n.t('新建机密')}
+          </Button>
+        </div>
+        <div className="p-4">
           <p className="text-xs text-muted-foreground mb-3">
             {i18n.t('机密加密存储，创建后无法再次查看，只能覆盖或删除')}
           </p>
@@ -230,17 +230,17 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
       </div>
 
       {/* ── Variables 区块 ── */}
-      <div className="bg-card border border-border rounded-lg">
-        <div className="p-4">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-medium text-foreground">{i18n.t('变量 (Variables)')}</h3>
-            </div>
-            <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddVariable}>
-              <Plus className="w-3 h-3 mr-1" />{i18n.t('新建变量')}
-            </Button>
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium text-foreground">{i18n.t('变量 (Variables)')}</span>
           </div>
+          <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddVariable}>
+          <Plus className="w-3 h-3 mr-1" />{i18n.t('新建变量')}
+          </Button>
+        </div>
+        <div className="p-4">
           <p className="text-xs text-muted-foreground mb-3">
             {i18n.t('变量以明文存储，可随时查看和编辑')}
           </p>
