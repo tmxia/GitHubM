@@ -108,7 +108,7 @@ export default function RepoDeployKeysPage() {
             {i18n.t('部署密钥')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border" onClick={load} disabled={loading}>
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={loading}>
           <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
@@ -118,9 +118,6 @@ export default function RepoDeployKeysPage() {
           </Button>
         </div>
       </div>
-      <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('部署密钥是存储在仓库上的 SSH 公钥，用于允许外部服务访问该仓库（默认只读）')}
-          </p>
 
       {loading ? (
         <div className="space-y-2">

@@ -134,7 +134,7 @@ export default function RepoActionsSettingsPage() {
       <div className="text-center py-12 text-destructive">
         <AlertCircle className="w-10 h-10 mx-auto mb-3" />
         <p>{error}</p>
-        <Button variant="ghost" className="mt-3 border border-border" onClick={load}>{i18n.t('重试')}</Button>
+        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
       </div>
     );
   }
@@ -166,9 +166,6 @@ export default function RepoActionsSettingsPage() {
           </Button>
         </div>
       </div>
-      <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('管理该仓库的 GitHub Actions 权限、workflow 令牌权限和产物保留策略')}
-          </p>
 
       {/* 1) Actions 权限 */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">

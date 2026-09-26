@@ -180,7 +180,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
       <div className="text-center py-8 text-destructive">
         <AlertCircle className="w-8 h-8 mx-auto mb-2" />
         <p className="text-sm">{error}</p>
-        <Button variant="ghost" className="mt-2 border border-border" onClick={load}>{i18n.t('重试')}</Button>
+        <Button variant="ghost" size="sm" className="mt-2 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
       </div>
     );
   }
@@ -413,9 +413,6 @@ export default function RepoSecretsVariablesPage() {
           </Button>
         </div>
       </div>
-      <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('管理 Actions、Dependabot、Codespaces 使用的机密（加密）和变量（明文）')}
-          </p>
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as SecretScope)} className="space-y-3">
         <TabsList className="bg-secondary border border-border">
