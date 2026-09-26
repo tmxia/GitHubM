@@ -2219,3 +2219,33 @@ export async function deleteActionCache(owner: string, repo: string, cacheId: nu
 export async function deleteActionCacheByKey(owner: string, repo: string, key: string): Promise<void> {
   await request<unknown>(`/repos/${owner}/${repo}/actions/caches?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
+
+/** 列出用户的某个容器包的所有版本 */
+export async function listUserPackageVersions(
+  username: string, packageName: string, packageType = 'container'
+): Promise<import('@/types/types').GitHubPackageVersion[]> {
+  // GitHub API 路径里的包名斜杠需要保留（不编码）
+  return request<import('@/types/types').GitHubPackageVersion[]>(
+    `/users/${username}/packages/${packageType}/${packageName}/versions`
+  );
+}
+
+/** 删除用户的某个容器包的版本 */
+export async function deleteUserPackageVersion(
+  username: string, packageName: string, versionId: number, packageType = 'container'
+): Promise<void> {
+  await request<unknown>(
+    `/users/${username}/packages/${packageType}/${packageName}/versions/${versionId}`,
+    { method: 'DELETE' }
+  );
+}
+
+/** 删除用户的整个容器包 */
+export async function deleteUserPackage(
+  username: string, packageName: string, packageType = 'container'
+): Promise<void> {
+  await request<unknown>(
+    `/users/${username}/packages/${packageType}/${packageName}`,
+    { method: 'DELETE' }
+  );
+}

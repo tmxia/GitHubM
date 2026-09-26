@@ -62,10 +62,10 @@ import {
   getActionCaches,
   deleteActionCache,
   deleteActionCacheByKey,
-  listRepoPackages,
-  listRepoPackageVersions,
-  deleteRepoPackageVersion,
-  deleteRepoPackage,
+  getUserPackages,
+  listUserPackageVersions,
+  deleteUserPackageVersion,
+  deleteUserPackage,
 } from '@/services/github';
 import type { GitHubWorkflow, GitHubWorkflowRun, GitHubWorkflowJob } from '@/types/types';
 import { toast } from 'sonner';
@@ -772,7 +772,10 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     setLoading(true);
     setError('');
     try {
-      const pkgs = await listRepoPackages(owner, repo, 'container');
+      const all = await getUserPackages(owner, 'container');
+      // 过滤出属于当前仓库的包（包名前缀匹配仓库名，忽略大小写）
+      const repoLower = repo.toLowerCase();
+      const pkgs = all.filter((p) => p.name.toLowerCase().startsWith(`${repoLower}/`) || p.name.toLowerCase().includes(repoLower));
       setPackages(pkgs);
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
@@ -786,7 +789,7 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
   const loadVersions = async (pkg: import('@/types/types').GitHubPackage) => {
     setLoadingVersions((prev) => ({ ...prev, [pkg.name]: true }));
     try {
-      const vs = await listRepoPackageVersions(owner, repo, pkg.package_type, pkg.name);
+      const vs = await listUserPackageVersions(owner, pkg.name, pkg.package_type);
       setVersions((prev) => ({ ...prev, [pkg.name]: vs }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('加载版本失败'));
@@ -809,7 +812,7 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     if (!confirm(i18n.t('确定删除此版本吗？不可恢复。'))) return;
     setDeleting(id);
     try {
-      await deleteRepoPackageVersion(owner, repo, pkg.package_type, pkg.name, vid);
+      await deleteUserPackageVersion(owner, pkg.name, vid, pkg.package_type);
       toast.success(i18n.t('已删除'));
       await loadVersions(pkg);
     } catch (e) {
@@ -823,7 +826,7 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     if (!confirm(`${i18n.t('确定删除整个包')} "${pkg.name}" ${i18n.t('及其所有版本吗？此操作不可恢复。')}`)) return;
     setDeleting(pkg.name);
     try {
-      await deleteRepoPackage(owner, repo, pkg.package_type, pkg.name);
+      await deleteUserPackage(owner, pkg.name, pkg.package_type);
       toast.success(i18n.t('包已删除'));
       await load();
     } catch (e) {
