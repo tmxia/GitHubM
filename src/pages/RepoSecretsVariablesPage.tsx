@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import sealedbox from 'tweetnacl-sealedbox-js';
 import {
-  Shield, ChevronLeft, RefreshCw, AlertCircle, Plus, Trash2, Pencil, Lock, Loader2, Eye, EyeOff,
+  Shield, ChevronRight, RefreshCw, AlertCircle, Plus, Trash2, Pencil, Lock, Loader2, Eye, EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -186,10 +186,10 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
   }
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       {/* ── Secrets 区块 ── */}
-      <Card className="bg-card border-border">
-        <CardContent className="p-4">
+      <div className="bg-card border border-border rounded-lg">
+        <div className="p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-primary" />
@@ -226,12 +226,12 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* ── Variables 区块 ── */}
-      <Card className="bg-card border-border">
-        <CardContent className="p-4">
+      <div className="bg-card border border-border rounded-lg">
+        <div className="p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-primary" />
@@ -273,8 +273,8 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* ── Secret 添加弹窗 ── */}
       <Dialog open={secretOpen} onOpenChange={setSecretOpen}>
@@ -401,29 +401,27 @@ export default function RepoSecretsVariablesPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <button type="button" className="hover:text-accent truncate" onClick={() => navigate(`/repos/${owner}/${repoName}`)}>{owner}/{repoName}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <span className="text-foreground">{i18n.t('机密和变量')}</span>
       </div>
 
-      <div className="space-y-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary" />
             {i18n.t('机密和变量')}
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('管理 Actions、Dependabot、Codespaces 使用的机密（加密）和变量（明文）')}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 justify-end">
-          <Button variant="ghost" size="sm" className="border border-border h-8" onClick={() => setRefreshKey((k) => k + 1)}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />
-            {i18n.t('刷新')}
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setRefreshKey((k) => k + 1)}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          {i18n.t('刷新')}
           </Button>
         </div>
       </div>
+      <p className="text-sm text-muted-foreground mt-1 text-pretty">
+            {i18n.t('管理 Actions、Dependabot、Codespaces 使用的机密（加密）和变量（明文）')}
+          </p>
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as SecretScope)} className="space-y-3">
         <TabsList className="bg-secondary border border-border">

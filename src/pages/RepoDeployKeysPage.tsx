@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Key, Plus, Trash2, ChevronLeft, RefreshCw, AlertCircle, Lock, Check, ArrowLeft,
+  Key, Plus, Trash2, ChevronRight, RefreshCw, AlertCircle, Lock, Check, ArrowLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -93,36 +93,34 @@ export default function RepoDeployKeysPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <button type="button" className="hover:text-accent truncate" onClick={() => navigate(`/repos/${owner}/${repoName}`)}>{owner}/{repoName}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <span className="text-foreground">{i18n.t('部署密钥')}</span>
       </div>
 
-      <div className="space-y-3">
-                  <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Key className="w-4 h-4 text-primary" />
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Key className="w-5 h-5 text-primary" />
             {i18n.t('部署密钥')}
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('部署密钥是存储在仓库上的 SSH 公钥，用于允许外部服务访问该仓库（默认只读）')}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 justify-end">
+        <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="border border-border" onClick={load} disabled={loading}>
-            <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            {i18n.t('刷新')}
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          {i18n.t('刷新')}
           </Button>
           <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddOpen(true)}>
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            {i18n.t('添加部署密钥')}
+          <Plus className="w-3.5 h-3.5 mr-1" />
+          {i18n.t('添加部署密钥')}
           </Button>
         </div>
       </div>
+      <p className="text-sm text-muted-foreground mt-1 text-pretty">
+            {i18n.t('部署密钥是存储在仓库上的 SSH 公钥，用于允许外部服务访问该仓库（默认只读）')}
+          </p>
 
       {loading ? (
         <div className="space-y-2">

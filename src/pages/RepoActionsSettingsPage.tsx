@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Zap, ChevronLeft, RefreshCw, AlertCircle, Loader2, Package, GitBranch,
+  Zap, ChevronRight, RefreshCw, AlertCircle, Loader2, Package, GitBranch,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -121,7 +121,7 @@ export default function RepoActionsSettingsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
         <Skeleton className="h-6 w-40 bg-muted" />
         <Skeleton className="h-32 bg-muted" />
         <Skeleton className="h-32 bg-muted" />
@@ -144,37 +144,35 @@ export default function RepoActionsSettingsPage() {
       {/* 面包屑 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <button type="button" className="hover:text-accent truncate" onClick={() => navigate(`/repos/${owner}/${repoName}`)}>{owner}/{repoName}</button>
-        <ChevronLeft className="w-3 h-3 rotate-180" />
+        <ChevronRight className="w-3 h-3" />
         <span className="text-foreground">{i18n.t('Actions 设置')}</span>
       </div>
 
       {/* 标题 */}
-      <div className="space-y-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" />
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Zap className="w-5 h-5 text-primary" />
             {i18n.t('Actions 设置')}
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 text-pretty">
-            {i18n.t('管理该仓库的 GitHub Actions 权限、workflow 令牌权限和产物保留策略')}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 justify-end">
-          <Button variant="ghost" size="sm" className="border border-border h-8" onClick={load} disabled={saving}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />
-            {i18n.t('刷新')}
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={saving}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          {i18n.t('刷新')}
           </Button>
-          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-8" onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
+          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-9" onClick={handleSave} disabled={saving}>
+          {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
           </Button>
         </div>
       </div>
+      <p className="text-sm text-muted-foreground mt-1 text-pretty">
+            {i18n.t('管理该仓库的 GitHub Actions 权限、workflow 令牌权限和产物保留策略')}
+          </p>
 
       {/* 1) Actions 权限 */}
-      <Card className="bg-card border-border">
-        <CardContent className="p-4 space-y-3">
+      <div className="bg-card border border-border rounded-lg">
+        <div className="p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-medium text-foreground">{i18n.t('Actions 权限')}</h2>
@@ -207,13 +205,13 @@ export default function RepoActionsSettingsPage() {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 2) Workflow 权限 */}
       {enabled && (
-        <Card className="bg-card border-border">
-          <CardContent className="p-4 space-y-3">
+        <div className="bg-card border border-border rounded-lg">
+          <div className="p-4 space-y-3">
             <div className="flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-primary" />
               <h2 className="text-sm font-medium text-foreground">{i18n.t('Workflow 权限')}</h2>
@@ -244,14 +242,14 @@ export default function RepoActionsSettingsPage() {
               </Label>
               <Switch id="can-approve" checked={canApprovePR} onCheckedChange={setCanApprovePR} />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* 3) 选定的 Actions */}
       {enabled && allowedActions === 'selected' && (
-        <Card className="bg-card border-border">
-          <CardContent className="p-4 space-y-3">
+        <div className="bg-card border border-border rounded-lg">
+          <div className="p-4 space-y-3">
             <div className="flex items-center gap-2">
               <Package className="w-4 h-4 text-primary" />
               <h2 className="text-sm font-medium text-foreground">{i18n.t('选定的 Actions')}</h2>
@@ -279,13 +277,13 @@ export default function RepoActionsSettingsPage() {
               />
               <p className="text-xs text-muted-foreground">{i18n.t('支持 * 通配符。例如：actions/*@v4')}</p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* 4) 保留天数 */}
-      <Card className="bg-card border-border">
-        <CardContent className="p-4 space-y-3">
+      <div className="bg-card border border-border rounded-lg">
+        <div className="p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Package className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-medium text-foreground">{i18n.t('产物和日志保留')}</h2>
@@ -302,8 +300,8 @@ export default function RepoActionsSettingsPage() {
               className="bg-secondary border-border text-foreground"
             />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
