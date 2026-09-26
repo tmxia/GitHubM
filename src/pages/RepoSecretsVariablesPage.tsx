@@ -194,7 +194,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
             <Lock className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">{i18n.t('机密 (Secrets)')}</span>
           </div>
-          <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddSecret}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary" onClick={openAddSecret}>
           <Plus className="w-3 h-3 mr-1" />{i18n.t('新建机密')}
           </Button>
         </div>
@@ -236,7 +236,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
             <Shield className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">{i18n.t('变量 (Variables)')}</span>
           </div>
-          <Button size="sm" className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddVariable}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary" onClick={openAddVariable}>
           <Plus className="w-3 h-3 mr-1" />{i18n.t('新建变量')}
           </Button>
         </div>
