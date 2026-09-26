@@ -101,21 +101,6 @@ export default function RepoDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editDesc, setEditDesc] = useState('');
-  const [editPrivate, setEditPrivate] = useState(false);
-  const [editRepoName, setEditRepoName] = useState('');
-  const [updating, setUpdating] = useState(false);
-  const [editHomepage, setEditHomepage] = useState('');
-  const [editHasIssues, setEditHasIssues] = useState(true);
-  const [editHasWiki, setEditHasWiki] = useState(true);
-  const [editHasProjects, setEditHasProjects] = useState(true);
-  const [editHasDownloads, setEditHasDownloads] = useState(true);
-  const [editAllowSquash, setEditAllowSquash] = useState(true);
-  const [editAllowMerge, setEditAllowMerge] = useState(true);
-  const [editAllowRebase, setEditAllowRebase] = useState(true);
-  const [editAllowAuto, setEditAllowAuto] = useState(false);
-  const [editDeleteBranchOnMerge, setEditDeleteBranchOnMerge] = useState(false);
   // README 编辑
   const [repoInfoOpen, setRepoInfoOpen] = useState(false);
   const [readmeDialogOpen, setReadmeDialogOpen] = useState(false);
@@ -253,44 +238,7 @@ export default function RepoDetailPage() {
     finally { setDeleting(false); }
   };
 
-  // 修改仓库信息
-  const handleUpdateRepo = async () => {
-    if (!owner || !repoName) return;
-    setUpdating(true);
-    try {
-      if (!editAllowMerge && !editAllowSquash && !editAllowRebase) {
-        toast.error(i18n.t('至少需要保留一种合并策略'));
-        setUpdating(false);
-        return;
-      }
-
-      const patch: Record<string, unknown> = {
-        name: editRepoName.trim() || repoName,
-        description: editDesc || null,
-        private: editPrivate,
-        has_issues: editHasIssues,
-        has_wiki: editHasWiki,
-        has_projects: editHasProjects,
-        allow_squash_merge: editAllowSquash,
-        allow_merge_commit: editAllowMerge,
-        allow_rebase_merge: editAllowRebase,
-        delete_branch_on_merge: editDeleteBranchOnMerge,
-      };
-      // homepage 空字符串会被 GitHub 422 拒绝，只在非空时提交
-      if (editHomepage.trim()) patch.homepage = editHomepage.trim();
-      const updated = await updateRepo(owner, repoName, patch);
-      setRepo(updated);
-      // 更新缓存中的仓库信息
-      const cacheKey = `repodetail:${owner}/${repoName}`;
-      const cached = pageCache.get<{ repo: GitHubRepo; languages: Record<string, number>; readme: string; commits: GitHubCommit[]; starred: boolean }>(cacheKey);
-      if (cached) pageCache.set(cacheKey, { ...cached, repo: updated });
-      pageCache.invalidate('repos:');
-      toast.success(i18n.t('仓库信息已更新'));
-      setEditDialogOpen(false);
-      if (editRepoName.trim() && editRepoName.trim() !== repoName) navigate(`/repos/${owner}/${editRepoName.trim()}`);
-    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('更新失败')); }
-    finally { setUpdating(false); }
-  };
+;
 
   const openReadmeEdit = async () => {
     if (!owner || !repoName) return;
@@ -332,23 +280,7 @@ export default function RepoDetailPage() {
     }
   };
 
-  const openEditDialog = () => {
-    if (!repo) return;
-    setEditDesc(repo.description || '');
-    setEditPrivate(repo.private);
-    setEditRepoName(repo.name);
-    setEditHomepage(repo.homepage || '');
-    setEditHasIssues(repo.has_issues ?? true);
-    setEditHasWiki(repo.has_wiki ?? true);
-    setEditHasProjects(repo.has_projects ?? true);
-    setEditHasDownloads(repo.has_downloads ?? true);
-    setEditAllowSquash(repo.allow_squash_merge ?? true);
-    setEditAllowMerge(repo.allow_merge_commit ?? true);
-    setEditAllowRebase(repo.allow_rebase_merge ?? true);
-    setEditAllowAuto(repo.allow_auto_merge ?? false);
-    setEditDeleteBranchOnMerge(repo.delete_branch_on_merge ?? false);
-    setEditDialogOpen(true);
-  };
+;
 
   // 计算语言占比
   const totalBytes = Object.values(languages).reduce((a, b) => a + b, 0);
@@ -492,7 +424,7 @@ export default function RepoDetailPage() {
               <>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:bg-secondary" onClick={openEditDialog}>
+                    <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:bg-secondary" onClick={() => navigate(`/repos/${owner}/${repoName}/settings`)}>
                       <Settings className="w-4 h-4" />
                     </Button>
                   </TooltipTrigger>
@@ -1038,111 +970,6 @@ export default function RepoDetailPage() {
         </AlertDialog>
       )}
 
-      {/* ── 仓库设置对话框（仅 owner 可触发） ── */}
-      {isOwner && (
-        <Dialog open={editDialogOpen} onOpenChange={(open) => { if (!open) setEditDialogOpen(false); }}>
-          <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
-            <DialogHeader>
-              <DialogTitle className="text-foreground flex items-center gap-2">
-                <Settings className="w-4 h-4 text-primary" />{i18n.t('仓库设置')}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 -mr-1">
-              {/* 卡片 1：基本信息 */}
-              <div className="bg-card border border-border rounded-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{i18n.t('基本信息')}</span>
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-normal text-foreground">{i18n.t('仓库名称')}</Label>
-                    <Input value={editRepoName} onChange={(e) => setEditRepoName(e.target.value)} placeholder={repoName} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono h-9" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-normal text-foreground">{i18n.t('仓库描述')}</Label>
-                    <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder={i18n.t('简短描述这个仓库...')} rows={3} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-normal text-foreground">{i18n.t('主页')}</Label>
-                    <Input value={editHomepage} onChange={(e) => setEditHomepage(e.target.value)} placeholder="https://example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground h-9" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-normal text-foreground">{i18n.t('可见性')}</Label>
-                    <div className="flex items-center gap-3">
-                      <button type="button" className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors ${!editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(false)}>
-                        <Globe className="w-3.5 h-3.5" />{i18n.t('公开')}</button>
-                      <button type="button" className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors ${editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(true)}>
-                        <Lock className="w-3.5 h-3.5" />{i18n.t('私有')}</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 卡片 2：功能 */}
-              <div className="bg-card border border-border rounded-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-                  <Package className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{i18n.t('功能')}</span>
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="has-issues" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Issues')}</Label>
-                    <Switch id="has-issues" checked={editHasIssues} onCheckedChange={setEditHasIssues} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="has-wiki" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Wiki')}</Label>
-                    <Switch id="has-wiki" checked={editHasWiki} onCheckedChange={setEditHasWiki} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="has-projects" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Projects')}</Label>
-                    <Switch id="has-projects" checked={editHasProjects} onCheckedChange={setEditHasProjects} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="has-downloads" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Downloads')}</Label>
-                    <Switch id="has-downloads" checked={editHasDownloads} onCheckedChange={setEditHasDownloads} />
-                  </div>
-                </div>
-              </div>
-
-              {/* 卡片 3：合并选项 */}
-              <div className="bg-card border border-border rounded-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{i18n.t('合并选项')}</span>
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-merge" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许合并提交 (Merge commit)')}</Label>
-                    <Switch id="allow-merge" checked={editAllowMerge} onCheckedChange={setEditAllowMerge} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-squash" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许压缩合并 (Squash)')}</Label>
-                    <Switch id="allow-squash" checked={editAllowSquash} onCheckedChange={setEditAllowSquash} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-rebase" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许变基合并 (Rebase)')}</Label>
-                    <Switch id="allow-rebase" checked={editAllowRebase} onCheckedChange={setEditAllowRebase} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-auto" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许自动合并')}</Label>
-                    <Switch id="allow-auto" checked={editAllowAuto} onCheckedChange={setEditAllowAuto} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="delete-branch" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('合并后自动删除分支')}</Label>
-                    <Switch id="delete-branch" checked={editDeleteBranchOnMerge} onCheckedChange={setEditDeleteBranchOnMerge} />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="gap-2">
-              <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => setEditDialogOpen(false)}>{i18n.t('取消')}</Button>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleUpdateRepo} disabled={updating}>
-                {updating ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
     </TooltipProvider>
   );
