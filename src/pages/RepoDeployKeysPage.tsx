@@ -102,17 +102,17 @@ export default function RepoDeployKeysPage() {
         <span className="text-foreground">{i18n.t('部署密钥')}</span>
       </div>
 
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex-1 min-w-0">
+      <div className="space-y-3">
+                  <div>
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Key className="w-5 h-5 text-primary" />
+            <Key className="w-4 h-4 text-primary" />
             {i18n.t('部署密钥')}
           </h1>
           <p className="text-sm text-muted-foreground mt-1 text-pretty">
             {i18n.t('部署密钥是存储在仓库上的 SSH 公钥，用于允许外部服务访问该仓库（默认只读）')}
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 justify-end">
           <Button variant="ghost" size="sm" className="border border-border" onClick={load} disabled={loading}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
             {i18n.t('刷新')}
@@ -145,7 +145,7 @@ export default function RepoDeployKeysPage() {
               <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
                 <Key className="w-4 h-4 text-muted-foreground" />
               </div>
-              <div className="flex-1 min-w-0">
+                        <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-foreground">{k.title}</span>
                   {k.verified && (
