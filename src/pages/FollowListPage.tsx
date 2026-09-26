@@ -218,15 +218,17 @@ export default function FollowListPage() {
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* 查看主页 */}
-                    <a href={u.html_url} target="_blank" rel="noopener noreferrer">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary gap-1"
-                      >
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary gap-1"
+                    >
+                      <a href={u.html_url} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="w-3 h-3" />
-                        {i18n.t('主页')}</Button>
-                    </a>
+                        {i18n.t('主页')}
+                      </a>
+                    </Button>
                     {/* 关注 / 取消关注（不显示自己） */}
                     {!isSelf && (
                       <Button

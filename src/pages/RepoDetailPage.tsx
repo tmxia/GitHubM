@@ -416,7 +416,7 @@ export default function RepoDetailPage() {
           </div>
 
           {/* 右侧操作按钮区 —— 根据 isOwner 动态显示 */}
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
             {isOwner && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -462,16 +462,19 @@ export default function RepoDetailPage() {
                 <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('部署密钥')}</TooltipContent>
               </Tooltip>
             )}
-            <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:bg-secondary" title={i18n.t('在 GitHub 中查看')}>
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('在 GitHub 中查看')}</TooltipContent>
-              </Tooltip>
-            </a>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                  onClick={() => window.open(repo.html_url, '_blank', 'noopener,noreferrer')}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('在 GitHub 中查看')}</TooltipContent>
+            </Tooltip>
             {/* 仅自己的仓库显示编辑和删除 */}
             {isOwner && (
               <>

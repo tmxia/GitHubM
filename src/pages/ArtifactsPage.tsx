@@ -170,11 +170,11 @@ function ReleaseItem({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <a href={release.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-accent hover:bg-accent/10">
+          <Button asChild variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-accent hover:bg-accent/10">
+            <a href={release.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
               <ExternalLink className="w-3.5 h-3.5" />
-            </Button>
-          </a>
+            </a>
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -454,10 +454,11 @@ export default function ArtifactsPage() {
                 <Tag className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                 <p className="text-foreground font-medium">{i18n.t('暂无 Release')}</p>
                 <p className="text-sm text-muted-foreground mt-1">{i18n.t('创建 Release 后可在此查看和下载产物')}</p>
-                <a href={`https://github.com/${owner}/${repo}/releases/new`} target="_blank" rel="noopener noreferrer" className="mt-4 inline-block">
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 mt-3">
-                    <ExternalLink className="w-4 h-4 mr-2" />{i18n.t('在 GitHub 创建 Release')}</Button>
-                </a>
+                <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90 mt-4">
+                  <a href={`https://github.com/${owner}/${repo}/releases/new`} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-4 h-4 mr-2" />{i18n.t('在 GitHub 创建 Release')}
+                  </a>
+                </Button>
               </div>
             ) : (
               <div className="divide-y divide-border">

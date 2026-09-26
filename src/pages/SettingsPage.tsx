@@ -510,16 +510,17 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="mt-3">
-            <a href={user.html_url} target="_blank" rel="noopener noreferrer">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full border border-border text-muted-foreground hover:text-foreground hover:bg-secondary text-xs h-8 gap-1.5"
-              >
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="w-full border border-border text-muted-foreground hover:text-foreground hover:bg-secondary text-xs h-8 gap-1.5"
+            >
+              <a href={user.html_url} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="w-3.5 h-3.5" />
                 {t('settings.viewGithub')}
-              </Button>
-            </a>
+              </a>
+            </Button>
           </div>
         </div>
       )}

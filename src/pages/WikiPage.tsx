@@ -33,11 +33,12 @@ export default function WikiPage() {
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-primary" />
           {i18n.t('Wiki 文档')}</h1>
-        <a href={wikiUrl} target="_blank" rel="noopener noreferrer">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9">
+        <Button asChild variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9">
+          <a href={wikiUrl} target="_blank" rel="noopener noreferrer">
             <ExternalLink className="w-4 h-4 mr-2" />
-            {i18n.t('在 GitHub 中编辑')}</Button>
-        </a>
+            {i18n.t('在 GitHub 中编辑')}
+          </a>
+        </Button>
       </div>
 
       <div className="flex-1 min-h-0 bg-card border border-border rounded-lg overflow-hidden flex flex-col">
@@ -48,16 +49,18 @@ export default function WikiPage() {
             <p className="text-sm text-muted-foreground text-pretty max-w-md mx-auto mb-6">
               {i18n.t('GitHub Wiki 不允许在 iframe 中嵌入显示。请点击下方按钮前往 GitHub 网页端查看和编辑文档。')}</p>
             <div className="flex flex-col md:flex-row gap-3">
-              <a href={wikiUrl} target="_blank" rel="noopener noreferrer">
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90">
+                <a href={wikiUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
-                  {i18n.t('前往 GitHub Wiki')}</Button>
-              </a>
-              <a href={`${wikiUrl}/_edit/Home`} target="_blank" rel="noopener noreferrer">
-                <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary">
+                  {i18n.t('前往 GitHub Wiki')}
+                </a>
+              </Button>
+              <Button asChild variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary">
+                <a href={`${wikiUrl}/_edit/Home`} target="_blank" rel="noopener noreferrer">
                   <Globe className="w-4 h-4 mr-2" />
-                  {i18n.t('创建/编辑首页')}</Button>
-              </a>
+                  {i18n.t('创建/编辑首页')}
+                </a>
+              </Button>
             </div>
           </div>
         ) : (
