@@ -59,9 +59,6 @@ import {
   getJobLogs,
   getBranches,
   formatRelativeTime,
-  getActionCaches,
-  deleteActionCache,
-  deleteActionCacheByKey,
   getUserPackages,
   listUserPackageVersions,
   deleteUserPackageVersion,
@@ -882,7 +879,7 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
             >
               <div className="flex items-center gap-2 min-w-0">
                 <Package className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium text-foreground truncate" title={pkg.name}>{pkg.name}</span>
+                <span className="text-sm font-medium text-foreground break-all" title={pkg.name}>{pkg.name}</span>
                 <Badge variant="outline" className="border-border text-muted-foreground text-xs shrink-0">
                   {pkg.package_type}
                 </Badge>
