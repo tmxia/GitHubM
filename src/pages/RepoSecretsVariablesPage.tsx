@@ -186,7 +186,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
+    <div className="space-y-4">
       {/* ── Secrets 区块 ── */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
@@ -392,7 +392,7 @@ export default function RepoSecretsVariablesPage() {
   if (!owner || !repoName) return null;
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
         <ChevronRight className="w-3 h-3" />
