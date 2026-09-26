@@ -63,6 +63,7 @@ import {
 } from '@/services/github';
 import type { GitHubRepo, GitHubCommit } from '@/types/types';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
+import RepoSelector from '@/components/ai/RepoSelector';
 import { toast } from 'sonner';
 import { decodeBase64Content } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -115,6 +116,7 @@ export default function RepoDetailPage() {
   const [editAllowAuto, setEditAllowAuto] = useState(false);
   const [editDeleteBranchOnMerge, setEditDeleteBranchOnMerge] = useState(false);
   // README 编辑
+  const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false);
   const [readmeDialogOpen, setReadmeDialogOpen] = useState(false);
   const [readmeDraft, setReadmeDraft] = useState('');
   const [readmeSha, setReadmeSha] = useState('');
@@ -407,7 +409,14 @@ export default function RepoDetailPage() {
               )}
               {/* 身份标识 */}
               {isOwner && (
-                <Badge className="bg-primary/15 text-primary border border-primary/30 text-xs">{i18n.t('我的仓库')}</Badge>
+                <button
+                  type="button"
+                  onClick={() => setRepoSwitcherOpen(true)}
+                  className="bg-primary/15 text-primary border border-primary/30 text-xs px-2.5 py-0.5 rounded-full hover:bg-primary/25 transition-colors"
+                  title={i18n.t('点击切换仓库')}
+                >
+                  {i18n.t('我的仓库')}
+                </button>
               )}
             </div>
             {repo.description && (
@@ -806,7 +815,25 @@ export default function RepoDetailPage() {
         </TabsContent>
       </Tabs>
 
-        {/* README 编辑弹窗 */}
+        {/* 仓库切换器 */}
+      <Dialog open={repoSwitcherOpen} onOpenChange={setRepoSwitcherOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4 text-primary" />
+              {i18n.t('切换仓库')}
+            </DialogTitle>
+          </DialogHeader>
+          <RepoSelector
+            onSelect={(r) => {
+              setRepoSwitcherOpen(false);
+              navigate(`/repos/${r.full_name}`);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* README 编辑弹窗 */}
         <Dialog open={readmeDialogOpen} onOpenChange={setReadmeDialogOpen}>
           <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border">
             <DialogHeader>
@@ -868,34 +895,44 @@ export default function RepoDetailPage() {
                 <Settings className="w-4 h-4 text-primary" />{i18n.t('仓库设置')}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 -mr-1">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-normal text-foreground">{i18n.t('仓库名称')}</Label>
-                <Input value={editRepoName} onChange={(e) => setEditRepoName(e.target.value)} placeholder={repoName} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm font-normal text-foreground">{i18n.t('仓库描述')}</Label>
-                <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder={i18n.t('简短描述这个仓库...')} rows={3} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm font-normal text-foreground">{i18n.t('主页')}</Label>
-                <Input value={editHomepage} onChange={(e) => setEditHomepage(e.target.value)} placeholder="https://example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm font-normal text-foreground">{i18n.t('可见性')}</Label>
-                <div className="flex items-center gap-3">
-                  <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${!editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(false)}>
-                    <Globe className="w-3.5 h-3.5" />{i18n.t('公开')}</button>
-                  <button type="button" className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(true)}>
-                    <Lock className="w-3.5 h-3.5" />{i18n.t('私有')}</button>
+              {/* 卡片 1：基本信息 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('基本信息')}</span>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-normal text-foreground">{i18n.t('仓库名称')}</Label>
+                    <Input value={editRepoName} onChange={(e) => setEditRepoName(e.target.value)} placeholder={repoName} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono h-9" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-normal text-foreground">{i18n.t('仓库描述')}</Label>
+                    <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder={i18n.t('简短描述这个仓库...')} rows={3} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-normal text-foreground">{i18n.t('主页')}</Label>
+                    <Input value={editHomepage} onChange={(e) => setEditHomepage(e.target.value)} placeholder="https://example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground h-9" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-normal text-foreground">{i18n.t('可见性')}</Label>
+                    <div className="flex items-center gap-3">
+                      <button type="button" className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors ${!editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(false)}>
+                        <Globe className="w-3.5 h-3.5" />{i18n.t('公开')}</button>
+                      <button type="button" className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors ${editPrivate ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:bg-secondary"}`} onClick={() => setEditPrivate(true)}>
+                        <Lock className="w-3.5 h-3.5" />{i18n.t('私有')}</button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-border">
-                <p className="text-xs font-medium text-muted-foreground mb-3">{i18n.t('功能')}</p>
-                <div className="space-y-3">
+              {/* 卡片 2：功能 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('功能')}</span>
+                </div>
+                <div className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="has-issues" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('Issues')}</Label>
                     <Switch id="has-issues" checked={editHasIssues} onCheckedChange={setEditHasIssues} />
@@ -915,9 +952,13 @@ export default function RepoDetailPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-border">
-                <p className="text-xs font-medium text-muted-foreground mb-3">{i18n.t('合并选项')}</p>
-                <div className="space-y-3">
+              {/* 卡片 3：合并选项 */}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{i18n.t('合并选项')}</span>
+                </div>
+                <div className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="allow-merge" className="text-sm font-normal text-foreground cursor-pointer">{i18n.t('允许合并提交 (Merge commit)')}</Label>
                     <Switch id="allow-merge" checked={editAllowMerge} onCheckedChange={setEditAllowMerge} />
