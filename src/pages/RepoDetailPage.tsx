@@ -912,7 +912,7 @@ export default function RepoDetailPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="ghost" size="sm" className="h-9 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
+            <Button variant="ghost" size="sm" className="w-full h-9 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setRepoInfoOpen(false)}>{i18n.t('关闭')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -501,7 +501,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               variant="ghost"
               size="icon"
               className="text-muted-foreground hover:bg-secondary"
-              onClick={() => {
+              onClick={(e) => {
+                (e.currentTarget as HTMLElement).blur();
                 if (location.pathname === '/more') {
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
