@@ -131,7 +131,7 @@ export default function RepoActionsSettingsPage() {
 
   if (error) {
     return (
-      <div className="text-center py-12 text-destructive">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto text-center py-12 text-destructive">
         <AlertCircle className="w-10 h-10 mx-auto mb-3" />
         <p>{error}</p>
         <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
@@ -140,7 +140,7 @@ export default function RepoActionsSettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       {/* 面包屑 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
