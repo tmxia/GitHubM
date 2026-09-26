@@ -1140,9 +1140,11 @@ export async function getWorkflowRunJobs(
 // ===== GitHub Packages =====
 export async function getUserPackages(
   username: string,
-  packageType: string = 'container'
+  packageType: string = 'container',
+  bust = false
 ): Promise<import('@/types/types').GitHubPackage[]> {
-  return request(`/users/${username}/packages?package_type=${packageType}`);
+  const url = `/users/${username}/packages?package_type=${packageType}`;
+  return request(bust ? `${url}&_t=${Date.now()}` : url);
 }
 
 export async function getRepoPackages(
@@ -2222,11 +2224,11 @@ export async function deleteActionCacheByKey(owner: string, repo: string, key: s
 
 /** 列出用户的某个容器包的所有版本 */
 export async function listUserPackageVersions(
-  username: string, packageName: string, packageType = 'container'
+  username: string, packageName: string, packageType = 'container', bust = false
 ): Promise<import('@/types/types').GitHubPackageVersion[]> {
-  // GitHub API 路径里的包名斜杠需要保留（不编码）
+  const url = `/users/${username}/packages/${packageType}/${encodeURIComponent(packageName)}/versions`;
   return request<import('@/types/types').GitHubPackageVersion[]>(
-    `/users/${username}/packages/${packageType}/${encodeURIComponent(packageName)}/versions`
+    bust ? `${url}?_t=${Date.now()}` : url
   );
 }
 

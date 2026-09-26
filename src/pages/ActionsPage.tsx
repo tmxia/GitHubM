@@ -64,7 +64,6 @@ import {
   listUserPackageVersions,
   deleteUserPackageVersion,
   deleteUserPackage,
-  invalidateCache,
 } from '@/services/github';
 import type { GitHubWorkflow, GitHubWorkflowRun, GitHubWorkflowJob } from '@/types/types';
 import { toast } from 'sonner';
@@ -778,13 +777,12 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     else setLoading(true);
     setError('');
     try {
-      // 清掉 packages 列表缓存，确保拿到最新
-      invalidateCache('/users/' + owner + '/packages');
-      const all = await getUserPackages(owner, 'container');
+      // bust=true 强制走网络，绕过任何缓存
+      const all = await getUserPackages(owner, 'container', true);
       const repoLower = repo.toLowerCase();
       const pkgs = all.filter((p) => p.name.toLowerCase().startsWith(`${repoLower}/`) || p.name.toLowerCase().includes(repoLower));
       setPackages(pkgs);
-      // 同步清掉版本缓存，强制重新拉
+      // 清空所有本地版本缓存，避免显示旧数据
       setVersions({});
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
@@ -799,9 +797,8 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
   const loadVersions = async (pkg: import('@/types/types').GitHubPackage) => {
     setLoadingVersions((prev) => ({ ...prev, [pkg.name]: true }));
     try {
-      // 清掉该包的版本缓存
-      invalidateCache('/users/' + owner + '/packages/' + pkg.package_type + '/' + pkg.name + '/versions');
-      const vs = await listUserPackageVersions(owner, pkg.name, pkg.package_type);
+      // bust=true 强制走网络
+      const vs = await listUserPackageVersions(owner, pkg.name, pkg.package_type, true);
       setVersions((prev) => ({ ...prev, [pkg.name]: vs }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('加载版本失败'));
@@ -836,9 +833,15 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
       setDeleting(id);
       try {
         await deleteUserPackageVersion(owner, t.pkg.name, t.vid, t.pkg.package_type);
+        // 乐观更新：立即从 UI 移除
+        setVersions((prev) => ({
+          ...prev,
+          [t.pkg.name]: (prev[t.pkg.name] || []).filter((v) => v.id !== t.vid),
+        }));
         toast.success(i18n.t('已删除'));
         setDeleteTarget(null);
-        await loadVersions(t.pkg);
+        // 后台静默刷新，保证与服务器一致
+        loadVersions(t.pkg).catch(() => {});
       } catch (e) {
         toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
       } finally {
@@ -848,9 +851,17 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
       setDeleting(t.pkg.name);
       try {
         await deleteUserPackage(owner, t.pkg.name, t.pkg.package_type);
+        // 乐观更新：立即从 UI 移除
+        setPackages((prev) => prev.filter((p) => p.id !== t.pkg.id));
+        setVersions((prev) => {
+          const next = { ...prev };
+          delete next[t.pkg.name];
+          return next;
+        });
         toast.success(i18n.t('包已删除'));
         setDeleteTarget(null);
-        await load();
+        // 后台静默刷新
+        load().catch(() => {});
       } catch (e) {
         toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
       } finally {
