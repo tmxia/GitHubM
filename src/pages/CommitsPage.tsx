@@ -149,7 +149,8 @@ export default function CommitsPage() {
   };
 
   useEffect(() => {
-    if (selectedBranch) loadCommits(1);
+    // 提交历史永远读最新数据（不缓存），避免清理/推送后显示旧列表
+    if (selectedBranch) loadCommits(1, false, true);
   }, [loadCommits, selectedBranch]);
 
   const handleViewCommit = async (sha: string) => {
