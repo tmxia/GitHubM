@@ -775,6 +775,69 @@ export async function createOrphanBranch(
 }
 
 /**
+ * 获取 commit 的 tree SHA（用于重建历史）
+ */
+export async function getCommitTreeSha(
+  owner: string,
+  repo: string,
+  commitSha: string
+): Promise<string> {
+  const data = await request<{ tree: { sha: string } }>(
+    `/repos/${owner}/${repo}/git/commits/${commitSha}`
+  );
+  return data.tree.sha;
+}
+
+/**
+ * 创建 commit（可指定 parent）
+ */
+export async function createCommit(
+  owner: string,
+  repo: string,
+  treeSha: string,
+  parents: string[],
+  message: string
+): Promise<string> {
+  const data = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/commits`, {
+    method: 'POST',
+    body: JSON.stringify({ tree: treeSha, parents, message }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return data.sha;
+}
+
+/**
+ * 保留最近 N 个 commit，丢弃更早的（重写分支历史）
+ * commits 是倒序数组（最新在前）
+ */
+export async function pruneCommitHistory(
+  owner: string,
+  repo: string,
+  branch: string,
+  commits: Array<{ sha: string; commit: { message: string } }>,
+  keepCount: number
+): Promise<string> {
+  const keep = commits.slice(0, keepCount);
+  if (keep.length === 0) throw new Error('no commits to keep');
+
+  // 从最老的保留的 commit 开始（倒序），逐个重建
+  let parentSha: string | null = null;
+  let newHeadSha = '';
+  for (let i = keep.length - 1; i >= 0; i--) {
+    const c = keep[i];
+    const treeSha = await getCommitTreeSha(owner, repo, c.sha);
+    const parents = parentSha ? [parentSha] : [];
+    const newSha = await createCommit(owner, repo, treeSha, parents, c.commit.message);
+    parentSha = newSha;
+    if (i === 0) newHeadSha = newSha;
+  }
+
+  // force update 分支指向新 head
+  await forceUpdateBranch(owner, repo, branch, newHeadSha);
+  return newHeadSha;
+}
+
+/**
  * 强制更新分支指针（用于"保留最近 N 个 commit"，丢弃更早的提交）
  * 破坏性操作：之后的 commit 会变成孤儿，30 天后被 GC 清除
  */

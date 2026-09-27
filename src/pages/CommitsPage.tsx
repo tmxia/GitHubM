@@ -44,7 +44,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { getCommits, getCommit, getBranches, getRepo, forceUpdateBranch, formatRelativeTime } from '@/services/github';
+import {
+  getCommits, getCommit, getBranches, getRepo, forceUpdateBranch, formatRelativeTime,
+  pruneCommitHistory,
+} from '@/services/github';
 import type { GitHubCommit, GitHubBranch } from '@/types/types';
 import { toast } from 'sonner';
 import { pageCache } from '@/lib/page-cache';
@@ -128,14 +131,14 @@ export default function CommitsPage() {
 
   const handlePrune = async () => {
     if (!owner || !repo || !selectedBranch || keepCount < 1) return;
-    const target = commits[keepCount - 1];
-    if (!target) {
+    if (commits.length < keepCount) {
       toast.error(i18n.t('该分支不足') + ` ${keepCount} ` + i18n.t('个 commit'));
       return;
     }
     setPruning(true);
     try {
-      await forceUpdateBranch(owner, repo, selectedBranch, target.sha);
+      // 重建最近 keepCount 个 commit，丢弃更早的历史
+      await pruneCommitHistory(owner, repo, selectedBranch, commits, keepCount);
       toast.success(i18n.t('已保留最近') + ` ${keepCount} ` + i18n.t('个 commit'));
       setPruneOpen(false);
       pageCache.invalidate(`commits:${owner}/${repo}:${selectedBranch}:`);
