@@ -1,0 +1,6162 @@
+import type { StreamMetrics } from '@/components/ai/aiTypes';
+import {
+  GitHubMcpClient,
+  loadCachedTools,
+  saveCachedTools,
+  loadCachedInstructions,
+  saveCachedInstructions,
+  type McpToolSchema,
+} from './mcpClient';
+
+let mcpClient: GitHubMcpClient | null = null;
+let mcpToolNames = new Set<string>();
+let mcpOpenAiTools: ToolDefinition[] = [];
+let mcpReady = false;
+let mcpFailed = false;
+
+function applyMcpTools(tools: McpToolSchema[]) {
+  mcpToolNames = new Set(tools.map((t) => t.name));
+  mcpOpenAiTools = tools
+    .filter((t) => t.inputSchema && Object.keys(t.inputSchema).length > 0)
+    .map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: (t.description ?? "").slice(0, 150),
+        parameters: t.inputSchema as Record<string, unknown>,
+      },
+    }));
+  mcpReady = tools.length > 0;
+}
+
+interface ModelConfig {
+  type: string;
+  api_key?: string;
+  endpoint?: string;
+  model?: string;
+  temperature?: number;
+}
+
+function isDeepSeekThinkingModel(model?: string): boolean {
+  if (!model) return false;
+  return model.includes("reasoner") || model.includes("v4-pro");
+}
+
+function supportsFunctionCalling(type: string, model?: string): boolean {
+  if (type === "deepseek" && isDeepSeekThinkingModel(model)) return false;
+  return ["deepseek", "openai", "gemini", "qwen"].includes(type);
+}
+
+interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+function getAllToolDefinitions(): ToolDefinition[] {
+  const localNames = new Set(TOOL_DEFINITIONS.map((t) => t.function.name));
+  const mcpOnly = mcpOpenAiTools.filter((t) => !localNames.has(t.function.name));
+  return [...TOOL_DEFINITIONS, ...mcpOnly];
+}
+
+const TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    type: "function", function: {
+      name: "list_files",
+      description: "列出仓库指定目录下的文件和子目录",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "目录路径，根目录传空字符串 \"\"" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "file_tree",
+      description: "递归获取完整文件树，适合快速了解项目结构（推荐优先使用）",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "起始路径，根目录传空字符串 \"\"" },
+        depth: { type: "string", description: "最大递归深度，默认 \"3\"" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "read_file",
+      description: "读取文件内容（带行号）。大文件可用 start_line/end_line 分段读取，每次最多 500 行",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        start_line: { type: "string", description: "起始行号（可选，不填则从第 1 行开始）" },
+        end_line: { type: "string", description: "结束行号（可选，不填则读到文件末尾）" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_file_info",
+      description: "获取文件基本信息（总行数、文件大小），适合读取大文件前制定分段计划",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "grep_in_file",
+      description: "在单个文件内搜索关键词（支持大文件全文搜索）。context_lines > 0 时返回匹配行前后 N 行上下文（用于理解代码背景），适合修改前精准定位行号",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        pattern: { type: "string", description: "搜索关键词或正则表达式" },
+        case_sensitive: { type: "string", description: "是否大小写敏感，\"true\" 或 \"false\"，默认 \"false\"" },
+        context_lines: { type: "string", description: "匹配行前后各展示 N 行上下文（默认 \"0\" 仅精确行，建议 \"3\"–\"5\"）" },
+        offset: { type: "string", description: "翻页偏移量，第一页传 \"0\"，超出时系统提示下一页偏移值" },
+      }, required: ["path", "pattern"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "batch_read",
+      description: "批量读取多个文件（逗号分隔路径，最多 5 个），每个文件返回前 300 行",
+      parameters: { type: "object", properties: {
+        paths: { type: "string", description: "逗号分隔的文件路径列表，如 \"src/a.ts,src/b.ts\"" },
+      }, required: ["paths"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "grep_in_repo",
+      description: "全仓库搜索关键词，返回匹配文件路径和精确行号",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词" },
+        file_pattern: { type: "string", description: "限制搜索的目录前缀，如 \"src/\"（可选）" },
+        offset: { type: "string", description: "翻页偏移量，第一页传 \"0\"" },
+      }, required: ["query"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "search_code",
+      description: "通过 GitHub Search API 搜索代码（仅返回文件路径，无行号）",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词" },
+      }, required: ["query"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "patch_file",
+      description: "局部修改文件指定行范围（推荐，仅替换 start_line 到 end_line 的内容）",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        start_line: { type: "string", description: "起始行号（从 1 开始）" },
+        end_line: { type: "string", description: "结束行号（含）" },
+        content: { type: "string", description: "替换内容（多行用 \\n 分隔）" },
+        message: { type: "string", description: "commit 消息" },
+        branch: { type: "string", description: "目标分支（可选，默认用仓库目标分支）" },
+      }, required: ["path", "start_line", "end_line", "content", "message"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "batch_patch",
+      description: "批量局部修改同一文件多处非连续行，合并为单个 commit",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        patches: { type: "string", description: "JSON 数组字符串，每项含 start_line/end_line/content" },
+        message: { type: "string", description: "commit 消息" },
+        branch: { type: "string", description: "目标分支（可选）" },
+      }, required: ["path", "patches", "message"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "write_file",
+      description: "全量写入文件（新建文件或大幅重写时使用）",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        content: { type: "string", description: "完整文件内容" },
+        message: { type: "string", description: "commit 消息" },
+        branch: { type: "string", description: "目标分支（可选）" },
+      }, required: ["path", "content", "message"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "delete_file",
+      description: "删除仓库中的文件",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        message: { type: "string", description: "commit 消息" },
+        branch: { type: "string", description: "目标分支（可选）" },
+      }, required: ["path", "message"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "search_and_replace",
+      description: "全仓库一键搜索替换，自动找到所有匹配行并批量修改，合并 commit",
+      parameters: { type: "object", properties: {
+        pattern: { type: "string", description: "要替换的目标字符串" },
+        replacement: { type: "string", description: "替换为的新字符串" },
+        file_pattern: { type: "string", description: "限制搜索范围的目录前缀（可选）" },
+        message: { type: "string", description: "commit 消息" },
+        branch: { type: "string", description: "目标分支（可选）" },
+      }, required: ["pattern", "replacement", "message"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "preview_diff",
+      description: "预览修改效果（不实际写入），修改前确认内容正确",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        start_line: { type: "string", description: "起始行号" },
+        end_line: { type: "string", description: "结束行号" },
+        content: { type: "string", description: "新内容" },
+      }, required: ["path", "start_line", "end_line", "content"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "undo_last_commit",
+      description: "撤销最后一次提交（逐文件恢复到上一版本，生成新的 Revert commit）",
+      parameters: { type: "object", properties: {
+        branch: { type: "string", description: "目标分支（可选）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_branches",
+      description: "列出仓库所有分支",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_commits",
+      description: "获取提交历史（可按路径或分支筛选）",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "限制到特定文件路径（可选）" },
+        branch: { type: "string", description: "分支名（可选）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "create_branch",
+      description: "新建分支",
+      parameters: { type: "object", properties: {
+        branch: { type: "string", description: "新分支名" },
+        from: { type: "string", description: "基于哪个分支创建（可选，默认用目标分支）" },
+      }, required: ["branch"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_pull_requests",
+      description: "列出 Pull Requests",
+      parameters: { type: "object", properties: {
+        state: { type: "string", description: "状态过滤：\"open\"（默认）、\"closed\" 或 \"all\"" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "create_pr",
+      description: "创建 Pull Request。head/base 填写分支名（不加 owner: 前缀），title 不能为空，head 与 base 必须有差异提交",
+      parameters: { type: "object", properties: {
+        title: { type: "string", description: "PR 标题（不能为空）" },
+        head: { type: "string", description: "来源分支名（不加 owner: 前缀）" },
+        base: { type: "string", description: "目标分支名（不加 owner: 前缀）" },
+        body: { type: "string", description: "PR 描述（可选）" },
+      }, required: ["title", "head", "base"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "resolve_git_conflict",
+      description: "【高阶组合工具】自动解决指定文件的 Git 合并冲突，通过提取双方分支内容并按策略覆盖 HEAD 分支，解决 PR 无法合并的问题",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "发生冲突的文件路径" },
+        strategy: { type: "string", description: "解决策略：'ours' (保留目标分支/源分支)、'theirs' (采用 base 分支内容)" },
+        base_branch: { type: "string", description: "PR 的目标分支 (base branch)" },
+        head_branch: { type: "string", description: "PR 的来源分支 (head branch/当前修改分支)" },
+      }, required: ["path", "strategy", "base_branch", "head_branch"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "merge_pull_request",
+      description: "合并 Pull Request",
+      parameters: { type: "object", properties: {
+        pull_number: { type: "string", description: "PR 编号" },
+        merge_method: { type: "string", description: "合并方式：\"squash\"（默认）、\"merge\" 或 \"rebase\"" },
+        commit_title: { type: "string", description: "合并 commit 标题（可选）" },
+      }, required: ["pull_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "close_pr",
+      description: "关闭 Pull Request（不合并）",
+      parameters: { type: "object", properties: {
+        pull_number: { type: "string", description: "PR 编号" },
+        comment: { type: "string", description: "关闭时附带的评论（可选）" },
+      }, required: ["pull_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_pr_files",
+      description: "查看 PR 的文件变更列表",
+      parameters: { type: "object", properties: {
+        pull_number: { type: "string", description: "PR 编号" },
+      }, required: ["pull_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "submit_pr_review",
+      description: "提交 PR 代码审查（APPROVE / REQUEST_CHANGES / COMMENT）",
+      parameters: { type: "object", properties: {
+        pull_number: { type: "string", description: "PR 编号" },
+        event: { type: "string", description: "审查类型：\"APPROVE\"、\"REQUEST_CHANGES\" 或 \"COMMENT\"" },
+        body: { type: "string", description: "审查意见" },
+      }, required: ["pull_number", "event", "body"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_issues",
+      description: "列出 Issues",
+      parameters: { type: "object", properties: {
+        state: { type: "string", description: "状态：\"open\"（默认）、\"closed\" 或 \"all\"" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "search_issues",
+      description: "按关键词、标签、作者搜索 Issues 或 PR",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词" },
+        state: { type: "string", description: "状态：\"open\"、\"closed\" 或 \"all\"" },
+        labels: { type: "string", description: "标签（逗号分隔，可选）" },
+        assignee: { type: "string", description: "负责人用户名（可选）" },
+        limit: { type: "string", description: "返回数量限制（默认 \"20\"）" },
+      }, required: ["query"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_issue_details",
+      description: "获取 Issue 详情（含正文和所有评论）",
+      parameters: { type: "object", properties: {
+        issue_number: { type: "string", description: "Issue 编号" },
+      }, required: ["issue_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "create_issue",
+      description: "创建新 Issue",
+      parameters: { type: "object", properties: {
+        title: { type: "string", description: "Issue 标题" },
+        body: { type: "string", description: "Issue 正文描述" },
+        labels: { type: "string", description: "标签（逗号分隔，可选）" },
+      }, required: ["title", "body"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "update_issue",
+      description: "更新 Issue（标题、正文、状态、标签、负责人，仅填需要改的字段）",
+      parameters: { type: "object", properties: {
+        issue_number: { type: "string", description: "Issue 编号" },
+        title: { type: "string", description: "新标题（可选）" },
+        body: { type: "string", description: "新正文（可选）" },
+        state: { type: "string", description: "新状态：\"open\" 或 \"closed\"（可选）" },
+        labels: { type: "string", description: "新标签（逗号分隔，可选）" },
+        assignees: { type: "string", description: "新负责人（逗号分隔，可选）" },
+      }, required: ["issue_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "close_issue",
+      description: "关闭 Issue（可附带结论评论）",
+      parameters: { type: "object", properties: {
+        issue_number: { type: "string", description: "Issue 编号" },
+        comment: { type: "string", description: "关闭时附带的评论（可选）" },
+      }, required: ["issue_number"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "add_comment",
+      description: "在 Issue 或 PR 下添加评论",
+      parameters: { type: "object", properties: {
+        issue_number: { type: "string", description: "Issue 或 PR 编号" },
+        body: { type: "string", description: "评论内容" },
+      }, required: ["issue_number", "body"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_repo_info",
+      description: "查看仓库基本信息（语言、Stars、默认分支、Topics 等）",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_commit_diff",
+      description: "查看某次提交的文件变更统计（diff）",
+      parameters: { type: "object", properties: {
+        sha: { type: "string", description: "commit SHA" },
+      }, required: ["sha"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "compare_commits",
+      description: "对比两个 commit / 分支 / tag 的所有文件变更（含 diff patch 片段）",
+      parameters: { type: "object", properties: {
+        base: { type: "string", description: "基准 commit / 分支 / tag" },
+        head: { type: "string", description: "比较目标 commit / 分支 / tag" },
+      }, required: ["base", "head"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "auto_review",
+      description: "自动代码审查：检查最近 N 次 commit 变更文件的质量问题",
+      parameters: { type: "object", properties: {
+        commit_count: { type: "string", description: "检查最近几次 commit（默认 \"1\"）" },
+        sha: { type: "string", description: "指定从某个 commit SHA 开始检查（可选）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_workflows",
+      description: "列出仓库所有 Actions 工作流",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_workflow_runs",
+      description: "查看工作流最近运行记录（仅查历史，不等待）",
+      parameters: { type: "object", properties: {
+        workflow_id: { type: "string", description: "工作流文件名或 ID（如 \"deploy.yml\"），不填则查全部" },
+        limit: { type: "string", description: "返回数量（默认 \"5\"）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "trigger_workflow",
+      description: "触发工作流（workflow_dispatch 事件）。触发后必须立即调用 check_run_status 等待结果",
+      parameters: { type: "object", properties: {
+        workflow_id: { type: "string", description: "工作流文件名或 ID（如 \"deploy.yml\"）" },
+        ref: { type: "string", description: "触发的分支或 tag" },
+      }, required: ["workflow_id", "ref"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "check_run_status",
+      description: "等待工作流运行完成并返回结果。workflow_type: \"normal\"（普通）、\"build_apk\"（Android 构建约3分钟）、\"fast\"（快速脚本）",
+      parameters: { type: "object", properties: {
+        run_id: { type: "string", description: "运行 ID（trigger_workflow 返回的 run_id）" },
+        workflow_type: { type: "string", description: "工作流类型：\"normal\"、\"build_apk\" 或 \"fast\"" },
+      }, required: ["run_id", "workflow_type"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_run_jobs",
+      description: "查看某次运行的 Jobs 及步骤（check_run_status 失败时才需要）",
+      parameters: { type: "object", properties: {
+        run_id: { type: "string", description: "运行 ID" },
+      }, required: ["run_id"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_job_logs",
+      description: [
+        "下载 Job 日志。",
+        "• 不传 start_line/end_line：返回全局统计（总行数/字符数）+ 智能错误摘要（ERROR/FAILED/Exception 上下文各 35 行）+ 末尾 Build Summary，适合首次分析。",
+        "• 传入 start_line/end_line：精准返回指定行范围（1-based），每次最多 800 行，可多次调用覆盖全部日志。",
+        "• 使用策略：先不传范围拿错误摘要；若需完整日志，先看总行数，再按 800 行一段循环读取。",
+      ].join(" "),
+      parameters: { type: "object", properties: {
+        job_id:     { type: "string", description: "Job ID" },
+        start_line: { type: "string", description: "起始行号（1-based，含），不传则智能摘要模式" },
+        end_line:   { type: "string", description: "结束行号（1-based，含），不传则智能摘要模式" },
+      }, required: ["job_id"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "cancel_workflow_run",
+      description: "取消正在运行的工作流",
+      parameters: { type: "object", properties: {
+        run_id: { type: "string", description: "运行 ID" },
+      }, required: ["run_id"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "rerun_workflow_run",
+      description: "重新运行失败的工作流（可选择只重跑失败的 jobs）",
+      parameters: { type: "object", properties: {
+        run_id: { type: "string", description: "运行 ID" },
+        failed_jobs_only: { type: "string", description: "是否只重跑失败 jobs：\"true\" 或 \"false\"" },
+      }, required: ["run_id"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_actions_secrets",
+      description: "查看仓库 Actions Secrets 名称列表（值不可见）",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_actions_variables",
+      description: "查看仓库 Actions Variables（明文环境变量）",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "set_actions_variable",
+      description: "创建或更新 Actions Variable（明文环境变量，加密 Secrets 需在 GitHub 网页设置）",
+      parameters: { type: "object", properties: {
+        name: { type: "string", description: "变量名（大写字母+下划线）" },
+        value: { type: "string", description: "变量值" },
+      }, required: ["name", "value"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_run_artifacts",
+      description: "查询某次运行产生的构建产物（Artifacts）列表",
+      parameters: { type: "object", properties: {
+        run_id: { type: "string", description: "运行 ID" },
+      }, required: ["run_id"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "run_lint",
+      description: "触发并运行 Lint 检查工作流，等待结果",
+      parameters: { type: "object", properties: {
+        branch: { type: "string", description: "检查的目标分支（可选）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "check_security",
+      description: "安全扫描：检查硬编码密钥、eval、SQL 注入、XSS 等常见安全隐患",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "扫描路径（如 \"src/\"）" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "trigger_and_monitor_build",
+      description: "触发构建工作流并全程自动监控：失败时自动提取日志供分析修复，循环直到成功",
+      parameters: { type: "object", properties: {
+        workflow_id: { type: "string", description: "工作流文件名（如 \"build.yml\"）" },
+        ref: { type: "string", description: "触发分支" },
+        branch: { type: "string", description: "修复提交的目标分支（可选）" },
+        max_fix_attempts: { type: "string", description: "最大自动修复次数（默认 \"3\"）" },
+      }, required: ["workflow_id", "ref"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "list_releases",
+      description: "列出最近的 Releases",
+      parameters: { type: "object", properties: {
+        limit: { type: "string", description: "返回数量（默认 \"10\"）" },
+      } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_latest_release",
+      description: "获取最新 Release 信息（tag、名称、发布时间）",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "create_release",
+      description: "创建新 Release（tag + 标题 + 发布说明）",
+      parameters: { type: "object", properties: {
+        tag_name: { type: "string", description: "tag 名称（如 \"v1.2.0\"）" },
+        name: { type: "string", description: "Release 标题" },
+        body: { type: "string", description: "发布说明（Markdown 格式）" },
+        draft: { type: "string", description: "是否为草稿：\"true\" 或 \"false\"" },
+        prerelease: { type: "string", description: "是否为预发布：\"true\" 或 \"false\"" },
+        branch: { type: "string", description: "基于哪个分支创建 tag（可选）" },
+      }, required: ["tag_name", "name", "body"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_merged_prs_since",
+      description: "获取指定时间点之后已合并的 PR 列表（含 labels、body、作者）",
+      parameters: { type: "object", properties: {
+        since: { type: "string", description: "起始时间（ISO 8601 格式，如 \"2024-01-15T10:30:00Z\"）" },
+      }, required: ["since"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "request_file",
+      description: "向用户请求上传文件（缺少图片/图标/证书等资源时使用）",
+      parameters: { type: "object", properties: {
+        filename: { type: "string", description: "需要的文件名（如 \"app-icon.png\"）" },
+        description: { type: "string", description: "描述需要什么文件及规格要求" },
+        mime_types: { type: "string", description: "允许的 MIME 类型（逗号分隔，如 \"image/png,image/jpeg\"）" },
+      }, required: ["filename", "description"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "get_code_outline",
+      description: "提取文件的代码骨架（函数/类/接口/类型列表 + 起止行号），不返回函数体。大文件操作必备第一步：先调用此工具建立全局结构认知，再用 read_function 或 read_file 精准读取目标函数，彻底避免逐段盲读整个文件。支持 TypeScript/JavaScript/Python/Go/Rust/Java/Kotlin。",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径，如 \"src/App.tsx\"" },
+      }, required: ["path"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "read_function",
+      description: "按函数/类/接口名称读取其完整体（含闭合括号），免去「先 grep 行号 → 再 read_file」两步。大文件修改必备：先 get_code_outline 找到目标符号名，再调用此工具一次拿到完整函数体。同名符号有多个时用 occurrence 指定第几个。",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "文件路径" },
+        function_name: { type: "string", description: "精确的函数/类/接口名称（区分大小写）" },
+        occurrence: { type: "string", description: "同名符号有多个时取第几个（\"1\"=第一个，默认 \"1\"）" },
+        ref: { type: "string", description: "git ref（分支名/tag/commit SHA），不填则读当前分支最新内容" },
+      }, required: ["path", "function_name"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "report_tool_issue",
+      description: "当你发现某个工具存在缺陷、限制或可改进之处时调用此工具上报问题。例如：工具返回的信息不够完整、参数设计不合理、缺少某个功能、错误处理不当等。不要等任务结束才报告，发现即上报。",
+      parameters: { type: "object", properties: {
+        tool_name:   { type: "string", description: "有问题的工具名称（如 patch_file、read_file、get_job_logs）" },
+        issue:       { type: "string", description: "具体问题描述：工具在什么情况下出现了什么问题，影响是什么" },
+        severity:    { type: "string", description: "严重程度：low（轻微，有替代方案）| medium（影响效率）| high（导致任务失败）" },
+        context:     { type: "string", description: "触发问题时的上下文：正在执行什么任务、调用参数是什么、得到了什么意外结果" },
+      }, required: ["tool_name", "issue", "severity"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "propose_tool_fix",
+      description: "在 report_tool_issue 之后，如果你知道如何修复这个工具问题，用此工具提交具体的代码改进方案。提供修改前和修改后的代码片段，帮助开发者快速应用改进。",
+      parameters: { type: "object", properties: {
+        tool_name:    { type: "string", description: "要改进的工具名称" },
+        explanation:  { type: "string", description: "改进方案的说明：改了什么、为什么这样改、预期效果" },
+        code_before:  { type: "string", description: "当前有问题的代码片段（函数体或关键逻辑，越精确越好）" },
+        code_after:   { type: "string", description: "改进后的代码片段（与 code_before 对应的修改版本）" },
+      }, required: ["tool_name", "explanation"] },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "npm_search",
+      description: "搜索 npm 官方仓库（registry.npmjs.org 公开搜索 API）查询真实包信息：包名、最新版本、描述、下载量。用于依赖选型、查证版本号、寻找替代包——绝不凭空编造包名或版本号。",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词，如 react、lodash、vite" },
+        size:  { type: "number", description: "返回条数，默认 5，最大 50" },
+      }, required: ["query"] },
+    },
+  },
+ ];
+
+function buildLLMRequest(cfg: ModelConfig): {
+  url: string;
+  headers: Record<string, string>;
+  bodyExtra: Record<string, unknown>;
+} {
+  const tempExtra = cfg.temperature !== undefined ? { temperature: cfg.temperature } : {};
+  const fcExtra = supportsFunctionCalling(cfg.type, cfg.model)
+    ? { tools: getAllToolDefinitions(), tool_choice: "auto", parallel_tool_calls: true }
+    : {};
+  switch (cfg.type) {
+    case "deepseek": {
+      const dsModel = cfg.model || "deepseek-v4-flash";
+      const dsIsThinking = isDeepSeekThinkingModel(dsModel);
+      const dsTempExtra = dsIsThinking ? {} : tempExtra;
+      const dsThinkingExtra = dsIsThinking
+        ? { thinking: { type: "enabled" }, reasoning_effort: "high" }
+        : {};
+      return {
+        url: "https://api.deepseek.com/v1/chat/completions",
+        headers: { Authorization: `Bearer ${cfg.api_key}` },
+        bodyExtra: {
+          model: dsModel,
+          stream: true,
+          max_tokens: 32768,
+          ...dsTempExtra,
+          ...dsThinkingExtra,
+          ...fcExtra,
+        },
+      };
+    }
+    case "gemini":
+      return {
+        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        headers: { Authorization: `Bearer ${cfg.api_key}` },
+        bodyExtra: {
+          model: cfg.model || "gemini-2.5-flash-preview-05-20",
+          stream: true,
+          max_tokens: 16384,
+          ...tempExtra,
+          ...fcExtra,
+        },
+      };
+    case "qwen":
+      return {
+        url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        headers: { Authorization: `Bearer ${cfg.api_key}` },
+        bodyExtra: {
+          model: cfg.model || "qwen2.5-coder-32b-instruct",
+          stream: true,
+          max_tokens: 8192,
+          ...tempExtra,
+          ...fcExtra,
+        },
+      };
+    case "openai":
+      return {
+        url: "https://api.openai.com/v1/chat/completions",
+        headers: { Authorization: `Bearer ${cfg.api_key}` },
+        bodyExtra: { model: cfg.model || "gpt-4o-mini", stream: true, max_tokens: 16384, ...tempExtra, ...fcExtra },
+      };
+    case "custom":
+      return {
+        url: cfg.endpoint!,
+        headers: cfg.api_key ? { Authorization: `Bearer ${cfg.api_key}` } : {},
+        bodyExtra: cfg.model
+          ? { model: cfg.model, stream: true, max_tokens: 8192, ...tempExtra }
+          : { stream: true, max_tokens: 8192, ...tempExtra },
+      };
+    default:
+      throw new Error(`不支持的模型平台：${cfg.type}（文心平台已下线，请在模型设置中选择 DeepSeek/Gemini/Qwen/OpenAI 并填写 API Key）`);
+  }
+}
+
+interface GithubContext {
+  token: string;
+  owner: string;
+  repo: string;
+}
+
+async function githubRequest(ctx: GithubContext, apiPath: string, options: RequestInit = {}) {
+  const isWrite = options.method && options.method !== "GET";
+  let finalPath = apiPath;
+  if (!isWrite) {
+    finalPath += apiPath.includes("?") ? `&_t=${Date.now()}` : `?_t=${Date.now()}`;
+  }
+  const res = await fetch(`https://api.github.com${finalPath}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${ctx.token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+      ...((options.headers as Record<string, string>) || {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new GithubApiError(res.status, body, apiPath);
+  }
+  if (res.status === 204) return {};
+  return res.json();
+}
+
+async function fetchLatestFileSha(
+  ctx: GithubContext,
+  filePath: string,
+  branch: string,
+): Promise<string | null> {
+  try {
+    const ref = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/git/ref/heads/${encodeURIComponent(branch)}`,
+    );
+    const commitSha: string = ref?.object?.sha;
+    if (!commitSha) return null;
+
+    const commit = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/git/commits/${commitSha}`,
+    );
+    const treeSha: string = commit?.tree?.sha;
+    if (!treeSha) return null;
+
+    const tree = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/git/trees/${treeSha}?recursive=1`,
+    );
+    const entry = (tree?.tree as Array<{ path: string; sha: string; type: string }>)
+      ?.find(item => item.path === filePath && item.type === "blob");
+    return entry?.sha ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isShaConflict(err: unknown): boolean {
+  if (!(err instanceof GithubApiError)) return false;
+  if (err.status !== 409) return false;
+  const body = err.body.toLowerCase();
+  return !body.includes("merge conflict") && !body.includes("pull request");
+}
+
+class GithubApiError extends Error {
+  status: number;
+  body: string;
+  apiPath: string;
+  constructor(status: number, body: string, apiPath: string) {
+    super(`GitHub API ${status}: ${body}`);
+    this.status = status;
+    this.body = body;
+    this.apiPath = apiPath;
+  }
+}
+
+function diagnose4xx(err: unknown, context?: string): string {
+  if (!(err instanceof GithubApiError)) {
+    return `操作失败：${(err as Error).message}`;
+  }
+  const { status, body, apiPath } = err;
+  let bodyMsg = body;
+  try { bodyMsg = JSON.parse(body)?.message ?? body; } catch (_) {}
+
+  const ctx2 = context ? `【${context}】` : "";
+
+  switch (status) {
+    case 401:
+      return `${ctx2} ❌ 401 认证失败：Token 已过期或无效。\n建议：请在设置页重新填写有效的 GitHub Personal Access Token（PAT）。`;
+    case 403:
+      if (bodyMsg.includes("workflow")) {
+        return `${ctx2} ❌ 403 权限不足：Token 缺少 \`workflow\` 权限，无法操作 Actions 工作流。\n建议：在 GitHub → Settings → Tokens 中为该 PAT 勾选 \`workflow\` scope 后重试。`;
+      }
+      if (bodyMsg.includes("push") || bodyMsg.includes("branch")) {
+        return `${ctx2} ❌ 403 分支受保护：目标分支已启用分支保护规则，禁止直接推送。\n建议：create_branch 创建新分支 → 在新分支上修改 → create_pr 发起 PR → 由有权限的人 merge_pull_request。`;
+      }
+      if (bodyMsg.includes("rate limit") || bodyMsg.includes("secondary rate")) {
+        return `${ctx2} ❌ 403 触发速率限制：API 请求过于频繁。\n建议：等待 1-2 分钟后重试；或检查 Token 权限，确保用正确 Token 而非未授权访问。`;
+      }
+      return `${ctx2} ❌ 403 操作被拒绝：${bodyMsg}\n建议：检查 Token 的 scope 是否包含对应权限（repo、workflow、admin:org 等）。`;
+    case 404:
+      if (apiPath.includes("/contents/")) {
+        const filePath = apiPath.split("/contents/")[1]?.split("?")[0] ?? "目标文件";
+        return `${ctx2} ❌ 404 文件不存在：\`${filePath}\` 在仓库中未找到。\n建议：用 file_tree 或 list_files 确认正确路径后重试；若要新建，改用 write_file。`;
+      }
+      if (apiPath.includes("/branches/")) {
+        return `${ctx2} ❌ 404 分支不存在：请用 list_branches 确认分支名称拼写，或先用 create_branch 创建该分支。`;
+      }
+      if (apiPath.includes("/pulls/") || apiPath.includes("/issues/")) {
+        const num = apiPath.match(/\/(pulls|issues)\/(\d+)/)?.[2];
+        return `${ctx2} ❌ 404 PR/Issue #${num ?? "?"} 不存在：请用 list_pull_requests 或 list_issues 确认编号后重试。`;
+      }
+      if (apiPath.includes("/actions/workflows/")) {
+        const wf = apiPath.match(/\/workflows\/([^/]+)\//)?.[1];
+        return `${ctx2} ❌ 404 工作流 \`${wf ?? "?"}\` 不存在：请用 list_workflows 获取正确的 workflow_id 后重试。`;
+      }
+      return `${ctx2} ❌ 404 资源不存在：\`${apiPath}\`\n建议：确认仓库名、路径、编号是否正确，必要时先 list_* 查询。`;
+    case 409:
+      if (bodyMsg.includes("merge conflict") || bodyMsg.includes("conflict")) {
+        return `${ctx2} ❌ 409 合并冲突：PR 存在合并冲突，无法自动 merge。\n建议：在本地或通过 patch_file 手动解决冲突后重新提交，再尝试合并。`;
+      }
+      if (bodyMsg.includes("already exists")) {
+        return `${ctx2} ❌ 409 已存在：目标资源（分支/文件/标签）已存在，无法重复创建。\n建议：用 list_branches 或 list_files 确认，若确实需要覆盖，先删除再创建。`;
+      }
+      return `${ctx2} ❌ 409 冲突：${bodyMsg}\n建议：检查资源状态，解决冲突后重试。`;
+    case 422: {
+      let errorsDetail = "";
+      try {
+        const parsed = JSON.parse(body);
+        const errors = parsed?.errors as Array<Record<string, string>> | undefined;
+        if (Array.isArray(errors) && errors.length) {
+          errorsDetail = errors.map(e =>
+            e.message ? e.message : `field=${e.field ?? "?"} code=${e.code ?? "?"}`
+          ).join("；");
+        }
+      } catch (_) {}
+
+      const combinedText = `${bodyMsg} ${errorsDetail}`.toLowerCase();
+      if (combinedText.includes("no commits between") || combinedText.includes("no commits")) {
+        const searchIn = errorsDetail.toLowerCase().includes("no commits") ? errorsDetail : bodyMsg;
+        const branches = searchIn.match(/between\s+(\S+)\s+and\s+(\S+)/i);
+        const bFrom = branches?.[1] ?? "head 分支";
+        const bTo   = branches?.[2] ?? "base 分支";
+        return `${ctx2} ❌ 422 无法创建 PR：分支 \`${bFrom}\` 与 \`${bTo}\` 内容完全相同，没有差异提交。\n原因：恢复分支是基于 base 创建的，尚未写入任何新提交，两分支 HEAD 指向同一 commit。\n解决：先用 write_file / patch_file 写入要恢复的内容并提交，再调用 create_pr。`;
+      }
+      if (combinedText.includes("already exists") || combinedText.includes("pull request already")) {
+        return `${ctx2} ❌ 422 PR 已存在：这两个分支之间已有一个 open 状态的 PR。\n建议：用 list_pull_requests 查看已有 PR，直接对现有 PR 操作（merge_pull_request 或关闭后重建）。`;
+      }
+      if (bodyMsg.includes("workflow_dispatch")) {
+        return `${ctx2} ❌ 422 工作流缺少 workflow_dispatch 触发器（将自动修复）。`;
+      }
+      if (bodyMsg.includes("protected branch")) {
+        return `${ctx2} ❌ 422 分支保护规则阻止操作：目标分支设有保护规则（需要 PR review / status check 通过）。\n建议：走 create_pr → merge_pull_request 流程，确保 CI 通过并获得 review 后再合并。`;
+      }
+      if (errorsDetail) {
+        return `${ctx2} ❌ 422 参数校验失败：${errorsDetail}\n建议：① title 不能为空；② head/base 填写已存在的分支名（不加 owner: 前缀）；③ 用 list_branches 确认分支名称后重试。`;
+      }
+      if (bodyMsg.includes("Validation Failed")) {
+        return `${ctx2} ❌ 422 参数校验失败（无详细字段信息）\n建议：① title 不能为空；② head/base 填分支名（不加 owner: 前缀，如 restore/main 而非 user:restore/main）；③ 确保 head 分支已存在（list_branches 确认）；④ head 与 base 分支必须有差异提交。`;
+      }
+      return `${ctx2} ❌ 422 无法处理的请求：${bodyMsg}${errorsDetail ? `\n详情：${errorsDetail}` : ""}\n建议：检查参数是否符合 GitHub API 要求，或先查询资源状态再重试。`;
+    }
+    case 410:
+      return `${ctx2} ❌ 410 资源已被删除：该 Issue/PR/分支已永久删除，无法再操作。`;
+    case 451:
+      return `${ctx2} ❌ 451 访问受限（法律原因）：该仓库或内容在当前地区受到访问限制。`;
+    default:
+      return `${ctx2} ❌ GitHub API ${status} 错误：${bodyMsg}\n原始路径：\`${apiPath}\``;
+  }
+}
+
+async function listFiles(ctx: GithubContext, path: string): Promise<string> {
+  try {
+    const cleanPath = (path ?? "").replace(/^\/+|\/+$/g, "");
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${cleanPath}`);
+    if (Array.isArray(data)) {
+      const items = data.map((f: { name: string; type: string; size: number }) =>
+        `${f.type === "dir" ? "📁" : "📄"} ${f.name}${f.type === "file" ? ` (${f.size}B)` : ""}`
+      );
+      return `目录 "${cleanPath || "/"}" 内容：\n${items.join("\n")}`;
+    }
+    return JSON.stringify(data);
+  } catch (e) { return diagnose4xx(e, "list_files"); }
+}
+
+async function getFileTree(
+  ctx: GithubContext,
+  path: string,
+  maxDepth = 3,
+  currentDepth = 0,
+  ignorePatterns = ["node_modules", ".git", "dist", "build", ".next", ".turbo", "__pycache__", ".cache"],
+): Promise<string> {
+  if (currentDepth >= maxDepth) return "";
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${path}`);
+    if (!Array.isArray(data)) return "";
+    const indent = "  ".repeat(currentDepth);
+    const parts: string[] = [];
+    const dirPromises: Array<Promise<string>> = [];
+    for (const item of data as Array<{ name: string; type: string; size: number }>) {
+      if (item.type === "dir") {
+        if (ignorePatterns.includes(item.name)) {
+          parts.push(`${indent}📁 ${item.name}/ (已跳过)`);
+          continue;
+        }
+        parts.push(`${indent}📁 ${item.name}/`);
+        parts.push("");
+        dirPromises.push(getFileTree(ctx, path ? `${path}/${item.name}` : item.name, maxDepth, currentDepth + 1, ignorePatterns));
+      } else {
+        parts.push(`${indent}📄 ${item.name} (${item.size}B)`);
+      }
+    }
+    const subs: string[] = new Array(dirPromises.length);
+    for (let i = 0; i < dirPromises.length; i += 8) {
+      const chunk = await Promise.all(dirPromises.slice(i, i + 8));
+      for (let j = 0; j < chunk.length; j++) subs[i + j] = chunk[j];
+    }
+    let di = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "" && di < subs.length) {
+        parts[i] = subs[di];
+        di++;
+      }
+    }
+    return parts.filter((s) => s !== "").join("\n");
+  } catch { return ""; }
+}
+
+async function fileTree(ctx: GithubContext, path: string, maxDepth: number): Promise<string> {
+  try {
+    const depth = Math.min(maxDepth || 3, 5);
+    const tree = await getFileTree(ctx, path || "", depth);
+    return `仓库文件树（${path || "/"}, 深度${depth}）：\n${tree || "（空目录）"}`;
+  } catch (e) { return diagnose4xx(e, "file_tree"); }
+}
+
+function decodeBase64Utf8(b64: string): string {
+  const binaryStr = atob(b64.replace(/\n/g, ""));
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+async function fetchFileContent(
+  ctx: GithubContext,
+  filePath: string,
+  ref?: string,
+): Promise<{ content: string; sha: string; size: number; totalLines: number } | string> {
+  const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}${refQuery}`);
+  if (Array.isArray(data)) return `"${filePath}" 是目录，请用 file_tree 列出其内容。`;
+  if (!data.sha) return `无法读取文件 "${filePath}"：缺少 blob SHA。`;
+
+  let rawContent: string;
+  const isLarge = !data.content || data.content.trim() === "" || (data.size && data.size > 1_000_000);
+
+  if (isLarge) {
+    const blob = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/blobs/${data.sha}`);
+    if (!blob.content) {
+      const sizeLabel = data.size ? Math.round(data.size / 1024) + "KB" : "未知大小";
+      return `无法读取大文件 "${filePath}"（${sizeLabel}），GitHub API 返回空内容。`;
+    }
+    rawContent = decodeBase64Utf8(blob.content);
+  } else {
+    if (data.encoding !== "base64") return `无法解码文件 "${filePath}"（编码：${data.encoding}）`;
+    rawContent = decodeBase64Utf8(data.content);
+  }
+
+  return {
+    content: rawContent,
+    sha: data.sha as string,
+    size: (data.size as number) ?? 0,
+    totalLines: rawContent.split("\n").length,
+  };
+}
+
+async function grepInFile(
+  ctx: GithubContext,
+  filePath: string,
+  pattern: string,
+  caseSensitive = false,
+  offset = 0,
+  contextLines = 0,
+): Promise<string> {
+  try {
+    const result = await fetchFileContent(ctx, filePath);
+    if (typeof result === "string") return result;
+
+    const { content, totalLines } = result;
+    const lines = content.split("\n");
+
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, caseSensitive ? "g" : "gi");
+    } catch {
+      regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi");
+    }
+
+    const matchIndices: number[] = [];
+    lines.forEach((line, i) => {
+      if (regex.test(line)) matchIndices.push(i);
+      regex.lastIndex = 0;
+    });
+
+    if (!matchIndices.length) {
+      return `"${filePath}" 中未找到匹配 "${pattern}" 的行（共搜索 ${totalLines} 行）`;
+    }
+
+    if (contextLines <= 0) {
+      const allMatches = matchIndices.map(i =>
+        `${String(i + 1).padStart(6, " ")} | ${lines[i]}`
+      );
+      const PAGE = 100;
+      const safeOffset = Math.max(0, Math.min(offset, allMatches.length - 1));
+      const page = allMatches.slice(safeOffset, safeOffset + PAGE);
+      const remaining = allMatches.length - safeOffset - page.length;
+      const header = `"${filePath}" 匹配 "${pattern}" 共 ${allMatches.length} 处` +
+        (safeOffset > 0 ? `，显示第 ${safeOffset + 1}–${safeOffset + page.length} 条` : `，显示第 1–${page.length} 条`) +
+        `（文件共 ${totalLines} 行）：`;
+      const truncHint = remaining > 0
+        ? `\n\n⚠️ 还有 ${remaining} 条未显示。继续查看请调用：` +
+          `{"tool":"grep_in_file","path":"${filePath}","pattern":"${pattern}","offset":"${safeOffset + PAGE}"}`
+        : "";
+      return `${header}\n\`\`\`\n${page.join("\n")}\n\`\`\`` + truncHint;
+    }
+
+    const ctx_ = Math.max(0, Math.min(contextLines, 20));
+    const ranges: Array<[number, number]> = [];
+    for (const idx of matchIndices) {
+      const from = Math.max(0, idx - ctx_);
+      const to   = Math.min(lines.length - 1, idx + ctx_);
+      if (ranges.length && from <= ranges[ranges.length - 1][1] + 1) {
+        ranges[ranges.length - 1][1] = Math.max(ranges[ranges.length - 1][1], to);
+      } else {
+        ranges.push([from, to]);
+      }
+    }
+
+    const PAGE_BLOCKS = 30;
+    const safeOffset  = Math.max(0, Math.min(offset, ranges.length - 1));
+    const pageRanges  = ranges.slice(safeOffset, safeOffset + PAGE_BLOCKS);
+    const remaining   = ranges.length - safeOffset - pageRanges.length;
+
+    const blocks = pageRanges.map(([from, to]) => {
+      const blockLines = lines.slice(from, to + 1).map((line, k) => {
+        const lineNo = from + k + 1;
+        const isMatch = matchIndices.includes(from + k);
+        return `${isMatch ? ">" : " "} ${String(lineNo).padStart(6, " ")} | ${line}`;
+      });
+      return blockLines.join("\n");
+    });
+
+    const header = `"${filePath}" 匹配 "${pattern}" 共 ${matchIndices.length} 处` +
+      `，展示为 ${ranges.length} 个上下文块（各含前后 ${ctx_} 行）` +
+      (safeOffset > 0 ? `，当前第 ${safeOffset + 1}–${safeOffset + pageRanges.length} 块` : `，第 1–${pageRanges.length} 块`) +
+      `（文件共 ${totalLines} 行）：`;
+
+    const truncHint = remaining > 0
+      ? `\n\n⚠️ 还有 ${remaining} 个块未显示。继续查看请调用：` +
+        `{"tool":"grep_in_file","path":"${filePath}","pattern":"${pattern}","context_lines":"${ctx_}","offset":"${safeOffset + PAGE_BLOCKS}"}`
+      : "";
+
+    return `${header}\n\`\`\`\n${blocks.join("\n── ──\n")}\n\`\`\`` + truncHint;
+  } catch (e) { return diagnose4xx(e, "grep_in_file"); }
+}
+
+interface OutlineEntry {
+  kind: string;
+  name: string;
+  startLine: number;
+  endLine: number;
+  isExported: boolean;
+}
+
+function parseCodeOutline(source: string, ext: string): OutlineEntry[] {
+  const lines = source.split("\n");
+  const entries: OutlineEntry[] = [];
+
+  if (ext === ".py") {
+    const defRe = /^(class|def|async def)\s+(\w+)/;
+    for (let i = 0; i < lines.length; i++) {
+      const m = defRe.exec(lines[i]);
+      if (!m) continue;
+      const indent = lines[i].search(/\S/);
+      const kind = m[1] === "class" ? "class" : "function";
+      const name = m[2];
+      let end = i;
+      for (let j = i + 1; j < lines.length; j++) {
+        const trimmed = lines[j].trim();
+        if (!trimmed) { end = j; continue; }
+        const jIndent = lines[j].search(/\S/);
+        if (jIndent <= indent && trimmed) { end = j - 1; break; }
+        end = j;
+        if (j === lines.length - 1) end = j;
+      }
+      entries.push({ kind, name, startLine: i + 1, endLine: end + 1, isExported: false });
+    }
+    return entries;
+  }
+
+  const isTSJS  = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext);
+  const isGo    = ext === ".go";
+  const isRust  = ext === ".rs";
+
+  const declRe: RegExp[] = [];
+
+  if (isTSJS) {
+    declRe.push(
+      /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)/,
+      /^(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/,
+      /^(?:export\s+)?interface\s+(\w+)/,
+      /^(?:export\s+)?type\s+(\w+)(?:<[^>]*>)?\s*=/,
+      /^(?:export\s+)?(?:const\s+)?enum\s+(\w+)/,
+      /^(?:export\s+)?const\s+(\w+)\s*(?::\s*\S+\s*)?=\s*(?:async\s+)?(?:function|\([^)]*\)\s*(?::\s*\S+\s*)?=>)/,
+    );
+  } else if (isGo) {
+    declRe.push(
+      /^func\s+(?:\([^)]+\)\s+)?(\w+)\s*\(/,
+      /^type\s+(\w+)\s+(?:struct|interface)/,
+    );
+  } else if (isRust) {
+    declRe.push(
+      /^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/,
+      /^(?:pub\s+)?struct\s+(\w+)/,
+      /^(?:pub\s+)?(?:trait|impl)\s+(\w+)/,
+      /^(?:pub\s+)?enum\s+(\w+)/,
+    );
+  } else {
+    declRe.push(
+      /^(?:public|private|protected|internal|static|final|abstract|override|suspend|\s)*(?:class|interface|enum)\s+(\w+)/,
+      /^(?:public|private|protected|internal|static|final|abstract|override|suspend|\s)*(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(/,
+    );
+  }
+
+  function findEndLine(startIdx: number): number {
+    let depth = 0;
+    let opened = false;
+    for (let j = startIdx; j < lines.length; j++) {
+      for (const ch of lines[j]) {
+        if (ch === "{") { depth++; opened = true; }
+        else if (ch === "}") { depth--; }
+      }
+      if (opened && depth <= 0) return j + 1;
+      if (j - startIdx > 2000) return Math.min(startIdx + 2000, lines.length);
+    }
+    return lines.length;
+  }
+
+  function getKind(line: string, ext2: string): string {
+    if ([".ts", ".tsx", ".js", ".jsx"].includes(ext2)) {
+      if (/\bclass\b/.test(line))     return "class";
+      if (/\binterface\b/.test(line)) return "interface";
+      if (/\btype\b/.test(line))      return "type";
+      if (/\benum\b/.test(line))      return "enum";
+      return "function";
+    }
+    if (ext2 === ".go") return /\btype\b/.test(line) ? "type" : "function";
+    if (ext2 === ".rs") {
+      if (/\bstruct\b/.test(line))   return "struct";
+      if (/\btrait\b/.test(line))    return "trait";
+      if (/\bimpl\b/.test(line))     return "impl";
+      if (/\benum\b/.test(line))     return "enum";
+      return "function";
+    }
+    if (/\bclass\b/.test(line) || /\binterface\b/.test(line)) return "class";
+    return "function";
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue;
+    const indent = line.search(/\S/);
+    if (indent > 4) continue;
+
+    for (const re of declRe) {
+      const m = re.exec(line);
+      if (!m) continue;
+      const name = m[1];
+      if (!name || name.length < 2) continue;
+      const isExported = /^export\b/.test(trimmed) || /^pub\b/.test(trimmed) ||
+                         /^public\b/.test(trimmed);
+      const kind = getKind(line, ext);
+      const endLine = findEndLine(i);
+      entries.push({ kind, name, startLine: i + 1, endLine, isExported });
+      break;
+    }
+  }
+
+  return entries;
+}
+
+async function getCodeOutline(ctx: GithubContext, filePath: string): Promise<string> {
+  try {
+    const result = await fetchFileContent(ctx, filePath);
+    if (typeof result === "string") return result;
+
+    const { content, totalLines, size } = result;
+    const ext = ("." + filePath.split(".").pop()).toLowerCase();
+    const entries = parseCodeOutline(content, ext);
+
+    if (!entries.length) {
+      return `"${filePath}" 中未能识别出代码符号（共 ${totalLines} 行）。\n` +
+        `可能原因：文件格式不受支持、全是注释/数据，或者是配置文件。\n` +
+        `支持语言：TypeScript/JavaScript/Python/Go/Rust/Java/Kotlin。`;
+    }
+
+    const sizeKB = Math.round(size / 1024);
+    const sizeNote = sizeKB > 0 ? ` | ${sizeKB}KB` : "";
+
+    const lines = entries.map(e => {
+      const exported = e.isExported ? "↑" : " ";
+      const span = e.endLine > e.startLine
+        ? `L${e.startLine}–${e.endLine}（${e.endLine - e.startLine + 1}行）`
+        : `L${e.startLine}`;
+      return `${exported} ${span.padEnd(22)} ${e.kind.padEnd(10)} ${e.name}`;
+    });
+
+    const legend = `（↑=导出  列格式：行范围  符号类型  符号名）`;
+    const hint = `\n💡 读取完整函数体：{"tool":"read_function","path":"${filePath}","function_name":"<函数名>"}\n   或精确读取行范围：{"tool":"read_file","path":"${filePath}","start_line":"N","end_line":"M"}`;
+
+    return `文件 "${filePath}" 代码骨架（共 ${entries.length} 个符号 | ${totalLines} 行${sizeNote}）${legend}：\n\`\`\`\n${lines.join("\n")}\n\`\`\`` + hint;
+  } catch (e) { return diagnose4xx(e, "get_code_outline"); }
+}
+
+async function readFunction(
+  ctx: GithubContext,
+  filePath: string,
+  functionName: string,
+  occurrence = 1,
+  ref?: string,
+): Promise<string> {
+  try {
+    const result = await fetchFileContent(ctx, filePath, ref);
+    if (typeof result === "string") return result;
+
+    const { content, totalLines, size } = result;
+    const ext = ("." + filePath.split(".").pop()).toLowerCase();
+    const entries = parseCodeOutline(content, ext);
+
+    const matched = entries.filter(e => e.name === functionName);
+
+    if (!matched.length) {
+      const fuzzy = entries.filter(e => e.name.toLowerCase() === functionName.toLowerCase());
+      if (fuzzy.length) {
+        const suggestions = fuzzy.map(e => `  • L${e.startLine}  ${e.kind}  ${e.name}`).join("\n");
+        return `"${filePath}" 中未找到名为 "${functionName}" 的符号（大小写不匹配）。\n` +
+          `相近名称：\n${suggestions}\n` +
+          `请用精确名称重新调用 read_function，或用 get_code_outline 查看全部符号。`;
+      }
+      const outline = entries.slice(0, 30).map(e => `  • L${e.startLine}  ${e.kind}  ${e.name}`).join("\n");
+      const moreHint = entries.length > 30 ? `\n  … 还有 ${entries.length - 30} 个符号，请用 get_code_outline 查看完整列表` : "";
+      return `"${filePath}" 中未找到名为 "${functionName}" 的符号。\n` +
+        `文件共 ${entries.length} 个符号，前 30 个：\n${outline}${moreHint}\n` +
+        `提示：使用 get_code_outline 获取完整骨架，或 grep_in_file 搜索关键词定位行号。`;
+    }
+
+    const occ = Math.max(1, Math.min(occurrence, matched.length));
+    if (occ < occurrence) {
+      const overview = matched.map((e, i) => `  ${i + 1}. L${e.startLine}–${e.endLine}（${e.endLine - e.startLine + 1}行）`).join("\n");
+      return `"${filePath}" 中共找到 ${matched.length} 个名为 "${functionName}" 的符号（你请求第 ${occurrence} 个，但只有 ${matched.length} 个）：\n${overview}`;
+    }
+
+    const entry = matched[occ - 1];
+    const lines = content.split("\n");
+    const body   = lines.slice(entry.startLine - 1, entry.endLine);
+    const numbered = body.map((l, i) =>
+      `${String(entry.startLine + i).padStart(6, " ")} | ${l}`
+    ).join("\n");
+
+    const sizeKB = Math.round(size / 1024);
+    const sizeNote = sizeKB > 50 ? ` | 文件 ${sizeKB}KB` : "";
+    const multiHint = matched.length > 1
+      ? `\n💡 此文件共有 ${matched.length} 个同名符号，当前显示第 ${occ} 个。` +
+        `读取其他：{"tool":"read_function","path":"${filePath}","function_name":"${functionName}","occurrence":"${occ < matched.length ? occ + 1 : 1}"}`
+      : "";
+
+    return `${entry.kind} \`${entry.name}\` — "${filePath}" L${entry.startLine}–${entry.endLine}（${body.length} 行${sizeNote}）：\n` +
+      `\`\`\`\n${numbered}\n\`\`\`\n` +
+      `_SHA 快照：文件共 ${totalLines} 行${sizeNote}_` +
+      multiHint;
+  } catch (e) { return diagnose4xx(e, "read_function"); }
+}
+
+async function batchReadFiles(ctx: GithubContext, paths: string): Promise<string> {
+  const fileList = paths.split(",").map(p => p.trim()).filter(Boolean).slice(0, 5);
+  if (!fileList.length) return "请提供至少一个文件路径";
+  const PREVIEW_LINES = 300;
+
+  const settled = await Promise.allSettled(
+    fileList.map(fp => fetchFileContent(ctx, fp).then(fetched => ({ fp, fetched })))
+  );
+
+  const results: string[] = [];
+  for (const res of settled) {
+    if (res.status === "rejected") {
+      const idx = settled.indexOf(res);
+      results.push(`\n=== ${fileList[idx]} ===\n${diagnose4xx(res.reason, "batch_read")}`);
+      continue;
+    }
+    const { fp, fetched } = res.value;
+    if (typeof fetched === "string") {
+      results.push(`\n=== ${fp} ===\n${fetched}`);
+      continue;
+    }
+    const { content, sha, size, totalLines } = fetched;
+    const lines = content.split("\n");
+    const preview = lines.slice(0, PREVIEW_LINES);
+    const sizeKB = Math.round(size / 1024);
+    const numbered = preview.map((l, i) => `${String(i + 1).padStart(6, " ")} | ${l}`).join("\n");
+    const truncHint = totalLines > PREVIEW_LINES
+      ? `\n⚠️ 文件共 ${totalLines} 行，仅展示前 ${PREVIEW_LINES} 行。` +
+        `完整读取请用：{"tool":"read_file","path":"${fp}","start_line":"1","end_line":"${PREVIEW_LINES}"}`
+      : "";
+    const sizeNote = sizeKB > 100 ? ` | ${sizeKB}KB` : "";
+    results.push(
+      `\n=== ${fp}（${totalLines} 行${sizeNote}）SHA: ${sha} ===\n\`\`\`\n${numbered}\n\`\`\`` + truncHint,
+    );
+  }
+  return results.join("\n");
+}
+
+async function readFile(
+  ctx: GithubContext,
+  filePath: string,
+  startLine?: number,
+  endLine?: number,
+): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+    if (Array.isArray(data)) return `"${filePath}" 是目录，请用 file_tree 列出其内容。`;
+
+    let fullContent: string;
+
+    if (!data.content || data.content.trim() === "" || (data.size && data.size > 1_000_000)) {
+      if (!data.sha) return `无法读取文件 "${filePath}"：缺少 blob SHA，请检查路径是否正确。`;
+      const blob = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/blobs/${data.sha}`);
+      if (!blob.content) return `无法读取大文件 "${filePath}"（大小：${data.size ? Math.round(data.size/1024) + "KB" : "未知"}），GitHub API 返回空内容。`;
+      fullContent = decodeBase64Utf8(blob.content);
+    } else {
+      if (data.encoding !== "base64") return `无法解码文件 "${filePath}"（编码：${data.encoding}）`;
+      fullContent = decodeBase64Utf8(data.content);
+    }
+
+    const allLines = fullContent.split("\n");
+    const totalLines = allLines.length;
+    const MAX_CHUNK = 500;
+    const AUTO_FULL_READ_LIMIT = 5000;
+
+    const fileSizeKB = data.size ? Math.round(data.size / 1024) : null;
+    const sizeNote = fileSizeKB && fileSizeKB > 100 ? ` | 文件大小: ${fileSizeKB}KB` : "";
+
+    if (!startLine && !endLine && totalLines <= AUTO_FULL_READ_LIMIT) {
+      const numberedContent = allLines
+        .map((line, i) => `${String(i + 1).padStart(6, " ")} | ${line}`)
+        .join("\n");
+      return (
+        `文件 "${filePath}" 第 1–${totalLines} 行（共 ${totalLines} 行，完整内容）${sizeNote}：\n\`\`\`\n${numberedContent}\n\`\`\`` +
+        `\n_SHA: ${data.sha} | 总行数: ${totalLines}${sizeNote}_`
+      );
+    }
+
+    if (!startLine && !endLine && totalLines > AUTO_FULL_READ_LIMIT) {
+      const from = 1;
+      const to = MAX_CHUNK;
+      const selectedLines = allLines.slice(0, to);
+      const numberedContent = selectedLines
+        .map((line, i) => `${String(i + 1).padStart(6, " ")} | ${line}`)
+        .join("\n");
+      return (
+        `文件 "${filePath}" 第 ${from}–${to} 行（共 ${totalLines} 行${sizeNote}）：\n\`\`\`\n${numberedContent}\n\`\`\`` +
+        `\n_SHA: ${data.sha} | 总行数: ${totalLines}${sizeNote}_` +
+        `\n\n🔴 **[必读]** 文件共 ${totalLines} 行，本次仅返回第 ${from}–${to} 行，内容不完整。` +
+        `\n⚠️ **必须立即继续读取剩余内容，不得停止**，按以下顺序逐段调用：` +
+        Array.from({ length: Math.ceil((totalLines - to) / MAX_CHUNK) }, (_, k) => {
+          const s = to + k * MAX_CHUNK + 1;
+          const e = Math.min(totalLines, to + (k + 1) * MAX_CHUNK);
+          return `\n   {"tool":"read_file","path":"${filePath}","start_line":"${s}","end_line":"${e}"}`;
+        }).join("")
+      );
+    }
+
+    const from = Math.max(1, startLine ?? 1);
+    const rawTo = endLine ? Math.min(totalLines, endLine) : totalLines;
+    const to    = Math.min(rawTo, from + MAX_CHUNK - 1);
+
+    const selectedLines = allLines.slice(from - 1, to);
+    const isTruncated = to < rawTo || (to < totalLines && !endLine);
+
+    const numberedContent = selectedLines
+      .map((line, i) => `${String(from + i).padStart(6, " ")} | ${line}`)
+      .join("\n");
+
+    const truncationHint = isTruncated
+      ? `\n\n🔴 **[必读]** 文件共 ${totalLines} 行，本次只返回第 ${from}–${to} 行，内容不完整。` +
+        `\n⚠️ **必须立即继续读取下一段，不得停止**：` +
+        `\n   {"tool":"read_file","path":"${filePath}","start_line":"${to + 1}","end_line":"${Math.min(totalLines, to + MAX_CHUNK)}"}`
+      : "";
+
+    return (
+      `文件 "${filePath}" 第 ${from}–${to} 行（共 ${totalLines} 行）${sizeNote}：\n\`\`\`\n${numberedContent}\n\`\`\`` +
+      `\n_SHA: ${data.sha} | 总行数: ${totalLines}${sizeNote}_` +
+      truncationHint
+    );
+  } catch (e) { return diagnose4xx(e, "read_file"); }
+}
+
+async function getFileInfo(ctx: GithubContext, filePath: string): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+    if (Array.isArray(data)) return `"${filePath}" 是目录，请用 file_tree 列出其内容。`;
+
+    const sizeKB = data.size ? Math.round(data.size / 1024) : 0;
+    const isLarge = data.size && data.size > 1_000_000;
+
+    let lineCount = "未知";
+    if (!isLarge && data.content && data.encoding === "base64") {
+      const content = decodeBase64Utf8(data.content);
+      lineCount = String(content.split("\n").length);
+    } else if (isLarge && data.sha) {
+      try {
+        const blob = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/blobs/${data.sha}`);
+        if (blob.content) {
+          const content = decodeBase64Utf8(blob.content);
+          lineCount = String(content.split("\n").length);
+        }
+      } catch {
+        lineCount = "无法统计（Blobs API 失败）";
+      }
+    }
+
+    const MAX_CHUNK = 500;
+    const chunks = lineCount !== "未知" && lineCount !== "无法统计（Blobs API 失败）"
+      ? `\n分段建议：共 ${lineCount} 行，建议每次读 ${MAX_CHUNK} 行，` +
+        `需要 ${Math.ceil(Number(lineCount) / MAX_CHUNK)} 次 read_file 调用可读完全文。`
+      : "";
+
+    return (
+      `文件信息：${filePath}\n` +
+      `- 大小：${sizeKB}KB（${data.size ?? 0} 字节）${isLarge ? " ⚠️ 大文件，将自动用 Blobs API 读取" : ""}\n` +
+      `- 总行数：${lineCount}\n` +
+      `- SHA：${data.sha}\n` +
+      `- 类型：${data.type}` +
+      chunks
+    );
+  } catch (e) { return diagnose4xx(e, "get_file_info"); }
+}
+
+async function patchFile(
+  ctx: GithubContext,
+  filePath: string,
+  startLine: number,
+  endLine: number,
+  newContent: string,
+  commitMessage: string,
+  branch?: string,
+): Promise<string> {
+  try {
+    const fetched = await fetchFileContent(ctx, filePath);
+    if (typeof fetched === "string") return fetched;
+    const { content: fullContent, sha: fileSha, totalLines } = fetched;
+    const allLines = fullContent.split("\n");
+
+    startLine = Number(startLine);
+    endLine   = Number(endLine);
+    if (isNaN(startLine) || isNaN(endLine)) {
+      return `⚠️ 参数类型错误：start_line/end_line 必须是数字，收到 start_line=${startLine}, end_line=${endLine}。` +
+        `\n请确保 JSON 中行号为数字而非字符串，例如 "start_line":"10" → "start_line":10`;
+    }
+    if (startLine < 1 || endLine < startLine || startLine > totalLines) {
+      const diagHint =
+        startLine > totalLines
+          ? `⚠️ 行号越界：文件当前共 ${totalLines} 行，但请求修改第 ${startLine} 行。` +
+            `\n📋 修复方案：先调用 {"tool":"get_file_info","path":"${filePath}"} 获取最新行数，再重新规划 patch 范围。`
+          : endLine < startLine
+            ? `⚠️ 参数错误：end_line(${endLine}) < start_line(${startLine})，请检查参数。`
+            : `⚠️ 行号无效：start_line 必须 ≥ 1，当前值 ${startLine}。`;
+      return diagHint;
+    }
+    const safeEnd = Math.min(endLine, totalLines);
+
+    const before   = allLines.slice(0, startLine - 1);
+    const after    = allLines.slice(safeEnd);
+    const newLines = newContent.split("\n");
+    const patched  = [...before, ...newLines, ...after].join("\n");
+    const patchedLines = patched.split("\n");
+
+    const encoded = btoa(unescape(encodeURIComponent(patched)));
+
+    const body: Record<string, string> = { message: commitMessage, content: encoded, sha: fileSha };
+    if (branch) body.branch = branch;
+
+    const result = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+
+    const commitSha = (result.commit?.sha as string)?.slice(0, 7) || "成功";
+    const replacedCount = safeEnd - startLine + 1;
+    const newCount = newLines.length;
+
+    const CONTEXT = 5;
+    const ctxFrom = Math.max(1, startLine - CONTEXT);
+    const ctxTo   = Math.min(patchedLines.length, startLine + newCount - 1 + CONTEXT);
+    const snapLines: string[] = [];
+
+    for (let i = ctxFrom; i < startLine; i++) {
+      snapLines.push(`${String(i).padStart(6, " ")}   | ${allLines[i - 1]}`);
+    }
+    for (let i = startLine; i <= safeEnd; i++) {
+      snapLines.push(`${String(i).padStart(6, " ")} - | ${allLines[i - 1]}`);
+    }
+    newLines.forEach((nl, ni) => {
+      snapLines.push(`${String(startLine + ni).padStart(6, " ")} + | ${nl}`);
+    });
+    const afterStart = startLine + newCount;
+    for (let i = afterStart; i <= ctxTo; i++) {
+      snapLines.push(`${String(i).padStart(6, " ")}   | ${patchedLines[i - 1]}`);
+    }
+
+    const lineDelta = newCount - replacedCount;
+    const deltaWarning = lineDelta !== 0
+      ? `\n\n⚠️ 行号偏移警告：本次替换使文件行数净变化 ${lineDelta > 0 ? "+" : ""}${lineDelta} 行（${replacedCount} 行 → ${newCount} 行）。` +
+        `\n文件当前共 ${patchedLines.length} 行。` +
+        `\n**如果你还有其他针对本文件的 patch 计划，其中位于第 ${safeEnd + 1} 行之后的所有 start_line/end_line 必须在原始行号基础上加 ${lineDelta > 0 ? "+" : ""}${lineDelta}。` +
+        `强烈建议：将剩余所有修改合并为一次 batch_patch 调用，避免行号累积偏移导致错误。**`
+      : "";
+
+    return (
+      `✅ patch "${filePath}" 成功：第 ${startLine}–${safeEnd} 行（${replacedCount} 行→${newCount} 行），` +
+      `commit: ${commitSha}，信息：${commitMessage}\n\n` +
+      `📋 修改验证快照（- 已删除  + 新增  上下文 ${CONTEXT} 行）：\n\`\`\`diff\n${snapLines.join("\n")}\n\`\`\`` +
+      deltaWarning
+    );
+  } catch (e) {
+    if (isShaConflict(e)) {
+      const DELAYS = [500, 1500, 3000];
+      for (let attempt = 0; attempt < DELAYS.length; attempt++) {
+        await new Promise(r => setTimeout(r, DELAYS[attempt]));
+        try {
+          console.warn(`[patch_file] SHA 冲突，第 ${attempt + 1} 次重试（等待 ${DELAYS[attempt]}ms 后）：${filePath}`);
+
+          let retrySha: string | undefined;
+          const targetBranchName = branch ?? ctx.repo;
+          const gitRefSha = await fetchLatestFileSha(ctx, filePath, branch ?? "main");
+          if (gitRefSha) {
+            retrySha = gitRefSha;
+          } else {
+            const retryMeta = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+            retrySha = retryMeta?.sha as string;
+          }
+          if (!retrySha) return `❌ patch_file 重试失败：无法获取文件 "${filePath}" 的最新 SHA`;
+
+          const retryFetched = await fetchFileContent(ctx, filePath);
+          if (typeof retryFetched === "string") return retryFetched;
+          const { content: retryContent, sha: retryContentSha, totalLines: retryTotalLines } = retryFetched;
+          const freshSha = gitRefSha ?? retryContentSha;
+
+          const retryAllLines = retryContent.split("\n");
+          const retryStart = Math.max(1, Math.min(startLine, retryTotalLines));
+          const retryEnd   = Math.min(endLine, retryTotalLines);
+          const retryBefore  = retryAllLines.slice(0, retryStart - 1);
+          const retryAfter   = retryAllLines.slice(retryEnd);
+          const retryPatched = [...retryBefore, ...newContent.split("\n"), ...retryAfter].join("\n");
+          const retryEncoded = btoa(unescape(encodeURIComponent(retryPatched)));
+
+          const retryBody: Record<string, string> = { message: commitMessage, content: retryEncoded, sha: freshSha };
+          if (branch) retryBody.branch = branch;
+          const retryResult = await githubRequest(
+            ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`,
+            { method: "PUT", body: JSON.stringify(retryBody) },
+          );
+          const retryCommitSha = (retryResult.commit?.sha as string)?.slice(0, 7) || "成功";
+          return (
+            `✅ patch "${filePath}" 成功（SHA 冲突自动重试第 ${attempt + 1} 次）：` +
+            `第 ${retryStart}–${retryEnd} 行，commit: ${retryCommitSha}，信息：${commitMessage}`
+          );
+        } catch (retryErr) {
+          if (!isShaConflict(retryErr) || attempt === DELAYS.length - 1) {
+            return (
+              `❌ patch_file 失败（SHA 冲突，已重试 ${attempt + 1} 次仍失败）：文件 "${filePath}"\n` +
+              `💡 建议：调用 {"tool":"read_file","path":"${filePath}"} 获取最新内容和行号，再重新执行 patch_file\n` +
+              `错误详情：${(retryErr as Error).message}`
+            );
+          }
+          console.warn(`[patch_file] 重试第 ${attempt + 1} 次仍冲突，继续重试：${(retryErr as Error).message}`);
+        }
+      }
+    }
+    const errMsg = (e as Error).message || "";
+    if (errMsg.includes("422") || errMsg.includes("branch protection") || errMsg.includes("protected branch")) {
+      return (
+        `❌ patch_file 失败（分支保护）：分支 "${ctx.repo}" 启用了保护规则，禁止直接推送。\n` +
+        `📋 修复方案：\n` +
+        `  1. 新建临时分支：{"tool":"create_branch","branch":"fix/patch-${Date.now()}","from":"main"}\n` +
+        `  2. 在新分支上执行 patch_file（指定 branch 参数）\n` +
+        `  3. 创建 PR：{"tool":"create_pr","title":"...","head":"fix/patch-xxx","base":"main","body":"..."}`
+      );
+    }
+    return diagnose4xx(e, "patch_file");
+  }
+}
+
+async function writeFile(
+  ctx: GithubContext, filePath: string, content: string,
+  commitMessage: string, branch?: string
+): Promise<string> {
+  const _writeOnce = async (sha?: string): Promise<string> => {
+    const body: Record<string, string> = {
+      message: commitMessage,
+      content: btoa(unescape(encodeURIComponent(content))),
+    };
+    if (sha) body.sha = sha;
+    if (branch) body.branch = branch;
+    const result = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`, {
+      method: "PUT", body: JSON.stringify(body),
+    });
+    return `✅ 文件 "${filePath}" 已${sha ? "更新" : "创建"}，提交：${result.commit?.sha?.slice(0, 7) || "成功"}，信息：${commitMessage}`;
+  };
+
+  try {
+    let sha: string | undefined;
+    try {
+      const existing = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+      sha = existing.sha;
+    } catch {}
+    return await _writeOnce(sha);
+  } catch (e) {
+    if (!isShaConflict(e)) return diagnose4xx(e, "write_file");
+    const DELAYS_WF = [500, 1500, 3000];
+    for (let attempt = 0; attempt < DELAYS_WF.length; attempt++) {
+      await new Promise(r => setTimeout(r, DELAYS_WF[attempt]));
+      console.warn(`[write_file] SHA 冲突，第 ${attempt + 1} 次重试（等待 ${DELAYS_WF[attempt]}ms 后）：${filePath}`);
+      try {
+        const gitRefSha = await fetchLatestFileSha(ctx, filePath, branch ?? "main");
+        let freshSha: string;
+        if (gitRefSha) {
+          freshSha = gitRefSha;
+        } else {
+          const latest = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+          freshSha = latest?.sha as string;
+        }
+        if (!freshSha) return `❌ write_file 重试失败：无法获取文件 "${filePath}" 的最新 SHA`;
+        return await _writeOnce(freshSha);
+      } catch (retryErr) {
+        if (!isShaConflict(retryErr) || attempt === DELAYS_WF.length - 1) {
+          return diagnose4xx(retryErr, `write_file（SHA 冲突，已重试 ${attempt + 1} 次）`);
+        }
+        console.warn(`[write_file] 重试第 ${attempt + 1} 次仍冲突，继续重试：${(retryErr as Error).message}`);
+      }
+    }
+    return `❌ write_file 失败：超出最大重试次数（${DELAYS_WF.length} 次）`;
+  }
+}
+
+async function searchCode(ctx: GithubContext, query: string): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx, `/search/code?q=${encodeURIComponent(query)}+repo:${ctx.owner}/${ctx.repo}&per_page=10`
+    );
+    if (!data.items?.length) return `未找到匹配 "${query}" 的代码`;
+    return `搜索 "${query}" 找到 ${data.total_count} 个结果（前10）：\n${
+      data.items.map((item: { path: string }) => `• ${item.path}`).join("\n")
+    }`;
+  } catch (e) { return diagnose4xx(e, "search_code"); }
+}
+
+async function grepInRepo(
+  ctx: GithubContext,
+  query: string,
+  filePattern?: string,
+  offset = 0,
+): Promise<string> {
+  try {
+    let searchQ = `${encodeURIComponent(query)}+repo:${ctx.owner}/${ctx.repo}`;
+    if (filePattern) searchQ += `+path:${encodeURIComponent(filePattern)}`;
+    const PAGE_SIZE = 8;
+    const searchUrl = `/search/code?q=${searchQ}&per_page=${PAGE_SIZE}&page=${Math.floor(offset / PAGE_SIZE) + 1}`;
+
+    const data = await githubRequest(ctx, searchUrl);
+    if (!data.items?.length) {
+      return `全仓库搜索 "${query}" 未找到匹配文件${filePattern ? `（路径过滤：${filePattern}）` : ""}`;
+    }
+
+    const totalCount = data.total_count as number;
+    const items = data.items as Array<{ path: string; html_url: string }>;
+
+    let regex: RegExp;
+    try {
+      regex = new RegExp(query, "gi");
+    } catch {
+      regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    }
+
+    const fileResults: string[] = [];
+    const settled = await Promise.allSettled(
+      items.map(async (item) => {
+        const fetched = await fetchFileContent(ctx, item.path);
+        return { item, fetched };
+      })
+    );
+    for (const res of settled) {
+      if (res.status === "rejected") {
+        fileResults.push(`📄 （读取文件失败：${(res.reason as Error)?.message ?? res.reason}）`);
+        continue;
+      }
+      const { item, fetched } = res.value;
+      if (typeof fetched === "string") {
+        fileResults.push(`📄 ${item.path}\n  ⚠️ ${fetched}`);
+        continue;
+      }
+      const lines = fetched.content.split("\n");
+      const matches: string[] = [];
+      lines.forEach((line, i) => {
+        regex.lastIndex = 0;
+        if (regex.test(line)) {
+          const lineNo = String(i + 1).padStart(6, " ");
+          const highlighted = line.replace(regex, (m) => `>>${m}<<`);
+          matches.push(`  ${lineNo} | ${highlighted}`);
+        }
+        regex.lastIndex = 0;
+      });
+      if (matches.length) {
+        fileResults.push(`📄 ${item.path}（${matches.length} 处匹配）：\n${matches.slice(0, 20).join("\n")}` +
+          (matches.length > 20 ? `\n  … 还有 ${matches.length - 20} 处，用 grep_in_file 查看全部` : ""));
+      } else {
+        fileResults.push(`📄 ${item.path}（Search API 匹配但行级 grep 未命中，可能是注释或字符串）`);
+      }
+    }
+
+    const shownFrom = offset + 1;
+    const shownTo   = offset + items.length;
+    const hasMore   = totalCount > shownTo;
+    const header = `🔍 全仓库搜索 "${query}"，共找到约 ${totalCount} 个匹配文件` +
+      (filePattern ? `（路径过滤：${filePattern}）` : "") +
+      `\n本次展示第 ${shownFrom}–${shownTo} 个文件：\n`;
+
+    const truncHint = hasMore
+      ? `\n\n⚠️ 还有更多匹配文件未展示。继续查看请调用：` +
+        `{"tool":"grep_in_repo","query":"${query}","offset":"${shownTo}"` +
+        (filePattern ? `,"file_pattern":"${filePattern}"` : "") + `}`
+      : "";
+
+    return header + fileResults.join("\n\n") + truncHint;
+  } catch (e) { return diagnose4xx(e, "grep_in_repo"); }
+}
+
+async function batchPatch(
+  ctx: GithubContext,
+  filePath: string,
+  patches: Array<{ start_line: number; end_line: number; content: string }>,
+  commitMessage: string,
+  branch?: string,
+): Promise<string> {
+  try {
+    if (!patches?.length) return "patches 数组为空，请提供至少一个修改项";
+
+    const fetched = await fetchFileContent(ctx, filePath);
+    if (typeof fetched === "string") return fetched;
+    const { content: fullContent, sha: fileSha, totalLines } = fetched;
+    const allLines = fullContent.split("\n");
+
+    const normalized = patches.map((p, idx) => ({
+      start_line: Number(p.start_line),
+      end_line:   Number(p.end_line),
+      content:    p.content ?? "",
+      _idx:       idx,
+    }));
+
+    for (const p of normalized) {
+      if (isNaN(p.start_line) || isNaN(p.end_line)) {
+        return `参数类型错误：patch[${p._idx}] 的 start_line/end_line 必须是数字，` +
+          `当前值 start_line=${patches[p._idx].start_line}, end_line=${patches[p._idx].end_line}。` +
+          `\n提示：请确保 patches JSON 中行号为数字而非字符串，例如 {"start_line":10,"end_line":12}`;
+      }
+      if (p.start_line < 1) {
+        return `行号无效：patch[${p._idx}] start_line=${p.start_line} 必须 ≥ 1。` +
+          `\n文件共 ${totalLines} 行，请 read_file 确认行号后重试。`;
+      }
+      if (p.end_line < p.start_line) {
+        return `行号无效：patch[${p._idx}] end_line(${p.end_line}) < start_line(${p.start_line})，` +
+          `结束行不能小于起始行。\n请 read_file 确认正确的行范围后重试。`;
+      }
+      if (p.start_line > totalLines) {
+        return `行号超出范围：patch[${p._idx}] start_line=${p.start_line} 超出文件末尾（共 ${totalLines} 行）。` +
+          `\n请先 read_file 获取最新内容和行号，再重新调用 batch_patch。`;
+      }
+      if (p.end_line > totalLines) {
+        console.warn(`[batch_patch] patch[${p._idx}] end_line=${p.end_line} 超出文件共 ${totalLines} 行，已自动截断至 ${totalLines}`);
+        p.end_line = totalLines;
+      }
+    }
+
+    const sorted = [...normalized].sort((a, b) => b.start_line - a.start_line);
+
+    const diffSnapshots: string[] = [];
+    const workLines = [...allLines];
+
+    for (const p of sorted) {
+      const safeEnd   = Math.min(p.end_line, workLines.length);
+      const oldLines  = workLines.slice(p.start_line - 1, safeEnd);
+      const newLines  = p.content.split("\n");
+
+      const CONTEXT = 3;
+      const ctxFrom = Math.max(1, p.start_line - CONTEXT);
+      const ctxTo   = Math.min(workLines.length, safeEnd + CONTEXT);
+
+      const snapLines: string[] = [];
+      for (let i = ctxFrom; i <= ctxTo; i++) {
+        if (i >= p.start_line && i <= safeEnd) {
+          snapLines.push(`${String(i).padStart(6, " ")} - | ${workLines[i - 1]}`);
+        } else {
+          snapLines.push(`${String(i).padStart(6, " ")}   | ${workLines[i - 1]}`);
+        }
+      }
+      newLines.forEach((nl, ni) => {
+        snapLines.splice(
+          CONTEXT + (safeEnd - p.start_line + 1) + ni,
+          0,
+          `${String(p.start_line + ni).padStart(6, " ")} + | ${nl}`,
+        );
+      });
+
+      diffSnapshots.unshift(
+        `**第 ${p.start_line}–${safeEnd} 行**（${oldLines.length} 行 → ${newLines.length} 行）：\n\`\`\`diff\n${snapLines.join("\n")}\n\`\`\``,
+      );
+
+      workLines.splice(p.start_line - 1, safeEnd - p.start_line + 1, ...newLines);
+    }
+
+    const encoded = btoa(unescape(encodeURIComponent(workLines.join("\n"))));
+    const DELAYS_BP = [500, 1500, 3000];
+
+    const tryWrite = async (sha: string): Promise<string> => {
+      const body: Record<string, string> = { message: commitMessage, content: encoded, sha };
+      if (branch) body.branch = branch;
+      const result = await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      );
+      const commitSha = (result.commit?.sha as string)?.slice(0, 7) || "成功";
+      return (
+        `✅ batch_patch "${filePath}" 成功：${patches.length} 处修改合并为单个 commit ${commitSha}\n` +
+        `信息：${commitMessage}\n\n` +
+        `📋 各处修改 diff 快照（- 旧行  + 新行）：\n\n` +
+        diffSnapshots.join("\n\n")
+      );
+    };
+
+    try {
+      return await tryWrite(fileSha);
+    } catch (writeErr) {
+      if (!isShaConflict(writeErr)) return diagnose4xx(writeErr, "batch_patch");
+    }
+
+    for (let attempt = 0; attempt < DELAYS_BP.length; attempt++) {
+      await new Promise(r => setTimeout(r, DELAYS_BP[attempt]));
+      console.warn(`[batch_patch] SHA 冲突，第 ${attempt + 1} 次重试（等待 ${DELAYS_BP[attempt]}ms 后）：${filePath}`);
+      try {
+        let freshSha: string;
+        const gitRefSha = await fetchLatestFileSha(ctx, filePath, branch ?? "main");
+        if (gitRefSha) {
+          freshSha = gitRefSha;
+        } else {
+          const meta = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+          freshSha = meta?.sha as string;
+        }
+        if (!freshSha) return `❌ batch_patch 重试失败：无法获取文件 "${filePath}" 的最新 SHA`;
+
+        const reFetched = await fetchFileContent(ctx, filePath);
+        if (typeof reFetched === "string") return reFetched;
+        const reWorkLines = reFetched.content.split("\n");
+        const reSorted = [...normalized].sort((a, b) => b.start_line - a.start_line);
+        for (const p of reSorted) {
+          const safeEnd = Math.min(p.end_line, reWorkLines.length);
+          reWorkLines.splice(p.start_line - 1, safeEnd - p.start_line + 1, ...p.content.split("\n"));
+        }
+        const reEncoded = btoa(unescape(encodeURIComponent(reWorkLines.join("\n"))));
+        const reBody: Record<string, string> = { message: commitMessage, content: reEncoded, sha: gitRefSha ?? freshSha };
+        if (branch) reBody.branch = branch;
+        const reResult = await githubRequest(
+          ctx,
+          `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`,
+          { method: "PUT", body: JSON.stringify(reBody) },
+        );
+        const reCommitSha = (reResult.commit?.sha as string)?.slice(0, 7) || "成功";
+        return (
+          `✅ batch_patch "${filePath}" 成功（SHA 冲突自动重试第 ${attempt + 1} 次）：` +
+          `${patches.length} 处修改合并为单个 commit ${reCommitSha}\n` +
+          `信息：${commitMessage}\n\n` +
+          `📋 各处修改 diff 快照（- 旧行  + 新行）：\n\n` +
+          diffSnapshots.join("\n\n")
+        );
+      } catch (retryErr) {
+        if (!isShaConflict(retryErr) || attempt === DELAYS_BP.length - 1) {
+          return (
+            `❌ batch_patch 失败（SHA 冲突，已重试 ${attempt + 1} 次仍失败）：文件 "${filePath}"\n` +
+            `💡 建议：调用 {"tool":"read_file","path":"${filePath}"} 获取最新内容，再重新执行 batch_patch\n` +
+            `错误详情：${(retryErr as Error).message}`
+          );
+        }
+        console.warn(`[batch_patch] 重试第 ${attempt + 1} 次仍冲突，继续重试：${(retryErr as Error).message}`);
+      }
+    }
+    return `❌ batch_patch 失败：超出最大重试次数（${DELAYS_BP.length} 次）`;
+  } catch (e) { return diagnose4xx(e, "batch_patch"); }
+}
+
+async function listBranches(ctx: GithubContext): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/branches?per_page=50`);
+    if (!Array.isArray(data) || !data.length) return "该仓库暂无分支";
+    const names = data.map((b: { name: string; protected: boolean }) =>
+      `• ${b.name}${b.protected ? " 🔒（受保护）" : ""}`
+    );
+    return `仓库分支列表（共 ${data.length} 个）：\n${names.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_branches"); }
+}
+
+async function listCommits(ctx: GithubContext, path?: string, branch?: string): Promise<string> {
+  try {
+    let url = `/repos/${ctx.owner}/${ctx.repo}/commits?per_page=10`;
+    if (path) url += `&path=${encodeURIComponent(path)}`;
+    if (branch) url += `&sha=${encodeURIComponent(branch)}`;
+    const data = await githubRequest(ctx, url);
+    if (!Array.isArray(data) || !data.length) return "暂无提交记录";
+    const items = data.map((c: { sha: string; commit: { message: string; author: { name: string; date: string } } }) =>
+      `• \`${c.sha.slice(0, 7)}\` ${c.commit.message.split("\n")[0]} — ${c.commit.author.name} (${c.commit.author.date.slice(0, 10)})`
+    );
+    return `最近 ${data.length} 条提交${path ? `（文件 ${path}）` : ""}：\n${items.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_commits"); }
+}
+
+async function createBranch(
+  ctx: GithubContext,
+  branchName: string,
+  fromBranch?: string,
+): Promise<string> {
+  try {
+    const sourceBranch = fromBranch || "main";
+    let baseSha: string;
+    try {
+      const ref = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/ref/heads/${encodeURIComponent(sourceBranch)}`);
+      baseSha = ref.object.sha;
+    } catch {
+      const repoInfo = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}`);
+      const defBranch = repoInfo.default_branch || "main";
+      const ref = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/ref/heads/${encodeURIComponent(defBranch)}`);
+      baseSha = ref.object.sha;
+    }
+    await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/git/refs`, {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: baseSha }),
+    });
+    return `✅ 分支 \`${branchName}\` 已从 \`${fromBranch || "默认分支"}\` 创建成功`;
+  } catch (e) { return diagnose4xx(e, "create_branch"); }
+}
+
+async function createPullRequest(
+  ctx: GithubContext,
+  title: string,
+  head: string,
+  base: string,
+  body?: string,
+): Promise<string> {
+  const cleanHead = (head ?? "").trim().replace(/^[^:]+:/, "");
+  const cleanBase = (base ?? "").trim().replace(/^[^:]+:/, "");
+  const cleanTitle = (title ?? "").trim() || `restore: 恢复 ${cleanHead} 到 ${cleanBase}`;
+  const cleanBody  = (body ?? "").trim();
+
+  if (!cleanHead || !cleanBase) {
+    return `【create_pr】 ❌ 参数缺失：head（源分支）和 base（目标分支）均不能为空。\n请先用 list_branches 确认分支名称后重试。`;
+  }
+  if (cleanHead === cleanBase) {
+    return `【create_pr】 ❌ 参数错误：head 分支与 base 分支相同（均为 \`${cleanHead}\`），无法创建 PR。\n请确认要合并的源分支名称。`;
+  }
+
+  try {
+    const existing = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/pulls?state=open&head=${ctx.owner}:${cleanHead}&base=${cleanBase}&per_page=1`,
+    ) as Array<Record<string, unknown>>;
+    if (existing.length > 0) {
+      const pr = existing[0];
+      return `【create_pr】 ℹ️ PR 已存在（无需重复创建）：\`${cleanHead}\` → \`${cleanBase}\` 已有 open PR。\n- #${pr.number} **${pr.title}**  [查看](${pr.html_url})\n如需合并，直接用：{"tool":"merge_pull_request","pull_number":"${pr.number}","merge_method":"squash"}`;
+    }
+  } catch (_) {}
+
+  try {
+    const pr = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/pulls`, {
+      method: "POST",
+      body: JSON.stringify({ title: cleanTitle, head: cleanHead, base: cleanBase, body: cleanBody, draft: false }),
+    });
+    return `✅ PR 已创建：[#${pr.number} ${pr.title}](${pr.html_url})\n- 从 \`${cleanHead}\` → \`${cleanBase}\`\n- 状态：${pr.state}`;
+  } catch (e) { return diagnose4xx(e, "create_pr"); }
+}
+
+async function listWorkflows(ctx: GithubContext): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/workflows`);
+    if (!data.workflows?.length) return "该仓库没有工作流文件。";
+    const rows = data.workflows.map((w: Record<string, string>) =>
+      `- **${w.name}**（\`${w.path}\`）ID: \`${w.id}\`  状态: ${w.state}`
+    );
+    return `共 ${data.total_count} 个工作流：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_workflows"); }
+}
+
+async function getWorkflowRuns(
+  ctx: GithubContext,
+  workflowId: string,
+  limit = 10,
+): Promise<string> {
+  try {
+    const path = workflowId
+      ? `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${workflowId}/runs?per_page=${limit}`
+      : `/repos/${ctx.owner}/${ctx.repo}/actions/runs?per_page=${limit}`;
+    const data = await githubRequest(ctx, path);
+    if (!data.workflow_runs?.length) return "没有找到运行记录。";
+    const rows = data.workflow_runs.map((r: Record<string, string>) => {
+      const duration = r.updated_at && r.run_started_at
+        ? `${Math.round((new Date(r.updated_at).getTime() - new Date(r.run_started_at).getTime()) / 1000)}s`
+        : "-";
+      const statusIcon = r.conclusion === "success" ? "✅" : r.conclusion === "failure" ? "❌"
+        : r.status === "in_progress" ? "🔄" : r.conclusion === "cancelled" ? "⏹" : "⏳";
+      return `${statusIcon} Run #${r.run_number}  结论: ${r.conclusion || r.status}  分支: \`${r.head_branch}\`  耗时: ${duration}  ID: \`${r.id}\`  触发: ${r.event}`;
+    });
+    return `最近 ${data.workflow_runs.length} 次运行：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "get_workflow_runs"); }
+}
+
+async function getRunJobs(ctx: GithubContext, runId: string): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/jobs`,
+    );
+    if (!data.jobs?.length) return `运行 #${runId} 没有 Job 记录。`;
+    const lines: string[] = [`运行 ID \`${runId}\` 共 ${data.jobs.length} 个 Job：\n`];
+    for (const job of data.jobs as Array<Record<string, unknown>>) {
+      const icon = job.conclusion === "success" ? "✅" : job.conclusion === "failure" ? "❌"
+        : job.status === "in_progress" ? "🔄" : "⏳";
+      lines.push(`${icon} **${job.name}** (Job ID: \`${job.id}\`)  状态: ${job.conclusion || job.status}`);
+      const steps = (job.steps as Array<Record<string, string>>) || [];
+      for (const step of steps) {
+        const sIcon = step.conclusion === "success" ? "  ✓" : step.conclusion === "failure" ? "  ✗"
+          : step.status === "in_progress" ? "  ►" : "  ○";
+        lines.push(`${sIcon} ${step.name}  (${step.conclusion || step.status || "pending"})`);
+      }
+    }
+    return lines.join("\n");
+  } catch (e) { return diagnose4xx(e, "get_run_jobs"); }
+}
+
+async function getJobLogs(
+  ctx: GithubContext,
+  jobId: string,
+  startLine?: number,
+  endLine?: number,
+): Promise<string> {
+  try {
+    const redirectResp = await fetch(
+      `https://api.github.com/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`,
+      {
+        headers: {
+          Authorization: `token ${ctx.token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "GitHubManagerApp",
+        },
+        redirect: "manual",
+      },
+    );
+    let logText = "";
+    if (redirectResp.status === 302) {
+      const logUrl = redirectResp.headers.get("location") || "";
+      const logResp = await fetch(logUrl);
+      logText = await logResp.text();
+    } else if (redirectResp.status === 200) {
+      logText = await redirectResp.text();
+    } else {
+      return `获取日志失败：HTTP ${redirectResp.status}`;
+    }
+
+    const lines = logText.split("\n");
+    const totalLines = lines.length;
+    const totalChars = logText.length;
+
+    const PAGE_LINES = 800;
+    if (startLine !== undefined || endLine !== undefined) {
+      const s = Math.max(1, startLine ?? 1);
+      const e = Math.min(totalLines, endLine ?? (s + PAGE_LINES - 1));
+      const clampedE = Math.min(e, s + PAGE_LINES - 1);
+      const slice = lines.slice(s - 1, clampedE).join("\n");
+      const hasMore = clampedE < totalLines;
+      const nextHint = hasMore
+        ? `\n💡 还有更多：下一段 start_line=${clampedE + 1} end_line=${Math.min(totalLines, clampedE + PAGE_LINES)}`
+        : `\n✅ 已到达日志末尾（第 ${totalLines} 行）`;
+      return [
+        `Job \`${jobId}\` 日志分段 [行 ${s}–${clampedE} / 共 ${totalLines} 行，${totalChars} 字符]：`,
+        "```",
+        slice,
+        "```",
+        nextHint,
+      ].join("\n");
+    }
+
+    const TOTAL_LIMIT = 60_000;
+    const TAIL_CHARS  = 20_000;
+    const CTX_LINES   = 35;
+
+    const statsHint = [
+      `Job \`${jobId}\` 日志统计：共 **${totalLines} 行** / **${totalChars} 字符**`,
+      totalChars > TOTAL_LIMIT
+        ? `（日志较大，以下为智能摘要；如需完整日志，使用 start_line/end_line 每次读取 ${PAGE_LINES} 行）`
+        : "（日志较小，完整返回）",
+    ].join(" ");
+
+    if (totalChars <= TOTAL_LIMIT) {
+      return `${statsHint}\n\`\`\`\n${logText}\n\`\`\``;
+    }
+
+    const errorPattern = /\b(error|Error|ERROR|FAILED|failed|FAILURE|Exception|exception|fatal|Fatal|FATAL|cannot|Cannot|undefined reference|unresolved)\b/;
+    const errorLineIndices: Set<number> = new Set();
+    for (let i = 0; i < totalLines; i++) {
+      if (errorPattern.test(lines[i])) {
+        const from = Math.max(0, i - CTX_LINES);
+        const to   = Math.min(totalLines - 1, i + CTX_LINES);
+        for (let j = from; j <= to; j++) errorLineIndices.add(j);
+      }
+    }
+
+    const sortedIndices = Array.from(errorLineIndices).sort((a, b) => a - b);
+    const errorSections: string[] = [];
+    let charCount = 0;
+    let i = 0;
+    while (i < sortedIndices.length && charCount < TOTAL_LIMIT - TAIL_CHARS) {
+      const start = sortedIndices[i];
+      let end = start;
+      while (i + 1 < sortedIndices.length && sortedIndices[i + 1] === sortedIndices[i] + 1) {
+        i++;
+        end = sortedIndices[i];
+      }
+      const sectionText = lines.slice(start, end + 1).join("\n");
+      const label = `\n--- [行 ${start + 1}–${end + 1}] ---\n`;
+      errorSections.push(label + sectionText);
+      charCount += label.length + sectionText.length;
+      i++;
+    }
+
+    const tail = logText.slice(-TAIL_CHARS);
+
+    let output = statsHint + "\n";
+    if (errorSections.length > 0) {
+      output += `\n## ⚠️ 错误相关段落（${errorLineIndices.size} 行上下文）\n\`\`\`\n${errorSections.join("\n")}\n\`\`\`\n`;
+    } else {
+      output += "\n（未检测到明确错误关键词，仅返回末尾内容）\n";
+    }
+    output += `\n## 📋 末尾 ${TAIL_CHARS} 字符（Build Summary）\n\`\`\`\n${tail}\n\`\`\``;
+    output += `\n\n💡 如需读取特定区段，使用 start_line/end_line，例如读取前 ${PAGE_LINES} 行：{"tool":"get_job_logs","job_id":"${jobId}","start_line":"1","end_line":"${PAGE_LINES}"}`;
+
+    return output;
+  } catch (e) { return diagnose4xx(e, "get_job_logs"); }
+}
+
+async function triggerWorkflow(
+  ctx: GithubContext,
+  workflowId: string,
+  ref: string,
+  inputs?: Record<string, string>,
+): Promise<string> {
+  const doDispatch = async () =>
+    githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${workflowId}/dispatches`,
+      { method: "POST", body: JSON.stringify({ ref, inputs: inputs || {} }) },
+    );
+
+  const resolveNewRunId = async (): Promise<string | null> => {
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const runs = await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${workflowId}/runs?per_page=1&branch=${encodeURIComponent(ref)}`,
+      );
+      const latest = runs.workflow_runs?.[0];
+      if (latest?.id) return String(latest.id);
+    } catch {}
+    return null;
+  };
+
+  try {
+    await doDispatch();
+    const runId = await resolveNewRunId();
+    const runHint = runId
+      ? `\n🆔 本次运行 ID：\`${runId}\`。请立即调用：{"tool":"check_run_status","run_id":"${runId}","workflow_type":"normal"}`
+      : `\n稍后可用 get_workflow_runs 查看进度。`;
+    return `✅ 已触发工作流 \`${workflowId}\`，分支：\`${ref}\`。${runHint}`;
+  } catch (e) {
+    const isDispatchMissing =
+      e instanceof GithubApiError &&
+      e.status === 422 &&
+      e.body.includes("workflow_dispatch");
+
+    if (!isDispatchMissing) return diagnose4xx(e, `trigger_workflow(${workflowId})`);
+
+    const workflowPath = workflowId.includes("/")
+      ? workflowId
+      : `.github/workflows/${workflowId}`;
+
+    let fileData: Record<string, string>;
+    try {
+      fileData = await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/contents/${workflowPath}`,
+      );
+    } catch (readErr) {
+      return `❌ 工作流缺少 workflow_dispatch，且无法读取文件自动修复：${diagnose4xx(readErr, "read workflow file")}`;
+    }
+
+    if (fileData.encoding !== "base64") {
+      return `❌ 工作流 \`${workflowId}\` 缺少 workflow_dispatch，文件编码非 base64，无法自动修复。`;
+    }
+
+    const original = decodeBase64Utf8(fileData.content);
+    if (original.includes("workflow_dispatch")) {
+      try { await doDispatch(); } catch (_) {}
+      const runId2 = await resolveNewRunId();
+      const runHint2 = runId2
+        ? `\n🆔 本次运行 ID：\`${runId2}\`。请立即调用：{"tool":"check_run_status","run_id":"${runId2}","workflow_type":"normal"}`
+        : "";
+      return `✅ 工作流已包含 workflow_dispatch，已重新触发 \`${workflowId}\`。${runHint2}`;
+    }
+
+    const lines = original.split("\n");
+    const onIdx = lines.findIndex(l => /^on\s*:/.test(l.trim()));
+    if (onIdx === -1) {
+      return `❌ 未在工作流文件中找到 \`on:\` 块，无法自动注入 workflow_dispatch。请 read_file 检查后手动 patch_file 修复。`;
+    }
+    lines.splice(onIdx + 1, 0, "  workflow_dispatch: {}");
+    const patched = lines.join("\n");
+    const encoded = btoa(unescape(encodeURIComponent(patched)));
+
+    try {
+      await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/contents/${workflowPath}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            message: "ci: 自动添加 workflow_dispatch 触发器",
+            content: encoded,
+            sha: fileData.sha,
+            branch: ref,
+          }),
+        },
+      );
+    } catch (writeErr) {
+      return `❌ 自动注入 workflow_dispatch 失败（写入时报错）：${diagnose4xx(writeErr, "auto-patch workflow_dispatch")}`;
+    }
+
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      await doDispatch();
+      const runId3 = await resolveNewRunId();
+      const runHint3 = runId3
+        ? `\n🆔 本次运行 ID：\`${runId3}\`。请立即调用：{"tool":"check_run_status","run_id":"${runId3}","workflow_type":"normal"}`
+        : `\n稍后可用 get_workflow_runs 查看运行进度。`;
+      return `✅ 已自动为 \`${workflowId}\` 添加 \`workflow_dispatch\` 触发器并提交，随后触发成功（分支：\`${ref}\`）。${runHint3}`;
+    } catch (retryErr) {
+      return `⚠️ 已添加 workflow_dispatch 触发器并提交，但触发仍失败：${diagnose4xx(retryErr, "retry trigger")}`;
+    }
+  }
+}
+
+async function checkRunStatus(
+  ctx: GithubContext,
+  runId: string,
+  workflowType: "fast" | "normal" | "build_apk" = "normal",
+): Promise<string> {
+  type PollConfig = { initialWait: number; interval: number; maxPolls: number };
+  const CONFIGS: Record<string, PollConfig> = {
+    fast:      { initialWait: 5_000,  interval: 10_000, maxPolls: 6 },
+    normal:    { initialWait: 15_000, interval: 20_000, maxPolls: 5 },
+    build_apk: { initialWait: 60_000, interval: 30_000, maxPolls: 3 },
+  };
+  const cfg = CONFIGS[workflowType] ?? CONFIGS.normal;
+
+  const runUrl = `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}`;
+
+  try {
+    const snap = await githubRequest(ctx, runUrl);
+    if (snap.conclusion === "startup_failure") {
+      return (
+        `❌ 工作流运行 \`${runId}\` 启动失败（startup_failure）。\n` +
+        `这通常意味着工作流文件存在语法错误，或引用的 Action 版本不存在。\n` +
+        `请用 read_file 检查 .github/workflows/ 下的工作流文件。`
+      );
+    }
+    if (snap.status === "completed") {
+      return formatRunResult(snap, runId, 0);
+    }
+  } catch (e) {
+    return diagnose4xx(e, `check_run_status(${runId})`);
+  }
+
+  await new Promise(r => setTimeout(r, cfg.initialWait));
+  let elapsedMs = cfg.initialWait;
+
+  for (let i = 0; i < cfg.maxPolls; i++) {
+    let run: Record<string, unknown>;
+    try {
+      run = await githubRequest(ctx, runUrl);
+    } catch (e) {
+      return diagnose4xx(e, `check_run_status poll(${runId})`);
+    }
+
+    if (run.status === "completed") {
+      return await formatRunResult(run, runId, elapsedMs, ctx);
+    }
+
+    if (run.conclusion === "startup_failure") {
+      return (
+        `❌ 工作流运行 \`${runId}\` 启动失败（startup_failure）。\n` +
+        `工作流文件可能有语法错误，请用 read_file 检查 .github/workflows/ 目录。`
+      );
+    }
+
+    if (i < cfg.maxPolls - 1) {
+      await new Promise(r => setTimeout(r, cfg.interval));
+      elapsedMs += cfg.interval;
+    }
+  }
+
+  const elapsedSec = Math.round(elapsedMs / 1000);
+  const continueHint = workflowType === "build_apk"
+    ? `构建 APP 通常需要约 3 分钟，已等待 ${elapsedSec}s。请再次调用：\n{"tool":"check_run_status","run_id":"${runId}","workflow_type":"build_apk"}`
+    : `已等待 ${elapsedSec}s，工作流仍在运行。可稍后调用：\n{"tool":"check_run_status","run_id":"${runId}","workflow_type":"${workflowType}"}`;
+
+  return `⏳ 工作流 \`${runId}\` 仍在运行（已等待 ${elapsedSec}s）。\n${continueHint}`;
+}
+
+async function formatRunResult(
+  run: Record<string, unknown>,
+  runId: string,
+  elapsedMs: number,
+  ctx?: GithubContext,
+): Promise<string> {
+  const conclusion  = run.conclusion  as string ?? "unknown";
+  const startedAt   = run.run_started_at as string ?? "";
+  const updatedAt   = run.updated_at   as string ?? "";
+  const runNumber   = run.run_number   as number ?? 0;
+  const headBranch  = run.head_branch  as string ?? "";
+
+  const durationSec = startedAt && updatedAt
+    ? Math.round((new Date(updatedAt).getTime() - new Date(startedAt).getTime()) / 1000)
+    : Math.round(elapsedMs / 1000);
+
+  const icon = conclusion === "success" ? "✅" : conclusion === "failure" ? "❌"
+    : conclusion === "cancelled" ? "⏹" : "⚠️";
+
+  let result =
+    `${icon} 工作流运行 **#${runNumber}**（ID: \`${runId}\`）已完成\n` +
+    `结论：\`${conclusion}\`  |  分支：\`${headBranch}\`  |  耗时：${durationSec}s`;
+
+  if ((conclusion === "failure" || conclusion === "cancelled") && ctx) {
+    try {
+      const jobsData = await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/jobs`,
+      );
+      const jobs = (jobsData.jobs ?? []) as Array<Record<string, unknown>>;
+      const failedJobs = jobs.filter(j => j.conclusion === "failure" || j.conclusion === "cancelled");
+
+      if (failedJobs.length) {
+        result += `\n\n**失败 Jobs**：`;
+        for (const job of failedJobs) {
+          result += `\n❌ \`${job.name}\` (Job ID: \`${job.id}\`)`;
+          const steps = (job.steps ?? []) as Array<Record<string, string>>;
+          const failedSteps = steps.filter(s => s.conclusion === "failure");
+          if (failedSteps.length) {
+            result += `\n   失败步骤：${failedSteps.map(s => `"${s.name}"`).join("、")}`;
+          }
+        }
+        const firstFailedJobId = failedJobs[0]?.id;
+        if (firstFailedJobId) {
+          result += `\n\n📋 获取详细日志：{"tool":"get_job_logs","job_id":"${firstFailedJobId}"}`;
+        }
+      }
+    } catch {}
+  }
+
+  if (conclusion === "success") {
+    result += `\n\n🎉 运行成功！`;
+  }
+
+  return result;
+}
+
+async function cancelWorkflowRun(ctx: GithubContext, runId: string): Promise<string> {
+  try {
+    await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/cancel`,
+      { method: "POST" },
+    );
+    return `✅ 已发送取消请求，Run ID: \`${runId}\`。`;
+  } catch (e) { return diagnose4xx(e, "cancel_workflow_run"); }
+}
+
+async function rerunWorkflowRun(ctx: GithubContext, runId: string, failedJobsOnly = false): Promise<string> {
+  try {
+    const path = failedJobsOnly
+      ? `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/rerun-failed-jobs`
+      : `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/rerun`;
+    await githubRequest(ctx, path, { method: "POST" });
+    return `✅ 已重新触发 Run \`${runId}\`（${failedJobsOnly ? "仅失败 Jobs" : "全部 Jobs"}），稍后可查看新运行。`;
+  } catch (e) { return diagnose4xx(e, "rerun_workflow_run"); }
+}
+
+async function deleteFile(
+  ctx: GithubContext,
+  filePath: string,
+  commitMessage: string,
+  branch?: string,
+): Promise<string> {
+  try {
+    const existing = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`);
+    const body: Record<string, string> = { message: commitMessage, sha: existing.sha };
+    if (branch) body.branch = branch;
+    await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/contents/${filePath}`, {
+      method: "DELETE", body: JSON.stringify(body),
+    });
+    return `✅ 已删除文件 "${filePath}"，提交信息：${commitMessage}`;
+  } catch (e) { return diagnose4xx(e, "delete_file"); }
+}
+
+async function listPullRequests(ctx: GithubContext, state = "open"): Promise<string> {
+  try {
+    const prs = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/pulls?state=${state}&per_page=20`,
+    ) as Array<Record<string, unknown>>;
+    if (!prs.length) return `没有 ${state} 状态的 PR。`;
+    const rows = prs.map(pr =>
+      `#${pr.number} **${pr.title}**  \`${(pr.head as Record<string,string>).ref}\` → \`${(pr.base as Record<string,string>).ref}\`  作者: ${(pr.user as Record<string,string>).login}  [查看](${pr.html_url})`
+    );
+    return `${state} 状态 PR（共 ${rows.length} 个）：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_pull_requests"); }
+}
+
+async function mergePullRequest(
+  ctx: GithubContext,
+  pullNumber: string,
+  mergeMethod = "squash",
+  commitTitle?: string,
+): Promise<string> {
+  try {
+    const body: Record<string, string> = { merge_method: mergeMethod };
+    if (commitTitle) body.commit_title = commitTitle;
+    const result = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/pulls/${pullNumber}/merge`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    return `✅ PR #${pullNumber} 已合并：${result.message}  SHA: ${result.sha?.slice(0, 7)}`;
+  } catch (e) { return diagnose4xx(e, "merge_pull_request"); }
+}
+
+async function listIssues(ctx: GithubContext, state = "open"): Promise<string> {
+  try {
+    const issues = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/issues?state=${state}&per_page=20`,
+    ) as Array<Record<string, unknown>>;
+    const realIssues = issues.filter(i => !(i as Record<string, unknown>).pull_request);
+    if (!realIssues.length) return `没有 ${state} 状态的 Issue。`;
+    const rows = realIssues.map(i =>
+      `#${i.number} **${i.title}**  作者: ${(i.user as Record<string,string>).login}  标签: ${((i.labels as Array<Record<string,string>>) || []).map(l => l.name).join(", ") || "无"}  [查看](${i.html_url})`
+    );
+    return `${state} Issues（共 ${rows.length} 个）：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_issues"); }
+}
+
+async function createIssue(
+  ctx: GithubContext,
+  title: string,
+  body?: string,
+  labels?: string,
+): Promise<string> {
+  try {
+    const payload: Record<string, unknown> = { title, body: body || "" };
+    if (labels) payload.labels = labels.split(",").map(l => l.trim()).filter(Boolean);
+    const issue = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/issues`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+    return `✅ Issue 已创建：[#${issue.number} ${issue.title}](${issue.html_url})`;
+  } catch (e) { return diagnose4xx(e, "create_issue"); }
+}
+
+async function listActionsSecrets(ctx: GithubContext): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/secrets`);
+    if (!data.secrets?.length) return "该仓库没有配置 Actions Secrets。";
+    const names = (data.secrets as Array<Record<string, string>>).map(s =>
+      `- \`${s.name}\`  更新时间: ${s.updated_at?.slice(0, 10) || "-"}`
+    );
+    return `共 ${data.total_count} 个 Secrets（仅显示名称，值不可读取）：\n${names.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_actions_secrets"); }
+}
+
+async function getRepoInfo(ctx: GithubContext): Promise<string> {
+  try {
+    const d = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}`);
+    const lines = [
+      `📦 **${d.full_name}**`,
+      d.description ? `> ${d.description}` : "",
+      ``,
+      `- 主语言：${d.language || "未知"}`,
+      `- ⭐ Stars：${d.stargazers_count}  🍴 Forks：${d.forks_count}  👁 Watchers：${d.subscribers_count}`,
+      `- 默认分支：\`${d.default_branch}\``,
+      `- 可见性：${d.private ? "私有" : "公开"}`,
+      `- 许可证：${d.license?.spdx_id || "无"}`,
+      d.topics?.length ? `- Topics：${(d.topics as string[]).join(", ")}` : "",
+      `- 创建时间：${d.created_at?.slice(0, 10)}  最后推送：${d.pushed_at?.slice(0, 10)}`,
+      `- 仓库链接：${d.html_url}`,
+    ].filter(Boolean);
+    return lines.join("\n");
+  } catch (e) { return diagnose4xx(e, "get_repo_info"); }
+}
+
+async function addComment(
+  ctx: GithubContext,
+  issueNumber: string,
+  body: string,
+): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}/comments`,
+      { method: "POST", body: JSON.stringify({ body }) },
+    );
+    return `✅ 已在 #${issueNumber} 添加评论（ID: ${data.id}）：\n> ${body.slice(0, 80)}${body.length > 80 ? "…" : ""}`;
+  } catch (e) { return diagnose4xx(e, `add_comment(#${issueNumber})`); }
+}
+
+async function closeIssue(
+  ctx: GithubContext,
+  issueNumber: string,
+  comment?: string,
+): Promise<string> {
+  try {
+    if (comment) {
+      await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}/comments`,
+        { method: "POST", body: JSON.stringify({ body: comment }) },
+      );
+    }
+    await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}`,
+      { method: "PATCH", body: JSON.stringify({ state: "closed" }) },
+    );
+    return `✅ Issue #${issueNumber} 已关闭${comment ? "（已附带评论）" : ""}。`;
+  } catch (e) { return diagnose4xx(e, `close_issue(#${issueNumber})`); }
+}
+
+async function searchIssues(
+  ctx: GithubContext,
+  query: string,
+  state = "open",
+  labels?: string,
+  assignee?: string,
+  limit = 20,
+): Promise<string> {
+  try {
+    let q = `repo:${ctx.owner}/${ctx.repo} is:issue ${query}`;
+    if (state !== "all") q += ` state:${state}`;
+    if (labels) labels.split(",").forEach(l => { q += ` label:"${l.trim()}"`; });
+    if (assignee) q += ` assignee:${assignee}`;
+    const data = await githubRequest(
+      ctx,
+      `/search/issues?q=${encodeURIComponent(q)}&per_page=${Math.min(limit, 30)}&sort=updated&order=desc`,
+    ) as { total_count: number; items: Array<Record<string, unknown>> };
+    if (!data.items?.length) return `未找到匹配"${query}"的 Issue。`;
+    const rows = data.items.map(i => {
+      const lbls = ((i.labels as Array<Record<string, string>>) || []).map(l => l.name).join(", ");
+      const assignees = ((i.assignees as Array<Record<string, string>>) || []).map(a => a.login).join(", ");
+      return `#${i.number} **${i.title}**  状态:${i.state}  标签:${lbls || "无"}  负责人:${assignees || "无"}  [查看](${i.html_url})`;
+    });
+    return `搜索"${query}"找到 ${data.total_count} 个 Issue（显示前 ${rows.length} 个）：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "search_issues"); }
+}
+
+async function getIssueDetails(
+  ctx: GithubContext,
+  issueNumber: string,
+): Promise<string> {
+  try {
+    const [issue, comments] = await Promise.all([
+      githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}`) as Promise<Record<string, unknown>>,
+      githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}/comments?per_page=20`) as Promise<Array<Record<string, unknown>>>,
+    ]);
+    const labels = ((issue.labels as Array<Record<string, string>>) || []).map(l => l.name).join(", ");
+    const assignees = ((issue.assignees as Array<Record<string, string>>) || []).map(a => a.login).join(", ");
+    const lines = [
+      `## Issue #${issue.number}: ${issue.title}`,
+      `- 状态：${issue.state}  作者：${(issue.user as Record<string, string>)?.login}`,
+      `- 标签：${labels || "无"}  负责人：${assignees || "无"}`,
+      `- 创建：${String(issue.created_at).slice(0, 10)}  更新：${String(issue.updated_at).slice(0, 10)}`,
+      `- 链接：${issue.html_url}`,
+      ``,
+      `### 正文`,
+      (issue.body as string) || "（无正文）",
+    ];
+    if (comments.length > 0) {
+      lines.push(``, `### 评论（${comments.length} 条）`);
+      comments.slice(0, 10).forEach(c => {
+        lines.push(`**@${(c.user as Record<string, string>)?.login}** (${String(c.created_at).slice(0, 10)})：`);
+        lines.push((c.body as string)?.slice(0, 300) + ((c.body as string)?.length > 300 ? "…" : ""));
+        lines.push("");
+      });
+      if (comments.length > 10) lines.push(`…还有 ${comments.length - 10} 条评论`);
+    }
+    return lines.join("\n");
+  } catch (e) { return diagnose4xx(e, `get_issue_details(#${issueNumber})`); }
+}
+
+async function updateIssue(
+  ctx: GithubContext,
+  issueNumber: string,
+  title?: string,
+  body?: string,
+  state?: string,
+  labels?: string,
+  assignees?: string,
+): Promise<string> {
+  try {
+    const patch: Record<string, unknown> = {};
+    if (title) patch.title = title;
+    if (body !== undefined) patch.body = body;
+    if (state) patch.state = state;
+    if (labels !== undefined) patch.labels = labels ? labels.split(",").map(l => l.trim()).filter(Boolean) : [];
+    if (assignees !== undefined) patch.assignees = assignees ? assignees.split(",").map(a => a.trim()).filter(Boolean) : [];
+    if (Object.keys(patch).length === 0) return "未提供任何更新字段，请指定 title/body/state/labels/assignees 之一。";
+    const issue = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/issues/${issueNumber}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ) as Record<string, unknown>;
+    const changes = Object.keys(patch).join("、");
+    return `✅ Issue #${issue.number} 已更新（${changes}）：[${issue.title}](${issue.html_url})`;
+  } catch (e) { return diagnose4xx(e, `update_issue(#${issueNumber})`); }
+}
+
+async function listActionsVariables(ctx: GithubContext): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/variables?per_page=30`) as { total_count: number; variables: Array<Record<string, string>> };
+    if (!data.variables?.length) return "该仓库没有配置 Actions Variables（环境变量）。";
+    const rows = data.variables.map(v =>
+      `- \`${v.name}\` = \`${v.value}\`  更新时间: ${v.updated_at?.slice(0, 10) || "-"}`
+    );
+    return `共 ${data.total_count} 个 Actions Variables：\n${rows.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_actions_variables"); }
+}
+
+async function setActionsVariable(
+  ctx: GithubContext,
+  name: string,
+  value: string,
+): Promise<string> {
+  try {
+    let exists = false;
+    try {
+      await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/variables/${name}`);
+      exists = true;
+    } catch {}
+
+    const method = exists ? "PATCH" : "POST";
+    const url = exists
+      ? `/repos/${ctx.owner}/${ctx.repo}/actions/variables/${name}`
+      : `/repos/${ctx.owner}/${ctx.repo}/actions/variables`;
+    const body = exists ? JSON.stringify({ value }) : JSON.stringify({ name, value });
+    await githubRequest(ctx, url, { method, body });
+    return `✅ Actions Variable \`${name}\` 已${exists ? "更新" : "创建"}，值：\`${value}\``;
+  } catch (e) { return diagnose4xx(e, `set_actions_variable(${name})`); }
+}
+
+async function closePR(
+  ctx: GithubContext,
+  pullNumber: string,
+  comment?: string,
+): Promise<string> {
+  try {
+    if (comment) {
+      await githubRequest(
+        ctx,
+        `/repos/${ctx.owner}/${ctx.repo}/issues/${pullNumber}/comments`,
+        { method: "POST", body: JSON.stringify({ body: comment }) },
+      );
+    }
+    await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/pulls/${pullNumber}`,
+      { method: "PATCH", body: JSON.stringify({ state: "closed" }) },
+    );
+    return `✅ PR #${pullNumber} 已关闭${comment ? "（已附带评论）" : ""}。`;
+  } catch (e) { return diagnose4xx(e, `close_pr(#${pullNumber})`); }
+}
+
+async function getCommitDiff(ctx: GithubContext, sha: string): Promise<string> {
+  try {
+    const data = await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/commits/${sha}`);
+    const commit = data.commit;
+    const files = (data.files as Array<Record<string, string | number>>) || [];
+    const header = [
+      `**提交 \`${sha.slice(0, 7)}\`**`,
+      `作者：${commit?.author?.name} <${commit?.author?.email}>`,
+      `时间：${commit?.author?.date?.slice(0, 19).replace("T", " ")}`,
+      `信息：${commit?.message?.split("\n")[0]}`,
+      `变更：+${data.stats?.additions} -${data.stats?.deletions}，共 ${files.length} 个文件`,
+      ``,
+    ].join("\n");
+    const fileLines = files.slice(0, 20).map((f: Record<string, string | number>) =>
+      `- ${f.status === "added" ? "➕" : f.status === "removed" ? "➖" : "✏️"} \`${f.filename}\`  +${f.additions} -${f.deletions}`
+    );
+    if (files.length > 20) fileLines.push(`…（共 ${files.length} 个文件，仅展示前 20 个）`);
+    return header + fileLines.join("\n");
+  } catch (e) { return diagnose4xx(e, `get_commit_diff(${sha})`); }
+}
+
+async function getPRFiles(ctx: GithubContext, pullNumber: string): Promise<string> {
+  try {
+    const files = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/pulls/${pullNumber}/files?per_page=50`,
+    ) as Array<Record<string, string | number>>;
+    if (!files?.length) return `PR #${pullNumber} 没有文件变更。`;
+    const lines = files.map(f =>
+      `- ${f.status === "added" ? "➕" : f.status === "removed" ? "➖" : "✏️"} \`${f.filename}\`  +${f.additions} -${f.deletions}`
+    );
+    const total = files.reduce((s, f) => s + (Number(f.additions) + Number(f.deletions)), 0);
+    return `PR #${pullNumber} 共变更 ${files.length} 个文件，${total} 行：\n${lines.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, `get_pr_files(#${pullNumber})`); }
+}
+
+async function compareCommits(ctx: GithubContext, base: string, head: string): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    );
+
+    const status      = data.status as string;
+    const aheadBy     = data.ahead_by  as number ?? 0;
+    const behindBy    = data.behind_by as number ?? 0;
+    const totalCommits= data.total_commits as number ?? 0;
+    const files       = (data.files as Array<Record<string, string | number | undefined>>) ?? [];
+    const commits     = (data.commits as Array<Record<string, Record<string, string>>>) ?? [];
+
+    if (status === "identical") {
+      return `\`${base}\` 与 \`${head}\` 完全相同，没有任何差异。`;
+    }
+
+    const summary = [
+      `📊 **对比结果：\`${base}\` ↔ \`${head}\`**`,
+      `状态：${status}  |  head 超前 ${aheadBy} 提交，落后 ${behindBy} 提交`,
+      `提交数：${totalCommits}  |  变更文件：${files.length} 个  |  +${data.stats?.additions ?? "?"} -${data.stats?.deletions ?? "?"}`,
+      "",
+    ].join("\n");
+
+    const commitLines = commits.slice(0, 10).map((c: any) =>
+      `  \`${String(c.sha).slice(0, 7)}\` ${String(c.commit?.message || "").split("\n")[0]}  — ${c.commit?.author?.name ?? ""}`,
+    );
+    const commitSection = totalCommits > 0
+      ? `**提交列表**（共 ${totalCommits} 条，展示前 ${commitLines.length} 条）：\n${commitLines.join("\n")}\n\n`
+      : "";
+
+    const MAX_PATCH_LINES = 40;
+    const fileDetails = files.slice(0, 30).map(f => {
+      const icon = f.status === "added" ? "➕" : f.status === "removed" ? "➖" : f.status === "renamed" ? "🔄" : "✏️";
+      const header = `${icon} \`${f.filename}\`  +${f.additions ?? 0} -${f.deletions ?? 0}  [${f.status}]`;
+      if (!f.patch) return header;
+      const patchLines = String(f.patch).split("\n");
+      const truncated = patchLines.length > MAX_PATCH_LINES;
+      const display = patchLines.slice(0, MAX_PATCH_LINES).join("\n");
+      return `${header}\n\`\`\`diff\n${display}${truncated ? `\n…（patch 共 ${patchLines.length} 行，仅展示前 ${MAX_PATCH_LINES} 行）` : ""}\n\`\`\``;
+    });
+    if (files.length > 30) fileDetails.push(`…（共 ${files.length} 个文件，仅展示前 30 个）`);
+
+    return summary + commitSection + `**文件变更详情**：\n\n` + fileDetails.join("\n\n");
+  } catch (e) { return diagnose4xx(e, `compare_commits(${base}...${head})`); }
+}
+
+async function searchAndReplace(
+  ctx: GithubContext,
+  searchPattern: string,
+  replacement: string,
+  filePattern: string | undefined,
+  commitMessage: string,
+  branch?: string,
+): Promise<string> {
+  try {
+    let searchQ = `${encodeURIComponent(searchPattern)}+repo:${ctx.owner}/${ctx.repo}`;
+    if (filePattern) searchQ += `+path:${encodeURIComponent(filePattern)}`;
+    const searchData = await githubRequest(ctx, `/search/code?q=${searchQ}&per_page=5`);
+
+    if (!searchData.items?.length) {
+      return `全仓库搜索 "${searchPattern}" 未找到匹配文件${filePattern ? `（路径过滤：${filePattern}）` : ""}，无需替换。`;
+    }
+
+    const items = searchData.items as Array<{ path: string }>;
+    const totalFound = searchData.total_count as number;
+
+    let regex: RegExp;
+    try {
+      regex = new RegExp(searchPattern, "g");
+    } catch {
+      regex = new RegExp(searchPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    }
+
+    const report: string[] = [
+      `🔄 **全仓库替换：\`${searchPattern}\` → \`${replacement}\`**`,
+      `找到约 ${totalFound} 个匹配文件，本次处理前 ${items.length} 个${filePattern ? `（路径过滤：${filePattern}）` : ""}`,
+      "",
+    ];
+
+    let totalReplacements = 0;
+
+    for (const item of items) {
+      const fetched = await fetchFileContent(ctx, item.path);
+      if (typeof fetched === "string") {
+        report.push(`❌ \`${item.path}\`：读取失败 — ${fetched}`);
+        continue;
+      }
+
+      const lines = fetched.content.split("\n");
+
+      const patches: Array<{ start_line: number; end_line: number; content: string }> = [];
+      lines.forEach((line, i) => {
+        regex.lastIndex = 0;
+        if (regex.test(line)) {
+          regex.lastIndex = 0;
+          const newLine = line.replace(regex, replacement);
+          patches.push({ start_line: i + 1, end_line: i + 1, content: newLine });
+        }
+        regex.lastIndex = 0;
+      });
+
+      if (!patches.length) {
+        report.push(`⏭️ \`${item.path}\`：Search API 匹配但逐行 grep 未命中，跳过`);
+        continue;
+      }
+
+      totalReplacements += patches.length;
+      const patchResult = await batchPatch(ctx, item.path, patches, commitMessage, branch);
+      const success = patchResult.startsWith("✅");
+      report.push(
+        `${success ? "✅" : "❌"} \`${item.path}\`：${patches.length} 处替换${success ? "成功" : "失败"}`,
+        ...(success ? [] : [`  错误：${patchResult.slice(0, 200)}`]),
+      );
+    }
+
+    const moreHint = totalFound > items.length
+      ? `\n⚠️ 仓库中还有约 ${totalFound - items.length} 个文件未处理，请再次调用 search_and_replace 继续（可配合 file_pattern 缩小范围）。`
+      : "";
+
+    report.push("", `共替换 ${totalReplacements} 处，涉及 ${items.length} 个文件。` + moreHint);
+    return report.join("\n");
+  } catch (e) { return diagnose4xx(e, "search_and_replace"); }
+}
+
+async function autoReview(
+  ctx: GithubContext,
+  commitCount = 1,
+  sha?: string,
+): Promise<string> {
+  try {
+    const commitsUrl = `/repos/${ctx.owner}/${ctx.repo}/commits?per_page=${Math.min(commitCount, 5)}`;
+    const commits = await githubRequest(ctx, sha ? `/repos/${ctx.owner}/${ctx.repo}/commits/${sha}` : commitsUrl);
+    const targetCommits = sha
+      ? [commits]
+      : (Array.isArray(commits) ? commits : [commits]);
+
+    const fileSet = new Map<string, string>();
+    for (const c of targetCommits) {
+      const detail = c.files
+        ? c
+        : await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/commits/${c.sha}`);
+      for (const f of (detail.files ?? []) as Array<Record<string, string>>) {
+        if (f.status !== "removed" && f.filename) {
+          fileSet.set(f.filename, f.patch ?? "");
+        }
+      }
+    }
+
+    if (!fileSet.size) return "未找到变更文件，无法进行代码审查。";
+
+    const report: string[] = [
+      `🔍 **自动代码审查报告**`,
+      `审查范围：最近 ${targetCommits.length} 次 commit，共 ${fileSet.size} 个变更文件`,
+      `时间：${new Date().toISOString().slice(0, 19).replace("T", " ")} UTC`,
+      "",
+    ];
+
+    let totalIssues = 0;
+
+    for (const [filePath, _patch] of fileSet) {
+      const skipExtensions = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".lock", ".sum", ".min.js", ".min.css"];
+      if (skipExtensions.some(ext => filePath.endsWith(ext))) continue;
+
+      const fetched = await fetchFileContent(ctx, filePath);
+      if (typeof fetched === "string") {
+        report.push(`📄 \`${filePath}\`\n  ⚠️ 无法读取：${fetched}\n`);
+        continue;
+      }
+
+      const lines = fetched.content.split("\n");
+      const issues: string[] = [];
+
+      const secretPatterns = [
+        /(?:api_key|apikey|secret|password|passwd|token|auth|credential)\s*[:=]\s*["']([^"']{8,})/i,
+        /(?:ghp_|sk-|AKIA)[A-Za-z0-9]{10,}/,
+        /-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/,
+      ];
+      lines.forEach((line, i) => {
+        if (secretPatterns.some(r => r.test(line)) && !line.trim().startsWith("//") && !line.trim().startsWith("#")) {
+          issues.push(`  🔴 第 ${i+1} 行 **[高危]** 疑似硬编码密钥/Token：\`${line.trim().slice(0, 80)}\``);
+        }
+      });
+
+      lines.forEach((line, i) => {
+        if (/\b(TODO|FIXME|HACK|XXX)\b/i.test(line)) {
+          issues.push(`  🟡 第 ${i+1} 行 **[待处理]** 遗留注释：\`${line.trim().slice(0, 80)}\``);
+        }
+      });
+
+      if (!/test|spec|__tests__/.test(filePath)) {
+        lines.forEach((line, i) => {
+          if (/console\.(log|debug|warn|error)\s*\(/.test(line) && !line.trim().startsWith("//")) {
+            issues.push(`  🟡 第 ${i+1} 行 **[调试残留]** console 输出：\`${line.trim().slice(0, 80)}\``);
+          }
+        });
+      }
+
+      lines.forEach((line, i) => {
+        if (line.length > 120 && !/^\s*(\/\/|#|"|')/.test(line) && !/https?:\/\//.test(line)) {
+          issues.push(`  🟠 第 ${i+1} 行 **[可读性]** 行长度 ${line.length} 字符（建议 ≤120）`);
+        }
+      });
+
+      lines.forEach((line, i) => {
+        if (/^\s*(const|let|var)\s+\w+\s*=\s*await\s+/.test(line)) {
+          const context = lines.slice(Math.max(0, i - 5), i + 1).join("\n");
+          if (!/try\s*\{/.test(context)) {
+            issues.push(`  🟡 第 ${i+1} 行 **[错误处理]** await 调用疑似缺少 try-catch：\`${line.trim().slice(0, 80)}\``);
+          }
+        }
+      });
+
+      let funcStart = -1;
+      let braceDepth = 0;
+      lines.forEach((line, i) => {
+        if (/^(async\s+)?function\s+\w+|=>\s*\{$|^\s*(async\s+)?\(/.test(line) && /\{/.test(line)) {
+          if (braceDepth === 0) funcStart = i;
+        }
+        braceDepth += (line.match(/\{/g) ?? []).length;
+        braceDepth -= (line.match(/\}/g) ?? []).length;
+        if (braceDepth <= 0 && funcStart >= 0) {
+          const funcLen = i - funcStart + 1;
+          if (funcLen > 80) {
+            issues.push(`  🟠 第 ${funcStart+1}–${i+1} 行 **[复杂度]** 函数体 ${funcLen} 行（建议拆分至 ≤80 行）`);
+          }
+          funcStart = -1;
+          braceDepth = 0;
+        }
+      });
+
+      totalIssues += issues.length;
+
+      if (issues.length) {
+        report.push(`📄 \`${filePath}\`（${fetched.totalLines} 行，发现 ${issues.length} 个问题）：`);
+        report.push(...issues.slice(0, 15));
+        if (issues.length > 15) report.push(`  …还有 ${issues.length - 15} 个问题`);
+        report.push("");
+      } else {
+        report.push(`📄 \`${filePath}\`（${fetched.totalLines} 行）：✅ 未发现常见问题`);
+      }
+    }
+
+    report.push(
+      "",
+      `---`,
+      `**审查完成**：共检查 ${fileSet.size} 个文件，发现 ${totalIssues} 个潜在问题。`,
+      totalIssues > 0
+        ? `建议优先处理 🔴 高危问题，再处理 🟡 待处理和 🟠 可读性问题。`
+        : `代码质量良好，未发现常见问题。`,
+    );
+
+    return report.join("\n");
+  } catch (e) { return diagnose4xx(e, "auto_review"); }
+}
+
+async function createRelease(
+  ctx: GithubContext,
+  tagName: string,
+  name: string,
+  body: string,
+  draft = false,
+  prerelease = false,
+  targetBranch?: string,
+): Promise<string> {
+  try {
+    const payload: Record<string, string | boolean> = {
+      tag_name: tagName,
+      name: name || tagName,
+      body: body || "",
+      draft,
+      prerelease,
+    };
+    if (targetBranch) payload.target_commitish = targetBranch;
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/releases`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+    return `✅ 已创建 Release \`${data.tag_name}\`（${draft ? "草稿" : prerelease ? "预发布" : "正式发布"}）\n链接：${data.html_url}`;
+  } catch (e) { return diagnose4xx(e, `create_release(${tagName})`); }
+}
+
+async function listReleases(ctx: GithubContext, limit = 10): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/releases?per_page=${limit}`,
+    ) as Array<Record<string, string | boolean>>;
+    if (!data?.length) return "该仓库还没有 Release。";
+    const lines = data.map(r =>
+      `- **${r.tag_name}** ${r.prerelease ? "（预发布）" : r.draft ? "（草稿）" : ""}  ${String(r.published_at || "").slice(0, 10) || "-"}\n  ${r.name || r.tag_name}`
+    );
+    return `共 ${data.length} 个 Release（最新 ${limit} 个）：\n${lines.join("\n")}`;
+  } catch (e) { return diagnose4xx(e, "list_releases"); }
+}
+
+async function getRunArtifacts(ctx: GithubContext, runId: string): Promise<string> {
+  if (!runId) return "❌ 参数缺失：run_id 为必填";
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${runId}/artifacts?per_page=30`,
+    ) as { total_count: number; artifacts: Array<{
+      id: number; name: string; size_in_bytes: number;
+      expired: boolean; expires_at: string; archive_download_url: string;
+    }> };
+
+    const { total_count, artifacts } = data;
+    if (!total_count || !artifacts?.length) {
+      return `⚠️ Run #${runId} 没有产生任何 Artifact。\n（工作流可能未配置 upload-artifact 步骤，或产物已过期）`;
+    }
+
+    const formatSize = (bytes: number) => {
+      if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${bytes} B`;
+    };
+
+    const lines = artifacts.map(a => {
+      const expiry = a.expired ? "（已过期）" : `（有效至 ${String(a.expires_at).slice(0, 10)}）`;
+      return `- **${a.name}**  ${formatSize(a.size_in_bytes)}  ${expiry}`;
+    });
+
+    return [
+      `📦 Run #${runId} 共产生 ${total_count} 个 Artifact：`,
+      ...lines,
+      ``,
+      `下载地址需使用已认证的 GitHub 账号访问 Actions 页面，或通过 GitHub CLI：`,
+      `\`gh run download ${runId}\``,
+    ].join("\n");
+  } catch (e) { return diagnose4xx(e, `get_run_artifacts(${runId})`); }
+}
+
+async function submitPRReview(
+  ctx: GithubContext,
+  pullNumber: string,
+  event: string,
+  body: string,
+): Promise<string> {
+  const allowed = ["APPROVE", "REQUEST_CHANGES", "COMMENT"];
+  const ev = event.toUpperCase();
+  if (!allowed.includes(ev)) {
+    return `❌ 无效的 review 类型 "${event}"，必须是 APPROVE / REQUEST_CHANGES / COMMENT 之一。`;
+  }
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/pulls/${pullNumber}/reviews`,
+      { method: "POST", body: JSON.stringify({ event: ev, body: body || "" }) },
+    );
+    const label = ev === "APPROVE" ? "✅ 已批准" : ev === "REQUEST_CHANGES" ? "🔄 已请求修改" : "💬 已评论";
+    return `${label} PR #${pullNumber}（Review ID: ${data.id}）${body ? `\n> ${body.slice(0, 100)}` : ""}`;
+  } catch (e) { return diagnose4xx(e, `submit_pr_review(#${pullNumber})`); }
+}
+
+async function getLatestRelease(ctx: GithubContext): Promise<string> {
+  try {
+    const data = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/releases/latest`,
+    );
+    return JSON.stringify({
+      tag_name: data.tag_name,
+      name: data.name,
+      published_at: data.published_at,
+      html_url: data.html_url,
+      body: (data.body as string)?.slice(0, 500) || "",
+    });
+  } catch (e) {
+    if (e instanceof GithubApiError && e.status === 404) {
+      return JSON.stringify({ tag_name: null, published_at: null, note: "该仓库还没有任何 Release，版本号将从 v0.1.0 开始" });
+    }
+    return diagnose4xx(e, "get_latest_release");
+  }
+}
+
+async function getMergedPRsSince(ctx: GithubContext, since: string): Promise<string> {
+  try {
+    const pulls = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/pulls?state=closed&sort=updated&direction=desc&per_page=50`,
+    ) as Array<Record<string, unknown>>;
+
+    const sinceDate = since ? new Date(since) : new Date(0);
+    const merged = pulls.filter((pr) => {
+      if (!pr.merged_at) return false;
+      return new Date(pr.merged_at as string) > sinceDate;
+    });
+
+    if (!merged.length) {
+      return JSON.stringify({ prs: [], note: `自 ${since || "仓库创建"} 以来没有已合并的 PR` });
+    }
+
+    const result = merged.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      body: (pr.body as string)?.slice(0, 300) || "",
+      labels: ((pr.labels as Array<{name: string}>) || []).map((l) => l.name),
+      merged_at: pr.merged_at,
+      user: (pr.user as {login: string})?.login || "unknown",
+    }));
+
+    return JSON.stringify({ prs: result, total: result.length });
+  } catch (e) { return diagnose4xx(e, "get_merged_prs_since"); }
+}
+
+async function previewDiff(
+  ctx: GithubContext,
+  path: string,
+  startLine: number,
+  endLine: number,
+  newContent: string,
+): Promise<string> {
+  if (!path || !startLine || !endLine || !newContent) {
+    return "参数缺失：path / start_line / end_line / content 均为必填";
+  }
+  try {
+    const fetched = await fetchFileContent(ctx, path);
+    if (typeof fetched === "string") return fetched;
+    const lines = fetched.content.split("\n");
+    const total = lines.length;
+    const s = Math.max(1, startLine);
+    const e = Math.min(total, endLine);
+
+    const before = lines.slice(s - 1, e);
+    const after  = newContent.split("\n");
+
+    const beforeStr = before.map((l, i) => `- ${String(s + i).padStart(5)} | ${l}`).join("\n");
+    const afterStr  = after .map((l, i) => `+ ${String(s + i).padStart(5)} | ${l}`).join("\n");
+
+    return [
+      `📄 **预览 diff**：\`${path}\` 第 ${s}–${e} 行（共 ${total} 行，未实际写入）`,
+      "```diff",
+      beforeStr,
+      "---",
+      afterStr,
+      "```",
+      `提示：确认无误后，使用 patch_file 工具传入相同参数执行写入。`,
+    ].join("\n");
+  } catch (e) { return diagnose4xx(e, "preview_diff"); }
+}
+
+async function undoLastCommit(ctx: GithubContext, branch?: string): Promise<string> {
+  const ref = branch || "main" || "main";
+  try {
+    const commits = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/commits?sha=${ref}&per_page=2`,
+    ) as Array<Record<string, unknown>>;
+
+    if (commits.length < 2) return "❌ 分支只有一次提交，无法撤销";
+
+    const latestSha = (commits[0] as {sha: string}).sha;
+    const prevSha   = (commits[1] as {sha: string}).sha;
+    const latestMsg = ((commits[0] as {commit: {message: string}}).commit?.message || "").split("\n")[0];
+
+    const diff = await githubRequest(
+      ctx,
+      `/repos/${ctx.owner}/${ctx.repo}/commits/${latestSha}`,
+    ) as {files: Array<{filename: string; status: string; sha: string}>};
+
+    const changedFiles = diff.files || [];
+    if (!changedFiles.length) return `✅ 最新提交 ${latestSha.slice(0,7)} 无文件变动，无需撤销`;
+
+    const results: string[] = [];
+    for (const f of changedFiles) {
+      try {
+        if (f.status === "added") {
+          await deleteFile(ctx, f.filename, `Revert: 删除 ${f.filename}（撤销 ${latestSha.slice(0,7)}）`, ref);
+          results.push(`🗑️ 已删除（撤销新增）：${f.filename}`);
+        } else if (f.status === "removed") {
+          const fetched = await fetchFileContent(ctx, f.filename, prevSha);
+          if (typeof fetched !== "string") {
+            await writeFile(ctx, f.filename, fetched.content, `Revert: 恢复 ${f.filename}（撤销 ${latestSha.slice(0,7)}）`, ref);
+            results.push(`♻️ 已恢复（撤销删除）：${f.filename}`);
+          }
+        } else {
+          const fetched = await fetchFileContent(ctx, f.filename, prevSha);
+          if (typeof fetched !== "string") {
+            await writeFile(ctx, f.filename, fetched.content, `Revert: 回滚 ${f.filename}（撤销 ${latestSha.slice(0,7)}）`, ref);
+            results.push(`⏪ 已回滚：${f.filename}`);
+          }
+        }
+      } catch (err) {
+        results.push(`⚠️ 文件处理失败：${f.filename}（${(err as Error).message || err}）`);
+      }
+    }
+
+    return [
+      `✅ **已撤销最后一次提交**`,
+      `- 分支：\`${ref}\``,
+      `- 撤销提交：\`${latestSha.slice(0,7)}\` "${latestMsg}"`,
+      `- 恢复到：\`${prevSha.slice(0,7)}\``,
+      `- 处理文件 ${changedFiles.length} 个：`,
+      ...results.map(r => `  ${r}`),
+    ].join("\n");
+  } catch (e) { return diagnose4xx(e, "undo_last_commit"); }
+}
+
+async function runLint(ctx: GithubContext, branch?: string): Promise<string> {
+  const ref = branch || "main" || "main";
+  try {
+    const wfList = await githubRequest(
+      ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/workflows`,
+    ) as {workflows: Array<{id: number; name: string; path: string; state: string}>};
+
+    const lintWf = wfList.workflows.find(w =>
+      w.state === "active" &&
+      /lint|eslint|check|quality|format/i.test(w.name + w.path)
+    );
+
+    if (!lintWf) {
+      const runs = await githubRequest(
+        ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/runs?branch=${ref}&per_page=5`,
+      ) as {workflow_runs: Array<{id: number; name: string; status: string; conclusion: string}>};
+
+      const latest = runs.workflow_runs[0];
+      if (!latest) return "⚠️ 未找到 lint 工作流，且没有最近的 CI 运行记录";
+
+      const jobs = await githubRequest(
+        ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${latest.id}/jobs`,
+      ) as {jobs: Array<{id: number; name: string; conclusion: string | null; steps: Array<{name: string; conclusion: string | null}>}>};
+
+      const lintJobs = jobs.jobs.filter(j => /lint|eslint|format|check/i.test(j.name));
+      if (!lintJobs.length) {
+        return `⚠️ 最新 CI 运行 #${latest.id} 中没有找到 lint 相关 job。\n` +
+          `全部 job：${jobs.jobs.map(j => j.name).join(", ")}\n` +
+          `建议：手动在工作流文件中添加 lint 步骤。`;
+      }
+
+      const jobResults = lintJobs.map(j =>
+        `- **${j.name}**：${j.conclusion === "success" ? "✅ 通过" : j.conclusion === "failure" ? "❌ 失败" : "⏳ " + (j.conclusion || "运行中")}`
+      ).join("\n");
+      return `📋 **Lint 结果**（来自最新 CI 运行 #${latest.id}）\n${jobResults}`;
+    }
+
+    await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${lintWf.id}/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({ ref }),
+    });
+
+    await new Promise(r => setTimeout(r, 8000));
+    for (let i = 0; i < 6; i++) {
+      const runs = await githubRequest(
+        ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${lintWf.id}/runs?branch=${ref}&per_page=1`,
+      ) as {workflow_runs: Array<{id: number; status: string; conclusion: string | null; html_url: string}>};
+      const run = runs.workflow_runs[0];
+      if (!run) { await new Promise(r => setTimeout(r, 15000)); continue; }
+      if (run.status === "completed") {
+        const icon = run.conclusion === "success" ? "✅" : "❌";
+        return `${icon} **Lint 工作流已完成**\n- 工作流：${lintWf.name}\n- 分支：\`${ref}\`\n- 结论：${run.conclusion}\n- 详情：${run.html_url}`;
+      }
+      await new Promise(r => setTimeout(r, 15000));
+    }
+    return `⏳ Lint 工作流已触发（${lintWf.name}），但 90s 内未完成，请用 get_workflow_runs 查看结果`;
+  } catch (e) { return diagnose4xx(e, "run_lint"); }
+}
+
+async function checkSecurity(ctx: GithubContext, path: string): Promise<string> {
+  const scope = path ? `path:${path}` : "";
+  const rules: [string, string, string][] = [
+    ["硬编码密钥",     "password=",    "硬编码密码，应使用环境变量或 Secret"],
+    ["硬编码 API Key", "api_key=",     "硬编码 API Key，应使用 Secret"],
+    ["eval 调用",      "eval(",        "eval() 可执行任意代码，存在代码注入风险"],
+    ["SQL 字符串拼接", "query+",       "可能存在 SQL 注入风险"],
+    ["innerHTML 赋值", "innerHTML",    "直接设置 innerHTML 存在 XSS 风险"],
+    ["TODO/FIXME",     "TODO security","标记了待修复的安全相关 TODO"],
+    ["私钥泄露",       "BEGIN PRIVATE KEY", "疑似私钥内容直接写入代码"],
+  ];
+
+  const findings: string[] = [];
+  let totalHits = 0;
+
+  for (const [name, keyword, desc] of rules) {
+    try {
+      const query = `${keyword} repo:${ctx.owner}/${ctx.repo} ${scope}`;
+      const res = await githubRequest(
+        ctx, `/search/code?q=${encodeURIComponent(query)}&per_page=5`,
+      ) as {total_count: number; items: Array<{path: string; html_url: string}>};
+
+      if (res.total_count > 0) {
+        totalHits += res.total_count;
+        const fileList = res.items.map(i => `  - \`${i.path}\``).join("\n");
+        findings.push(`⚠️ **${name}**（共 ${res.total_count} 处）\n  说明：${desc}\n${fileList}`);
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  if (!findings.length) {
+    return `✅ **安全扫描通过**\n扫描范围：${path || "整个仓库"}\n未发现常见安全隐患模式。\n⚠️ 注意：此为启发式扫描，不能替代专业安全审计工具。`;
+  }
+
+  return [
+    `🔍 **安全扫描报告**`,
+    `扫描范围：${path || "整个仓库"} | 发现问题：${findings.length} 类 ${totalHits} 处`,
+    "",
+    findings.join("\n\n"),
+    "",
+    "⚠️ 此为启发式扫描，存在误报可能，请人工核实后处理。",
+  ].join("\n");
+}
+
+function inferTemperature(
+  userMessage: string,
+  isAutoMode: boolean,
+  userOverride?: number,
+): number {
+  if (userOverride !== undefined) return userOverride;
+  if (isAutoMode) return 0.1;
+  const analyticalPattern = /分析|review|评审|建议|报告|总结|摘要|解释|explain|debug|排查|诊断/i;
+  if (analyticalPattern.test(userMessage)) return 0.3;
+  return 0.7;
+}
+
+function buildSystemPrompt(targetBranch?: string, isAutoMode = false, modelType = "deepseek", modelConfig?: { model?: string }): string {
+  const branchNote = targetBranch
+    ? `**当前目标分支：\`${targetBranch}\`**（所有写入操作默认提交到此分支，除非用户明确指定其他分支）`
+    : "（未指定分支，写入时使用仓库默认分支）";
+
+  const langNote = "**重要语言要求：无论内部推理还是最终回复，请全程使用中文，严禁切换为英语或其他语言。**";
+
+  if (supportsFunctionCalling(modelType, modelConfig?.model)) {
+    if (!isAutoMode) {
+      return `你是 GitHub 仓库开发助手，帮助用户管理仓库、查询信息、执行操作。
+${langNote}
+${branchNote}
+
+## 核心规则
+1. 查询类问题直接调用工具给出简洁回答，不输出 PLAN。
+2. 单一操作（创建文件、合并PR、关闭Issue 等）直接执行，完成后告知结果。
+3. 复杂任务（多文件修改、新功能开发、重构）先提方案，等用户确认后再执行。
+4. 不确定意图时可以礼貌询问，而不是盲目执行。
+
+## 工具自我改进
+执行过程中遇到工具缺陷或限制时（信息不完整、参数不够用、无法处理某种场景），调用 report_tool_issue 上报。
+有具体修复方案时继续调用 propose_tool_fix 提交改进代码。上报不会中断任务。
+
+## 新功能/重构请求必须走的四阶段流程
+**阶段 1**：先用工具探索项目（file_tree → batch_read 关键文件 → grep_in_repo 定位相关代码）
+- 大文件（>500行）改造：优先 get_code_outline 建立骨架 → read_function 精准读取目标函数
+**阶段 2**：输出方案（格式见下方），等用户确认
+**阶段 3**：用户确认后，输出 PLAN 并开始执行
+**阶段 4**：完成后输出 TASK_DONE
+
+方案格式：
+## 📋 需求理解
+[需求核心、受影响代码、约束和风险]
+## 💡 方案选项
+### 方案 A — [方案名]
+- **思路**：[一句话]
+- **优点/缺点**：[关键点]
+- **预计改动**：[小/中/大]
+**我的建议**：[推荐哪个方案及理由]
+
+## 回复规范
+- 简洁：1-3 句话说明结果，不展开不必要细节
+- 遇错：告知原因和建议，询问用户如何处理
+- 语气：像熟悉 GitHub 的开发者朋友，自然简洁
+- 代码/命令：必要时用行内代码，文件名不需要全部加反引号`;
+    }
+
+    return `你是 GitHub 仓库全流程开发助手。
+${langNote}
+${branchNote}
+
+## 核心规则
+1. **首轮必须输出任务计划**：收到任务后，在回复开头输出 PLAN，然后立即开始执行第一步。
+   格式（合法 JSON，不加 markdown 代码块）：
+   PLAN:{"steps":[{"id":"1","title":"步骤名（≤8字）","desc":"一句话说明"},{"id":"2","title":"...","desc":"..."}]}
+2. **步骤标记**：切换到新步骤时输出 STEP:步骤ID（仅切换步骤时，不是每次工具调用都要输出）。
+3. **自主执行**：禁止询问用户是否继续，禁止提前结束，工具报错时分析原因后继续。
+4. **任务完成**：全部步骤完成后，在回复最开头输出 TASK_DONE，然后给一句简洁的完成总结。
+
+## 工具自我改进（注意：执行途中才上报，不可作为第一个工具调用）
+在执行过程中，**首先输出 PLAN 并开始执行任务步骤**；当遇到工具缺陷时（信息不完整、参数不够用、无法处理某种场景），再调用 report_tool_issue 上报。
+
+## 开发需求分析工作流（新功能/重构必须遵循）
+触发条件：用户说"想新增"、"帮我实现"、"重构"等涉及新功能或较大改动时：
+1. file_tree → batch_read 关键配置 → grep_in_repo 定位相关代码（探索阶段）
+   - 目标文件 > 500 行时：优先 get_code_outline 建立骨架 → read_function 精准读取目标函数
+2. 输出方案选项等用户确认（唯一的暂停点）
+3. 用户确认后立即输出 PLAN 并执行（不要再次询问）
+
+排查构建/部署失败时，必须自主完成全链路修复：
+get_workflow_runs → get_run_jobs → get_job_logs → 分析 → patch/write 修复 → rerun → check_run_status
+
+## 回复规范
+- 用 1-3 句话直接说明结果，不铺垫废话
+- 不使用 ## 二级标题；层次感用换行和项目符号体现
+- 错误时直接说明原因和建议`;
+  }
+
+  if (!isAutoMode) {
+    return `你是 GitHub 仓库开发助手，帮助用户管理仓库、查询信息、执行简单操作。
+${langNote}
+${branchNote}
+
+==============================
+⚠️ 核心规则（严格遵守）
+==============================
+1. **直接回答**：查询类问题（README、文件内容、Issue 列表、PR 状态等）直接调用工具并给出简洁回答，不输出 PLAN。
+2. **单步骤操作**：明确的单一操作（创建文件、合并PR、关闭Issue 等）直接执行，完成后告知结果。
+3. **复杂任务先提方案**：涉及多个文件修改、新功能开发、重构等复杂任务时，先分析并提出方案选项，等用户确认后再执行。
+4. **允许询问**：不确定用户意图时，可以礼貌地提问澄清，而不是盲目执行。
+5. **工具格式**：每轮只调用一个工具，工具 JSON 单独成行，**绝对不加 markdown 代码围栏（反引号）**。
+6. **禁止伪造**：不要用文字模仿工具执行过程，只输出 JSON。
+7. **格式强制**：工具调用 JSON 中的每个键值必须是字符串，不允许嵌套对象作为值（除 inputs 字段外）。
+
+==============================
+对话行为准则
+==============================
+- **简洁回答**：用 1-3 句话说明操作结果或给出信息，不展开不必要的细节
+- **遇到错误**：告知原因并给出建议，询问用户如何处理，而不是自行决策
+- **不强制 PLAN**：除非用户明确要求"帮我规划任务"或任务确实需要 4+ 步骤，否则不输出 PLAN 格式
+- **工具按需调用**：只调用回答问题所必需的工具，不要过度探索
+- **语气**：像一位熟悉 GitHub 的开发者朋友，自然、简洁，避免机器腔`;
+  }
+
+  return `你是 GitHub 仓库全流程开发助手。
+${langNote}
+${branchNote}
+
+==============================
+⚠️ 核心规则（严格遵守）
+==============================
+1. **任务规划（首轮必须）**：收到用户任务后，第一件事是在回复开头输出一行任务计划，然后立即执行第一步。
+   格式（必须是合法 JSON，不加 markdown 代码块）：
+   PLAN:{"steps":[{"id":"1","title":"步骤名（≤8字）","desc":"一句话说明"},{"id":"2","title":"...","desc":"..."}]}
+
+2. **步骤标记**：在开始一个新步骤时，在工具调用 JSON 前一行输出 STEP:步骤ID（仅在切换步骤时输出，不是每次工具调用都要输出）。
+   示例：
+   PLAN:{"steps":[{"id":"1","title":"探索结构","desc":"获取项目文件树"},{"id":"2","title":"修复代码","desc":"定位并修改问题"}]}
+   STEP:1
+   {"tool":"file_tree","path":"","depth":"3"}
+
+3. **ReAct 模式**：每轮只调用一个工具，工具 JSON 单独成行，**绝对不加 markdown 代码围栏（反引号）**。
+4. **禁止伪造**：不要用文字模仿工具执行过程，只输出 JSON。
+5. **自主执行**：禁止询问用户是否继续，禁止提前结束，工具报错时自行修正后继续。
+6. **格式强制**：工具调用 JSON 中的每个键值必须是字符串，不允许嵌套对象作为值（除 inputs 字段外）。正确示例：
+   {"tool":"patch_file","path":"src/a.ts","start_line":"10","end_line":"12","content":"新内容","message":"fix: xxx","branch":"main"}
+   错误示例（值嵌套对象）：{"tool":"patch_file","range":{"start":10}}
+
+==============================
+工具清单（每次只调用一个，JSON 单独成行）
+==============================
+
+📁 **文件操作**
+1. 列出目录：{"tool":"list_files","path":"src/"}
+2. 获取完整文件树（推荐用于了解项目结构）：{"tool":"file_tree","path":"","depth":"3"}
+3. 读取文件（带行号）：{"tool":"read_file","path":".github/workflows/deploy.yml"}
+4. 分段读取大文件（每次最多 500 行，返回中自动附带下一段调用示例）：
+   {"tool":"read_file","path":"src/App.tsx","start_line":"1","end_line":"500"}
+4b. 读取前先查文件信息（获取总行数、大小，制定分段计划）：{"tool":"get_file_info","path":"src/App.tsx"}
+5. 文件内搜索（grep，支持大文件全文搜索）：{"tool":"grep_in_file","path":"src/main.kt","pattern":"TODO","case_sensitive":"false"}
+   搜索结果超 100 条时，返回中附带翻页调用示例，继续查看：{"tool":"grep_in_file","path":"src/main.kt","pattern":"TODO","offset":"100"}
+6. 批量读取多个文件（逗号分隔，最多5个，每文件前 300 行，自动支持大文件）：{"tool":"batch_read","paths":"src/a.ts,src/b.ts,src/c.ts"}
+7. 全仓库搜索关键词（返回文件路径+精确行号）：{"tool":"grep_in_repo","query":"TODO","file_pattern":"src/"}
+   搜索结果超 8 个文件时附带翻页示例，继续查看：{"tool":"grep_in_repo","query":"TODO","offset":"8"}
+8. 全仓库一键搜索替换（自动找到所有匹配行，按文件 batch_patch 修改，合并 commit）：
+   {"tool":"search_and_replace","pattern":"oldApiUrl","replacement":"newApiUrl","file_pattern":"src/","message":"refactor: 替换 API 地址","branch":"main"}
+9. 对比两个 commit / 分支 / tag 的所有文件变更（含 diff patch 片段）：
+   {"tool":"compare_commits","base":"main","head":"feat/new-feature"}
+   {"tool":"compare_commits","base":"v1.0.0","head":"v1.1.0"}
+10. 自动代码审查（检查最近 N 次 commit 变更文件的质量问题）：
+    {"tool":"auto_review","commit_count":"1"}
+    {"tool":"auto_review","sha":"abc1234","commit_count":"3"}
+11. 搜索代码（GitHub Search API，仅返回文件路径，无行号）：{"tool":"search_code","query":"TODO"}
+12. 批量局部修改（同一文件多处非连续行，合并为单个 commit）：
+   {"tool":"batch_patch","path":"src/App.tsx","patches":"[{\"start_line\":10,\"end_line\":12,\"content\":\"新内容A\"},{\"start_line\":50,\"end_line\":55,\"content\":\"新内容B\"}]","message":"fix: 同时修复两处问题","branch":"main"}
+13. 局部修改（推荐，仅替换指定行）：
+   {"tool":"patch_file","path":"src/App.tsx","start_line":"10","end_line":"15","content":"新内容","message":"fix: 修复某处","branch":"${targetBranch || "main"}"}
+14. 全量写入（新建文件或大幅重写时用）：
+   {"tool":"write_file","path":".github/workflows/deploy.yml","content":"...","message":"ci: 更新部署工作流","branch":"${targetBranch || "main"}"}
+15. 删除文件：{"tool":"delete_file","path":"src/old.ts","message":"chore: 删除废弃文件","branch":"${targetBranch || "main"}"}
+16. 预览修改效果（不实际写入，修改前确认内容）：
+    {"tool":"preview_diff","path":"src/App.tsx","start_line":"10","end_line":"15","content":"新内容"}
+17. 撤销最后一次提交（逐文件恢复到上一版本，生成新的 Revert commit）：
+    {"tool":"undo_last_commit","branch":"main"}
+
+🔀 **分支 & PR**
+18. 列出分支：{"tool":"list_branches"}
+19. 新建分支：{"tool":"create_branch","branch":"fix/bug-123","from":"${targetBranch || "main"}"}
+20. 获取提交历史：{"tool":"list_commits","path":""}
+21. 列出 PR：{"tool":"list_pull_requests","state":"open"}
+22. 创建 PR：{"tool":"create_pr","title":"fix: 修复构建失败","head":"fix/build","base":"main","body":"描述"}
+    ⚠️ head/base 填写**分支名**（不加 owner: 前缀）；title 不能为空；head 与 base 必须有差异提交，否则 API 拒绝
+23. 合并 PR：{"tool":"merge_pull_request","pull_number":"42","merge_method":"squash"}
+
+🐛 **Issue 管理**
+24. 列出 Issues：{"tool":"list_issues","state":"open"}
+25. 搜索 Issues（按关键词、标签、作者）：
+    {"tool":"search_issues","query":"登录失败","state":"open","labels":"bug","assignee":"","limit":"20"}
+    （state 可选：open/closed/all；labels 逗号分隔；不填则不过滤）
+26. 查看 Issue 详情（含正文+评论）：{"tool":"get_issue_details","issue_number":"12"}
+27. 创建 Issue：{"tool":"create_issue","title":"构建失败","body":"描述","labels":"bug,ci"}
+28. 更新 Issue（标题/正文/状态/标签/负责人，仅填需要改的字段）：
+    {"tool":"update_issue","issue_number":"12","state":"closed","labels":"bug,resolved","assignees":"alice,bob"}
+29. 关闭 Issue（可附带结论评论）：{"tool":"close_issue","issue_number":"12","comment":"已在 PR #33 修复，关闭此 Issue"}
+30. 在 Issue 或 PR 下添加评论：{"tool":"add_comment","issue_number":"12","body":"评论内容"}
+
+⚙️ **工作流 & 部署**
+31. 列出所有工作流：{"tool":"list_workflows"}
+32. 查看工作流最近运行（仅看历史，不等待）：{"tool":"get_workflow_runs","workflow_id":"deploy.yml","limit":"5"}
+    （workflow_id 可以是文件名如 deploy.yml 或数字 ID；不填则查全部运行）
+33. 触发工作流 → 自动等待完成（两步标准流程）：
+    步骤一 触发：{"tool":"trigger_workflow","workflow_id":"deploy.yml","ref":"main"}
+    步骤二 等待（trigger 返回的 run_id 直接填入，无需再查）：
+      普通部署   ：{"tool":"check_run_status","run_id":"<run_id>","workflow_type":"normal"}
+      构建 Android APK（约 3 分钟）：{"tool":"check_run_status","run_id":"<run_id>","workflow_type":"build_apk"}
+      快速脚本（<1 分钟）：{"tool":"check_run_status","run_id":"<run_id>","workflow_type":"fast"}
+    ⚠️ build_apk 若第一次返回"仍在运行"，**必须**再次调用 check_run_status（相同参数），不要改用 get_workflow_runs 轮询
+34. 等待已知 run_id（push 自动触发的运行）：
+    {"tool":"check_run_status","run_id":"12345678","workflow_type":"normal"}
+35. 查看某次运行的 Jobs 及步骤（check_run_status 失败时才需要）：{"tool":"get_run_jobs","run_id":"12345678"}
+36. 下载 Job 日志（智能摘要，首次调用不传范围）：{"tool":"get_job_logs","job_id":"87654321"}
+    ⚡ check_run_status 失败时会自动附带 job_id，可直接用。
+    📖 日志较大时，摘要会告知总行数；如需完整日志，按行分段读取（每次 800 行）：
+    {"tool":"get_job_logs","job_id":"87654321","start_line":"1","end_line":"800"}
+    {"tool":"get_job_logs","job_id":"87654321","start_line":"801","end_line":"1600"}
+    …依此类推直到"已到达日志末尾"提示出现。
+37. 取消运行中的工作流：{"tool":"cancel_workflow_run","run_id":"12345678"}
+38. 重新运行失败的工作流：{"tool":"rerun_workflow_run","run_id":"12345678","failed_jobs_only":"true"}
+39. 查看 Actions Secrets 名称：{"tool":"list_actions_secrets"}
+40. 查看 Actions Variables（明文环境变量）：{"tool":"list_actions_variables"}
+41. 创建或更新 Actions Variable：{"tool":"set_actions_variable","name":"APP_ENV","value":"production"}
+    ⚠️ Secrets（加密）只能通过 GitHub 网页设置；Variables（明文）可通过此工具读写
+42. 向用户请求上传文件（缺少图片/图标/证书等资源时）：
+    {"tool":"request_file","filename":"app-icon.png","description":"需要 512×512 的应用图标 PNG 文件","mime_types":"image/png,image/jpeg"}
+43. 触发构建并全程自动监控（自动轮询，失败时返回日志供分析修复，循环直到成功）：
+    {"tool":"trigger_and_monitor_build","workflow_id":"build.yml","ref":"main","max_fix_attempts":"3"}
+44. 触发并运行 Lint 检查（找到 lint 工作流自动触发并等待结果）：
+    {"tool":"run_lint","branch":"main"}
+45. 安全扫描（扫描硬编码密钥/eval/SQL注入/XSS等常见安全隐患）：
+    {"tool":"check_security","path":"src/"}
+46. 查询某次运行产生的 Artifacts（构建产物列表、大小、有效期）：
+    {"tool":"get_run_artifacts","run_id":"12345678"}
+
+🔀 **PR 高级操作**
+46. 关闭 PR（可附带评论）：{"tool":"close_pr","pull_number":"42","comment":"改用 PR #45，关闭此 PR"}
+47. 查看 PR 的文件变更列表：{"tool":"get_pr_files","pull_number":"42"}
+48. 提交 PR 代码审查（APPROVE/REQUEST_CHANGES/COMMENT）：
+    {"tool":"submit_pr_review","pull_number":"42","event":"APPROVE","body":"LGTM，代码清晰"}
+
+📊 **仓库分析**
+49. 查看仓库基本信息（语言/Stars/默认分支/Topics 等）：{"tool":"get_repo_info"}
+50. 查看某次提交的 diff（文件变更统计）：{"tool":"get_commit_diff","sha":"abc1234"}
+
+🏷️ **Release 管理**
+51. 列出最近 Releases：{"tool":"list_releases","limit":"10"}
+52. 创建新 Release（tag + 标题 + 发布说明）：
+    {"tool":"create_release","tag_name":"v1.2.0","name":"v1.2.0 - 新增 XX 功能","body":"## 更新内容\n- 修复 xxx\n- 新增 yyy","draft":"false","prerelease":"false","branch":"main"}
+
+🚀 **Release 自动化**
+53. 获取最新 Release 信息（tag、名称、发布时间）：{"tool":"get_latest_release"}
+54. 获取指定时间点之后已合并的 PR 列表（含 labels、body、作者）：
+    {"tool":"get_merged_prs_since","since":"2024-01-15T10:30:00Z"}
+
+==============================
+开发需求分析与方案确认工作流（新功能/重构请求必须遵循）
+==============================
+
+**触发条件**：用户描述"想新增某功能"、"帮我实现/开发"、"重构/改造"、"加一个…"等，涉及**新功能开发或较大改动**时，必须走以下四阶段流程，而不是直接开始执行。
+
+> ⚠️ **例外**：Bug 修复、单行/单文件小改动、CI 排查等可直接执行，不需要方案确认阶段。
+
+---
+
+**阶段 1 — 深度分析（先探索再提方案，禁止盲猜）**
+1. file_tree（depth:3）快速了解项目全貌
+2. batch_read 关键配置 + 入口文件（如 README、package.json、路由文件）
+3. grep_in_repo / grep_in_file 定位与需求相关的现有代码
+4. **总结理解**：明确需求背景、技术边界、潜在依赖、可能的风险点
+
+**阶段 2 — 输出设计方案供用户选择**
+完成探索后，**必须**以如下固定格式输出方案（不要直接写代码，不要直接执行）：
+
+\`\`\`
+## 📋 需求理解
+
+[2-4 句话说明：理解到的需求核心是什么，现有代码中哪些部分会受影响，有哪些约束或风险]
+
+## 💡 方案选项
+
+### 方案 A — [简短方案名]
+- **思路**：[一句话描述实现路径]
+- **优点**：[最关键的 1-2 个优势]
+- **风险/缺点**：[最需要注意的问题]
+- **预计改动**：[小（<50行） / 中（50-200行） / 大（>200行）]
+
+### 方案 B — [简短方案名]
+（同上格式）
+
+### 方案 C — [简短方案名]（如有第三种思路）
+（同上格式）
+
+---
+**我的建议**：[推荐哪个方案，以及 1-2 句理由]
+
+请确认选用哪个方案（或告诉我你的调整意见），我会立即制定详细开发计划并开始执行。
+\`\`\`
+
+**方案数量原则**：
+- 需求明确、只有一种合理实现 → 提 1 个方案 + 说明为何如此选择
+- 存在明显的权衡取舍（如侵入性 vs 非侵入性、性能 vs 可读性）→ 提 2-3 个方案
+- 不要为了"看起来全面"强行凑 3 个方案，少而精比多而滥好
+
+**阶段 3 — 等待用户确认（唯一的中断点）**
+- 输出方案后，**停止**，等待用户回复
+- 这是整个任务生命周期中**唯一允许主动暂停**等待用户输入的时机
+- 如果用户直接说"开始"/"按你推荐的做"/"方案A"等，视为对推荐方案的确认，**立即进入阶段 4**
+- 如果用户提出修改意见，融合意见后直接进入阶段 4，不要再次输出完整方案
+
+**阶段 4 — 制定计划并自主执行**
+用户确认后，**立即**输出 PLAN 并开始执行（不要再次询问）：
+1. 输出 \`PLAN:{"steps":[...]}\` 包含 4-8 个步骤（步骤粒度适中，不要过细或过粗）
+2. 按步骤顺序自主执行，切换步骤时输出 \`STEP:id\`
+3. 全部步骤完成后，**必须**在回复的最开头输出 \`TASK_DONE\`，然后紧跟简洁的完成总结。例如：\`TASK_DONE\n已完成 xxx，触发了构建，请等待结果。\`
+
+---
+
+**判断是否需要方案确认的快速决策**：
+
+| 需求类型 | 是否需要方案确认 |
+|---|---|
+| 新功能、新模块、新页面 | ✅ 需要 |
+| 重构、架构调整 | ✅ 需要 |
+| 功能增强（涉及多个文件） | ✅ 需要 |
+| Bug 修复 | ❌ 直接执行 |
+| 单文件小改动 | ❌ 直接执行 |
+| CI/CD 配置调整 | ❌ 直接执行 |
+| 用户已经描述了具体实现方案 | ❌ 直接按用户方案执行 |
+
+==============================
+全流程开发标准工作流
+==============================
+
+🔍 **探索未知项目（首选方案）**：
+  1. file_tree 一次性获取完整项目结构（depth:3）
+  2. batch_read 同时读取 README + 关键配置文件
+  3. grep_in_file 在特定文件中定位关键代码
+
+🚀 **部署新功能**：
+  1. create_branch 创建功能分支
+  2. file_tree / read_file / batch_read 理解代码结构
+  3. grep_in_file 定位需要修改的具体行号
+  4. patch_file 精确修改代码（优先于 write_file）
+  5. create_pr 提交 PR → merge_pull_request 合并
+  6. **触发部署前必须检查**：read_file 读取 workflow 文件，确认 on: 块包含 \`workflow_dispatch:\`；
+     若缺少，先用 patch_file 添加，提交后再执行 trigger_workflow
+  7. trigger_workflow 触发部署 → **立即**用 check_run_status 等待结果（workflow_type 根据工作流选择）
+     - 普通部署：workflow_type="normal"（约 1 分钟）
+     - 构建 APK：workflow_type="build_apk"（约 3 分钟，第一次若超时需再调一次）
+
+🔍 **排查构建/部署失败（自动修复工作流）**：
+  遇到用户提到"构建失败"、"部署报错"、"CI 挂了"等情况，**必须**按此流程自主完成全链路修复，无需询问用户：
+  1. get_workflow_runs 找到最新失败的运行 ID（状态为 failure/cancelled）
+  2. get_run_jobs 查看哪个 Job/步骤失败，获取 job_id
+  3. get_job_logs 下载该 Job 的日志（不传范围，获取智能摘要 + 总行数）
+     - 若日志较大且错误信息不足，按 800 行分段读取直到找到根因：
+       {"tool":"get_job_logs","job_id":"<id>","start_line":"1","end_line":"800"} …
+  4. 根据日志内容定位问题根源：
+     - 依赖问题 → 检查 package.json / pom.xml / go.mod 等
+     - 代码错误 → grep_in_file / search_code 定位具体行
+     - 配置错误 → read_file 读取 workflow 文件或配置文件
+     - 缺少 Secret → list_actions_secrets 检查，提示用户手动添加
+     - 缺少资源文件（图片/图标等）→ 发出 request_file 工具调用
+  5. patch_file / write_file 修复问题
+  6. rerun_workflow_run 重新触发 → **立即**调用 check_run_status 等待结果（不要轮询 get_workflow_runs）
+  7. 如果依然失败，重复步骤 3-6 直到修复成功
+  8. **所有自动修复尝试耗尽后仍失败时，必须输出如下格式的修复清单**，帮助用户手动处理：
+
+  ---
+  ## 🔧 修复清单（手动操作）
+
+  > 自动修复未能解决全部问题，以下是根据日志分析整理的可操作步骤：
+
+  ### ❌ 问题 1：[简短问题标题]
+  - **原因**：[具体错误原因，引用日志关键行]
+  - **文件**：\`path/to/file.ts\`（第 N 行）
+  - [ ] [可执行操作 1，动词开头，如"将 xxx 修改为 yyy"]
+  - [ ] [可执行操作 2]
+
+  ### ❌ 问题 2：[简短问题标题]
+  - **原因**：[...]
+  - [ ] [...]
+
+  ### ⚠️ 注意事项
+  - [需要手动配置的 Secret 名称及作用]
+  - [其他无法自动处理的前置条件]
+
+  **修复完成后**，回复"重新构建"即可让我自动触发 CI 并验证结果。
+  ---
+
+✅ **构建成功后验证产物（必须执行）**：
+  当任何构建任务成功后（trigger_and_monitor_build 或 check_run_status 返回成功），**必须**按以下顺序完成收尾工作，不得省略：
+
+  **步骤 1 — 确认 Artifacts**
+  - trigger_and_monitor_build 已在返回值中自动附带 Artifacts 列表，直接读取即可。
+  - 若使用 check_run_status 触发构建成功，需额外调用：
+    {"tool":"get_run_artifacts","run_id":"<成功的 run_id>"}
+  - 根据结果判断：
+    - 有产物 → 记录名称和大小，后续在任务总结中展示
+    - 无产物（工作流未配置 upload-artifact）→ 告知用户构建成功但无 Artifact，提示可在 Actions 页面查看日志
+    - 产物已过期 → 告知用户需重新触发构建
+
+  **步骤 2 — 确认 Releases（若工作流会创建 Release）**
+  - 若本次构建工作流包含发布步骤（如 gh release create、actions/create-release 等），调用：
+    {"tool":"get_latest_release"}
+  - 对比 Release 的 published_at 与本次构建时间，确认是否为本次产生的新 Release。
+  - 有新 Release → 在任务总结中展示版本号和链接
+  - 无 Release → 任务总结中注明"本次工作流未创建 Release"
+
+  **步骤 3 — 生成开发任务总结（必须输出，固定格式）**
+  完成上述验证后，**必须**输出以下格式的任务总结，然后结束任务：
+
+  ---
+  ## 🎉 任务完成
+
+  **构建结果**：成功 ✅  **Run ID**：<run_id>  **分支**：\`<分支名>\`
+
+  **构建产物**：
+  - <artifact 名称>（<大小>，有效至 <日期>）
+  （若无 Artifact：本次工作流未上传构建产物）
+
+  **Release**：<版本号> — <链接>
+  （若无 Release：本次工作流未创建 Release）
+
+  **任务概要**：
+  <用 2-4 句话描述本次任务：修改了哪些文件、触发了哪个工作流、构建产物的用途>
+
+  ---
+
+  ⚠️ **工作流编写规范**：创建或修改构建工作流时，必须包含 \`actions/upload-artifact\` 步骤，
+  确保每次构建都会生成可下载的产物。示例：
+  \`\`\`yaml
+  - name: 上传构建产物
+    uses: actions/upload-artifact@v4
+    with:
+      name: app-release
+      path: app/build/outputs/apk/release/*.apk
+  \`\`\`
+
+🔧 **修改工作流文件**：
+  1. list_workflows 找到 workflow_id 及路径
+  2. read_file 读取 .github/workflows/xxx.yml
+  3. patch_file 精确修改触发条件/环境变量/步骤
+     **⚠️ 若需要用 trigger_workflow 触发，必须确保 on: 块含有 \`workflow_dispatch:\`**
+     若缺少，在此步同时添加：\`workflow_dispatch: {}\` 或带 inputs 的完整定义
+  4. trigger_workflow 验证新工作流（仅在确认 workflow_dispatch 已存在后调用）
+
+📦 **缺失资源文件处理**：
+  当项目中缺少图片、图标、证书等二进制资源时：
+  1. 通过 file_tree / grep_in_file 确认资源路径及名称
+  2. 调用 request_file 工具，说明需要的文件名和用途
+  3. 等待用户在聊天框上传后，用 write_file 写入到正确路径
+
+🐛 **Issue 全生命周期管理工作流**：
+  当用户说"帮我整理 Issue"、"查看所有 bug"、"关闭已解决的 Issue"等，按此流程处理：
+
+  **查找阶段**
+  - 关键词搜索：{"tool":"search_issues","query":"登录 崩溃","state":"open","labels":"bug"}
+  - 查看详情（含评论）：{"tool":"get_issue_details","issue_number":"12"}
+  - 全量列表：{"tool":"list_issues","state":"open"}
+
+  **更新阶段**（仅填需要修改的字段）
+  - 打标签 + 指派：{"tool":"update_issue","issue_number":"12","labels":"bug,priority-high","assignees":"alice"}
+  - 更新正文：{"tool":"update_issue","issue_number":"12","body":"更新后的描述"}
+  - 重新打开：{"tool":"update_issue","issue_number":"12","state":"open"}
+
+  **关闭阶段**
+  - 附带结论关闭：{"tool":"close_issue","issue_number":"12","comment":"已在 PR #33 中修复，关闭此 Issue"}
+  - 添加跟进评论：{"tool":"add_comment","issue_number":"12","body":"已确认修复，请测试验证"}
+
+  **关键规则**：
+  - 批量处理时逐个处理，每次操作后确认返回结果再继续
+  - 关闭 Issue 前必须先查看详情，确认关闭原因准确
+  - 创建 Issue 时 labels 尽量填写（bug/enhancement/documentation 等）
+
+🏷️ **Release 自动化工作流（自动生成 changelog 并发版）**：
+  当用户说"帮我发版"、"合并 PR 后创建 Release"、"生成 changelog 并发布"等，**必须**按此完整流程执行：
+
+  **步骤 1 — 获取版本基线**
+  {"tool":"get_latest_release"}
+  - 若返回 tag_name 为 null → 说明没有历史 Release，版本号从 **v0.1.0** 开始，since 设为空字符串 ""
+  - 若有历史 Release → 记录 tag_name 和 published_at
+
+  **步骤 2 — 获取自上次发版以来已合并的 PR**
+  {"tool":"get_merged_prs_since","since":"<上一步的 published_at，无则为空字符串>"}
+  - 返回 JSON 数组，每项含：number、title、body、labels、merged_at、user
+
+  **步骤 3 — 推断下一个版本号（semver 规则）**
+  按以下优先级判断（从高到低，匹配到即停）：
+  - 任意 PR 的 labels 含 \`breaking\` 或 \`major\` → **主版本 +1**，次版本和修订版归零
+  - 任意 PR 的 labels 含 \`feature\`/\`feat\`/\`enhancement\`，或标题以 \`feat:\` 开头 → **次版本 +1**，修订版归零
+  - 其余情况（fix/chore/docs/ci/refactor/test 等）→ **修订版 +1**
+  - 无上一个 Release → 固定使用 **v0.1.0**，不再推断
+
+  **步骤 4 — 生成结构化 changelog**
+  将 PR 按类型分组，生成如下 Markdown 格式（保留该格式，不自行发挥）：
+
+  \`\`\`markdown
+  ## What's Changed
+
+  ### 🚀 新功能
+  - feat: <PR标题> (#<编号> by @<用户名>)
+
+  ### 🐛 Bug 修复
+  - fix: <PR标题> (#<编号> by @<用户名>)
+
+  ### 🔧 其他改动
+  - chore/docs/ci/refactor: <PR标题> (#<编号>)
+
+  **Full Changelog**: https://github.com/<owner>/<repo>/compare/<上一个tag>...<新tag>
+  \`\`\`
+
+  分类规则：
+  - labels 含 feature/feat/enhancement 或标题以 feat: 开头 → 🚀 新功能
+  - labels 含 bug/fix 或标题以 fix: 开头 → 🐛 Bug 修复
+  - 其余（chore/docs/ci/refactor/test 等）→ 🔧 其他改动
+  - 若某类别为空，省略该区块
+
+  **步骤 5 — 创建 Release**
+  {"tool":"create_release","tag_name":"v<新版本号>","name":"v<新版本号>","body":"<步骤4生成的changelog>","draft":"false","prerelease":"false"}
+
+  ⚠️ **注意事项**：
+  - 若 get_merged_prs_since 返回 prs 为空数组，主动告知用户"自上次发版以来暂无已合并 PR"，询问是否仍要继续发版（此时 changelog 正文可写"暂无变更"）
+  - tag_name 必须以 \`v\` 开头，格式 vX.Y.Z
+  - 不要在 create_release 前询问用户确认，直接执行
+
+==============================
+大文件完整读取策略
+==============================
+
+**🆕 大文件高效操作（推荐工作流）**：
+
+> 核心原则：**先建立全局认知，再精准读取目标，不要逐段盲读整个文件**
+
+**新工具（优先使用）**：
+- \`get_code_outline\` — 提取代码骨架（函数/类/接口列表 + 起止行号），不返回代码体，极低上下文消耗
+- \`read_function\` — 按函数/类名称直接读取完整体，免去两步操作（grep行号 → read_file）
+- \`grep_in_file\` with \`context_lines\` — 搜索时同时返回前后 N 行上下文，一步拿到足够背景
+
+**推荐工作流（文件 > 500 行时强烈建议）**：
+\`\`\`
+步骤1：get_code_outline  →  建立文件全局结构（函数列表+行号）
+步骤2：read_function     →  精准读取目标函数完整体（直接按名称）
+步骤3：patch_file / batch_patch  →  按已知行号修改
+\`\`\`
+
+**示例**：
+- 查看文件结构：\`{"tool":"get_code_outline","path":"src/services/github.ts"}\`
+- 精准读取函数：\`{"tool":"read_function","path":"src/App.tsx","function_name":"AppContent"}\`
+- 同名函数取第2个：\`{"tool":"read_function","path":"src/utils.ts","function_name":"format","occurrence":"2"}\`
+- 搜索+上下文：\`{"tool":"grep_in_file","path":"src/main.ts","pattern":"fetchData","context_lines":"5"}\`
+
+**何时仍用 read_file 逐段读取**：
+- 需要理解函数之间的流程串联（多个函数如何协作）
+- 文件结构不规则（如大量内联匿名函数）无法被 outline 覆盖
+- 文件 ≤ 5000 行且需要全量代码上下文时，直接 read_file（不带行范围）一次返回完整内容
+
+**read_file 自动全文模式（优先使用）**：
+- 文件 ≤ 5000 行时，直接调用 \`{"tool":"read_file","path":"src/App.tsx"}\`（不带行范围），系统自动一次性返回完整内容
+- 文件 > 5000 行时，系统返回第一段并附带**所有后续段落的调用列表**，必须逐段执行完毕
+
+**标准流程（文件 > 5000 行时）**：
+1. 先调用 \`get_code_outline\` 建立骨架（推荐替代 get_file_info）
+2. 用 \`read_function\` 精准读取目标函数，无需分段
+3. 确实需要跨函数全文时，再按 500 行步进分段 read_file
+
+**大文件（>1MB）特别说明**：
+- GitHub Contents API 对 >1MB 文件返回空内容，read_file 已自动切换到 Git Blobs API
+- get_code_outline / read_function 同样自动处理大文件，用户无需感知
+
+**关键规则（违反即视为任务失败）**：
+- **收到 🔴 截断提示后，必须立即继续读取下一段，不得中断、不得向用户汇报"已读取部分"**
+- **不得在文件未读完时就开始修改代码**，必须先读完目标代码再分析
+- 大文件（> 500 行）修改代码前**必须先调用 get_code_outline 或 grep_in_file(context_lines≥3) 确认精确行号**，不得凭猜测行号直接 patch
+- batch_read 适合同时了解多个小文件（如配置文件组合），每文件返回前 300 行，自动支持大文件
+
+==============================
+长内容输出与 patch 自动验证规则
+==============================
+
+**写入大内容时（代码超过 200 行）必须分批修改，不得一次性 write_file**：
+1. 先用 get_code_outline 或 get_file_info 确认目标文件总行数
+2. 将要写入的内容拆分为多段，每段不超过 200 行
+3. **必须使用 batch_patch 一次性提交所有段落**，格式：\`[{"start_line":N1,"end_line":M1,"content":"段落1"},{"start_line":N2,"end_line":M2,"content":"段落2"},...]\`
+   - batch_patch 内部按倒序处理各段，不存在行号偏移问题
+   - ❌ 严禁分多次调用 patch_file：每次 patch 会改变文件行数，导致后续调用行号偏移，产生重复或错误内容
+4. batch_patch 返回「各处修改 diff 快照」，**必须核查每处快照**：
+   - 内容正确 → 完成
+   - 发现错误 → read_file 重新读取当前行号，再次 batch_patch 修正
+
+**patch_file 使用规则**（单处修改专用）：
+- patch_file 仅适合对同一文件做**单处修改**；同一文件多处修改必须用 batch_patch
+- 返回结果包含「📋 修改验证快照」，显示修改区域 ±5 行上下文，AI 必须阅读快照确认无误
+- 若返回包含「⚠️ 行号偏移警告」，说明本次行数发生变化，后续如需再次修改该文件，必须先 read_file 获取最新行号，或改用 batch_patch
+
+**grep_in_file 搜索翻页**（搜索结果超 100 条时）：
+- 返回末尾会出现 ⚠️ 提示，附带 offset 翻页调用示例
+- 必须按提示继续翻页，直到收集到所有需要的匹配结果
+
+==============================
+重要规则
+==============================
+- 查看日志时先用 get_run_jobs 找到失败 Job ID，再用 get_job_logs 获取日志
+- patch_file 比 write_file 更安全，修改工作流文件时优先使用 patch
+- **同一文件多处修改时，必须使用 batch_patch，合并为单个 commit；❌ 严禁多次顺序调用 patch_file——每次行数变化均会使后续行号偏移，导致重复或错误覆盖**
+- **batch_patch 的各 patch 行号均基于原始文件，内部自动处理偏移，无需手动修正**
+- 修改前必须先用 grep_in_file 或 read_file 确认精确的行号
+- **全仓库定位关键词用 grep_in_repo（返回行号）；跨文件批量替换用 search_and_replace（自动完成全流程）；只需文件路径列表用 search_code（更快但无行号）**
+- **大文件（>500行）操作必须先 get_code_outline 建立骨架认知，再 read_function 按名称精准读取函数体，避免逐段盲读浪费上下文**
+- **grep_in_file 加 context_lines 参数（建议值 3–5）可一次拿到匹配行的上下文，替代「grep→read_file」两步流程**
+- **对比两个分支/tag/commit 差异用 compare_commits（含 diff 片段）；查看单个 commit 详情用 get_commit_diff**
+- **代码审查用 auto_review；不要手动逐行分析变更文件，auto_review 会自动读取文件并输出结构化报告**
+- **触发工作流后必须用 check_run_status 等待结果，不要用 get_workflow_runs 手动轮询；build_apk 类型若超时需再调一次；startup_failure 说明工作流文件有语法问题，直接修复**
+- **trigger_workflow 已内置自动修复**：若缺少 workflow_dispatch，系统会自动添加并重试，无需手动干预
+- **构建成功必须验证产物**：构建任务成功后，必须按"构建成功后验证产物"工作流完成 Artifacts + Release 确认，并输出固定格式任务总结，然后才能结束任务
+- **Release 自动化**：收到发版/生成changelog指令时，必须按「Release 自动化工作流」五步完整执行，不得跳步或提前结束
+- commit message 使用中文，遵循 Conventional Commits（fix/feat/ci/chore/docs）
+- 对话语言：中文；操作完成后给出简洁总结
+
+==============================
+GitHub API 4xx 错误自愈规则
+==============================
+工具返回的错误消息已包含具体诊断和建议，遇到 4xx 时**立即按诊断建议自动修复，不要询问用户**：
+
+- **401 认证失败**：无法自动修复，告知用户更新 PAT，终止当前任务
+- **403 workflow 权限不足**：无法自动修复，告知用户为 Token 勾选 workflow scope
+- **403 分支保护**：自动切换为"create_branch → patch_file → create_pr → merge_pull_request"流程
+- **403 速率限制**：等待后重试（已在消息中说明），本次任务暂停并告知用户
+- **404 文件不存在**：自动用 file_tree 重新定位正确路径后重试；若确认不存在则改用 write_file 新建
+- **404 分支不存在**：自动用 list_branches 查询正确名称或先 create_branch 创建
+- **404 工作流不存在**：自动用 list_workflows 确认正确 workflow_id 后重试
+- **404 PR/Issue 不存在**：自动用 list_pull_requests / list_issues 重新获取正确编号
+- **409 合并冲突**：自动读取冲突文件，用 patch_file 解决冲突后重新尝试合并
+- **409 资源已存在**：检查是否可复用现有资源，或先删除再创建
+- **422 分支保护规则**：自动走 PR 流程替代直接 push
+- **410 资源已删除**：告知用户，建议重新创建或确认正确 ID
+
+==============================
+自主任务执行规则（最重要）
+==============================
+- 你拥有 15 次工具调用机会，必须充分利用，不得提前放弃
+- 每次调用完工具后，立即分析结果，继续执行下一步，不要询问用户是否继续
+- 任务未完成时，绝对禁止输出"任务完成"、"请问是否需要继续"等终止性语句
+- 只有当所有步骤都已完成、结果已验证，才输出最终总结；**输出总结时必须在最开头写 \`TASK_DONE\`**（不可省略，系统依靠此标记判断任务完成）
+- 遇到工具报错时，自行分析原因并尝试修正，而不是停下来询问用户
+- 面对复杂任务，按以下方式执行：
+  1. 先输出 PLAN（首轮）
+  2. 逐步执行每个步骤，切换步骤时输出 STEP:id
+  3. 每步完成后检查结果，决定下一步
+  4. 全部完成后输出 \`TASK_DONE\` 后跟简洁的完成总结
+
+==============================
+回复语气与格式规范（自然对话）
+==============================
+- **语气**：像一位熟悉 GitHub 的开发者朋友，用自然、简洁的中文对话，避免生硬的机器腔
+- **最终总结格式**：
+  - 用 1-3 句话直接说明做了什么、结果如何，不用铺垫废话
+  - 如有文件/分支/PR 操作，用简洁的项目符号列出，不要展开技术细节
+  - 不需要每句话都加 ✅❌⚠️ 等 emoji，偶尔点缀即可
+  - 不使用 ## 二级标题 / ### 三级标题；层次感用换行和项目符号体现
+  - 避免"我已经成功地完成了您交给我的任务"这类冗长总结句
+  - 错误时直接说明原因和建议，不用"很遗憾地告知您"
+- **代码/命令**：必要时用行内代码或代码块，但不要每个文件名都加反引号包裹
+- **举例**：好的回复是"已把 \`deploy.yml\` 的 Node 版本从 16 改到 20，构建触发后大约 2 分钟出结果。"而不是"我已成功执行了更新操作，✅ 步骤1：分析工作流文件 ✅ 步骤2：修改版本号..."`;
+
+}
+
+interface Message {
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+  reasoning_content?: string;
+}
+
+interface LLMResult {
+  text: string;
+  reasoningContent?: string;
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  } | null;
+}
+
+interface ChatChunk {
+  choices: Array<{
+    delta: {
+      content?: string;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: "function";
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
+
+interface LLMUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  model: string;
+  type: string;
+}
+
+async function callLLM(
+  cfg: ModelConfig,
+  messages: Message[],
+  onThinkingChunk?: (chunk: string) => Promise<void>,
+  onHeartbeat?: () => Promise<void>,
+  onUsage?: (usage: LLMUsage) => void,
+): Promise<LLMResult> {
+  const { url, headers, bodyExtra } = buildLLMRequest(cfg);
+  console.log(`[callLLM] type=${cfg.type} model=${cfg.model || "default"} url=${url}`);
+
+  const isDeepSeek = cfg.type === "deepseek";
+  const missingRC = messages.filter(m => m.role === "assistant" && m.reasoning_content == null).length;
+  const needFix = isDeepSeek || missingRC > 0;
+  const safeMessages: Message[] = needFix
+    ? messages.map(m =>
+        m.role === "assistant" && m.reasoning_content == null
+          ? { ...m, reasoning_content: "" }
+          : m
+      )
+    : messages;
+  if (needFix) {
+    const fixed = safeMessages.filter(m => m.role === "assistant" && m.reasoning_content === "").length;
+    if (fixed > 0) {
+      console.log(`[callLLM] reasoning_content 修复：为 ${fixed} 条 assistant 消息补充了空字符串（isDeepSeek=${isDeepSeek} model=${cfg.model} missingRC=${missingRC}）`);
+    }
+  }
+
+  const dbgMsgs = safeMessages.map(m => m.role === "assistant" ? { role: m.role, hasRC: m.reasoning_content != null, rcLen: m.reasoning_content?.length ?? -1 } : { role: m.role });
+  console.log(`[callLLM] debug-messages-structure: ${JSON.stringify(dbgMsgs)}`);
+
+  const llmAbort = new AbortController();
+  const llmTimer = setTimeout(() => llmAbort.abort("llm-timeout"), 90_000);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ messages: safeMessages, ...bodyExtra }),
+      signal: llmAbort.signal,
+    });
+  } catch (e) {
+    clearTimeout(llmTimer);
+    const err = e as Error;
+    if (err?.name === "AbortError") {
+      throw new Error("LLM 请求超时（90s）：模型服务响应过慢，请稍后重试");
+    }
+    throw new Error(`LLM 网络请求失败：${err.message}`);
+  }
+  clearTimeout(llmTimer);
+
+  if (!res.ok || !res.body) {
+    let errText = "";
+    try { errText = await res.text(); } catch {}
+
+    let errMsg = "";
+    try {
+      const parsed = JSON.parse(errText);
+      errMsg = parsed?.error?.message || parsed?.error || parsed?.message || "";
+    } catch {}
+
+    if (!errMsg) {
+      if (errText.trim().startsWith("<") || errText.includes("<!DOCTYPE")) {
+        const titleMatch = errText.match(/<title[^>]*>([^<]{1,120})<\/title>/i);
+        errMsg = titleMatch?.[1]?.trim() || "服务端返回 HTML 页面（可能为限流/防火墙拦截）";
+      } else {
+        errMsg = errText.replace(/\s+/g, " ").trim().slice(0, 400) || res.statusText;
+      }
+    }
+
+    if (res.status === 400 && errMsg.includes("reasoning_content")) {
+      const dbg = safeMessages.map(m => ({
+        role: m.role,
+        hasRC: m.reasoning_content != null,
+        rcLen: m.reasoning_content?.length ?? -1,
+        contentPreview: (m.content || "").slice(0, 60),
+      }));
+      console.error(`[callLLM] HTTP 400 reasoning_content 诊断：发出去的 messages 结构 = ${JSON.stringify(dbg)}`);
+    }
+
+    let friendly = errMsg;
+    if (res.status === 401) friendly = `API Key 无效或已过期（${errMsg || "401 Unauthorized"}）`;
+    else if (res.status === 402) friendly = `账户余额不足，请前往平台充值（${errMsg || "402 Payment Required"}）`;
+    else if (res.status === 403) friendly = `无访问权限（${errMsg || "403 Forbidden"}）`;
+    else if (res.status === 429) friendly = `请求频率超限，请稍后再试（${errMsg || "429 Too Many Requests"}）`;
+    else if (res.status >= 500) friendly = `平台服务异常（${res.status}），请稍后重试`;
+    const fullMsg = `LLM 调用失败（HTTP ${res.status}）：${friendly}`;
+    console.error(`[callLLM] 失败 status=${res.status} msg=${errMsg.slice(0, 200)}`);
+    throw new Error(fullMsg);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "", buf = "";
+  let hadReasoningContent = false;
+  let capturedUsage: ChatChunk["usage"] | null = null;
+
+  let fcId = "";
+  let fcName = "";
+  let fcArgsBuf = "";
+  let reasoningFull = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n"); buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (raw === "[DONE]") continue;
+      try {
+        const chunk = JSON.parse(raw) as ChatChunk;
+        if (chunk.usage?.total_tokens) capturedUsage = chunk.usage;
+        const delta = chunk.choices?.[0]?.delta;
+        if (!delta) continue;
+
+        if (delta.tool_calls && delta.tool_calls.length > 0) {
+          const tc = delta.tool_calls[0];
+          if (tc.id) fcId = tc.id;
+          if (tc.function?.name) fcName = tc.function.name;
+          if (tc.function?.arguments) fcArgsBuf += tc.function.arguments;
+          if (onHeartbeat) await onHeartbeat();
+          continue;
+        }
+
+        if (delta.reasoning_content) {
+          hadReasoningContent = true;
+          reasoningFull += delta.reasoning_content;
+          if (onThinkingChunk) await onThinkingChunk(delta.reasoning_content);
+        } else if (onHeartbeat) {
+          await onHeartbeat();
+        }
+
+        full += delta.content ?? "";
+      } catch {}
+    }
+  }
+
+  if (onUsage) {
+    const modelName = cfg.model || "default";
+    if (capturedUsage?.total_tokens) {
+      onUsage({
+        prompt_tokens: capturedUsage.prompt_tokens ?? 0,
+        completion_tokens: capturedUsage.completion_tokens ?? 0,
+        total_tokens: capturedUsage.total_tokens,
+        model: modelName,
+        type: cfg.type,
+      });
+    } else {
+      const inputChars = messages.reduce((s, m) => s + (typeof m.content === "string" ? m.content.length : 0), 0);
+      const outputChars = full.length + fcArgsBuf.length;
+      const est_prompt = Math.ceil(inputChars / 3);
+      const est_completion = Math.ceil(outputChars / 3);
+      onUsage({
+        prompt_tokens: est_prompt,
+        completion_tokens: est_completion,
+        total_tokens: est_prompt + est_completion,
+        model: modelName,
+        type: cfg.type,
+      });
+    }
+  }
+
+  if (fcName) {
+    let parsedArgs: Record<string, unknown> = {};
+    try {
+      parsedArgs = JSON.parse(fcArgsBuf || "{}");
+    } catch {
+      const matches = fcArgsBuf.match(/\{(?:[^{}]|\{[^{}]*\})*\}/g) ?? [];
+      let recovered: Record<string, unknown> | null = null;
+      for (let i = matches.length - 1; i >= 0; i--) {
+        try { recovered = JSON.parse(matches[i]); break; } catch {}
+      }
+      if (!recovered) {
+        const start = fcArgsBuf.lastIndexOf("{");
+        const end = fcArgsBuf.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+          try { recovered = JSON.parse(fcArgsBuf.slice(start, end + 1)); } catch {}
+        }
+      }
+      parsedArgs = recovered ?? {};
+      console.warn(
+        recovered
+          ? `[callLLM] FC arguments JSON 解析失败，已从多对象输出中恢复：${JSON.stringify(recovered).slice(0, 160)}`
+          : `[callLLM] FC arguments JSON 解析失败，原始内容：${fcArgsBuf.slice(0, 200)}`
+      );
+    }
+    console.log(`[callLLM] FC 工具调用 name=${fcName} id=${fcId} argsLen=${fcArgsBuf.length}`);
+    return {
+      text: full,
+      reasoningContent: reasoningFull || undefined,
+      toolCall: { id: fcId || `call-${Date.now()}`, name: fcName, arguments: parsedArgs },
+    };
+  }
+
+  if (full.trim() === "") {
+    if (hadReasoningContent) {
+      console.error("[callLLM] 模型只返回了 reasoning_content，content 字段为空（可能限流或配额耗尽）");
+      throw new Error("模型只返回了思考过程（reasoning_content），正式回答为空。可能触发了限流或配额耗尽，请稍后重试");
+    }
+    console.error("[callLLM] 模型返回了空响应（full.length=0）");
+    throw new Error("模型返回了空响应，可能是上下文过长或服务异常，请重试");
+  }
+
+  console.log(`[callLLM] 完成 full.length=${full.length}`);
+  return { text: full, reasoningContent: reasoningFull || undefined, toolCall: null };
+}
+
+function stripCodeFences(text: string): string {
+  return text
+    .replace(/^```[a-zA-Z]*\s*\n?/gm, "")
+    .replace(/^```\s*$/gm, "")
+    .trim();
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  let depth = 0, start = -1;
+  let inString = false, escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function extractToolCall(text: string): Record<string, unknown> | null {
+  const clean = stripCodeFences(text);
+
+  for (const line of clean.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.includes('"tool"')) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed.tool === "string") return parsed as Record<string, unknown>;
+    } catch {}
+  }
+
+  let searchFrom = 0;
+  while (searchFrom < clean.length) {
+    const idx = clean.indexOf("{", searchFrom);
+    if (idx === -1) break;
+    const candidate = extractFirstJsonObject(clean.slice(idx));
+    if (!candidate) break;
+    if (candidate.includes('"tool"')) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (typeof parsed.tool === "string") return parsed as Record<string, unknown>;
+      } catch {}
+    }
+    searchFrom = idx + 1;
+  }
+  return null;
+}
+
+interface PlanStep { id: string; title: string; desc: string; }
+function extractPlan(text: string): PlanStep[] | null {
+  const clean = stripCodeFences(text);
+  const planIdx = clean.search(/\bPLAN\s*:/i);
+  if (planIdx === -1) return null;
+  const afterPlan = clean.slice(planIdx).replace(/^PLAN\s*:\s*/i, "");
+  const jsonStr = extractFirstJsonObject(afterPlan);
+  if (!jsonStr) return null;
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+      return parsed.steps as PlanStep[];
+    }
+  } catch {}
+  return null;
+}
+
+function extractStepMarker(text: string): string | null {
+  const m = text.match(/\bSTEP\s*:\s*([a-zA-Z0-9_-]+)/i);
+  return m ? m[1] : null;
+}
+
+async function triggerAndMonitorBuild(
+  ctx: GithubContext,
+  workflowId: string,
+  ref: string,
+  branch?: string,
+  maxFixAttempts = 3,
+): Promise<string> {
+  if (!workflowId) return "❌ 参数缺失：workflow_id 为必填";
+  const targetRef = ref || branch || "main" || "main";
+
+  const log = (...msgs: string[]) => console.log(`[build-monitor] ${msgs.join(" ")}`);
+
+  try {
+    await githubRequest(ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${workflowId}/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({ ref: targetRef }),
+    });
+    log(`已触发 ${workflowId} @ ${targetRef}`);
+  } catch (e) { return diagnose4xx(e, "trigger_and_monitor_build (触发阶段)"); }
+
+  await new Promise(r => setTimeout(r, 8000));
+
+  async function pollUntilDone(): Promise<{runId: number; conclusion: string; logsHint: string} | null> {
+    for (let tick = 0; tick < 30; tick++) {
+      try {
+        const runs = await githubRequest(
+          ctx,
+          `/repos/${ctx.owner}/${ctx.repo}/actions/workflows/${workflowId}/runs?branch=${targetRef}&per_page=1`,
+        ) as {workflow_runs: Array<{id: number; status: string; conclusion: string | null; html_url: string}>};
+
+        const run = runs.workflow_runs[0];
+        if (!run) { await new Promise(r => setTimeout(r, 60000)); continue; }
+
+        log(`Run #${run.id} status=${run.status} conclusion=${run.conclusion ?? "—"} tick=${tick}`);
+
+        if (run.status === "completed") {
+          let logsHint = "";
+          if (run.conclusion !== "success") {
+            try {
+              const jobs = await githubRequest(
+                ctx, `/repos/${ctx.owner}/${ctx.repo}/actions/runs/${run.id}/jobs`,
+              ) as {jobs: Array<{id: number; name: string; conclusion: string | null}>};
+
+              const failedJobs = jobs.jobs.filter(j => j.conclusion === "failure");
+              for (const job of failedJobs.slice(0, 2)) {
+                const logText = await getJobLogs(ctx, String(job.id));
+                const lastLines = logText.split("\n").slice(-200).join("\n");
+                logsHint += `\n\n**Job: ${job.name}**\n\`\`\`\n${lastLines.slice(0, 4000)}\n\`\`\``;
+              }
+            } catch {}
+          }
+          return { runId: run.id, conclusion: run.conclusion || "unknown", logsHint };
+        }
+      } catch (e) { log(`轮询出错: ${(e as Error).message}`); }
+      await new Promise(r => setTimeout(r, 60000));
+    }
+    return null;
+  }
+
+  let result = await pollUntilDone();
+  if (!result) {
+    return `⏳ 构建超时（30min 未完成），请稍后用 get_workflow_runs 手动查询工作流 ${workflowId}`;
+  }
+  if (result.conclusion === "success") {
+    let artifactsInfo = "";
+    try {
+      artifactsInfo = await getRunArtifacts(ctx, String(result.runId));
+    } catch { artifactsInfo = "（Artifacts 查询失败，请用 get_run_artifacts 手动查询）"; }
+
+    return [
+      `✅ **构建成功**`,
+      `- 工作流：${workflowId}`,
+      `- 分支：\`${targetRef}\``,
+      `- Run ID：${result.runId}`,
+      ``,
+      artifactsInfo,
+    ].join("\n");
+  }
+
+  const fixInfo = [
+    `❌ **构建失败**（第 1 次）`,
+    `- 工作流：${workflowId}`,
+    `- 分支：\`${targetRef}\``,
+    `- Run ID：${result.runId}`,
+    `- 最大允许修复次数：${maxFixAttempts}`,
+    ``,
+    `**错误日志：**${result.logsHint || "（日志获取失败，请用 get_job_logs 手动查看）"}`,
+    ``,
+    `请分析上述错误日志，定位问题根因，修复相关代码，然后再次调用 trigger_and_monitor_build。`,
+  ].join("\n");
+
+  log(`构建失败 Run #${result.runId}，返回日志供 LLM 分析`);
+  return fixInfo;
+}
+
+function coerceStr(v: unknown, fallback = ""): string {
+  if (v === null || v === undefined) return fallback;
+  if (typeof v === "string") return v;
+  return String(v);
+}
+
+async function searchNpmPackages(query: string, size: number): Promise<string> {
+  if (!query) return "❌ 参数缺失：query 为必填";
+  const limit = Math.max(1, Math.min(50, size || 5));
+  try {
+    const resp = await fetch(
+      `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${limit}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!resp.ok) return `❌ npm 搜索失败（HTTP ${resp.status}）`;
+    const data = (await resp.json()) as {
+      objects?: Array<{
+        package?: { name?: string; version?: string; description?: string; links?: { npm?: string } };
+        score?: { final?: number };
+      }>;
+    };
+    const objs = data?.objects ?? [];
+    if (objs.length === 0) return `未找到与 "${query}" 匹配的 npm 包。`;
+    const lines = objs.map((o, i) => {
+      const p = o.package ?? {};
+      const score = o.score?.final != null ? ` 热度${o.score.final.toFixed(2)}` : "";
+      return `${i + 1}. ${p.name ?? "?"}@${p.version ?? "?"}${score}\n   ${(p.description ?? "").slice(0, 140) || "（无描述）"}\n   ${p.links?.npm ?? ""}`;
+    });
+    return `npm 搜索结果（${objs.length} 条，查询 "${query}"）：\n${lines.join("\n")}`;
+  } catch (e) {
+    return `❌ npm 搜索请求失败：${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+function executeTool(
+  ctx: GithubContext,
+  call: Record<string, unknown>,
+  targetBranch?: string,
+): Promise<string> {
+  const p = (k: string, fb = "") => coerceStr(call[k], fb);
+  switch (call.tool) {
+    case "list_files":   return listFiles(ctx, p("path"));
+    case "read_file":    return readFile(
+      ctx, p("path"),
+      p("start_line") ? parseInt(p("start_line"), 10) : undefined,
+      p("end_line")   ? parseInt(p("end_line"),   10) : undefined,
+    );
+    case "get_file_info": return getFileInfo(ctx, p("path"));
+    case "patch_file":   return patchFile(
+      ctx, p("path"),
+      parseInt(p("start_line"), 10),
+      parseInt(p("end_line"),   10),
+      p("content"),
+      p("message"),
+      p("branch") || targetBranch,
+    );
+    case "write_file":   return writeFile(ctx, p("path"), p("content"), p("message"), p("branch") || targetBranch);
+    case "delete_file":  return deleteFile(ctx, p("path"), p("message"), p("branch") || targetBranch);
+    case "search_code":  return searchCode(ctx, p("query"));
+    case "grep_in_repo": return grepInRepo(
+      ctx, p("query"),
+      p("file_pattern") || undefined,
+      p("offset") ? parseInt(p("offset"), 10) : 0,
+    );
+    case "batch_patch":  return batchPatch(
+      ctx, p("path"),
+      (() => {
+        const raw = call.patches;
+        if (Array.isArray(raw)) return raw;
+        try { return JSON.parse(p("patches", "[]")); } catch { return []; }
+      })(),
+      p("message"),
+      p("branch") || targetBranch,
+    );
+    case "file_tree":    return fileTree(ctx, p("path"), parseInt(p("depth", "3"), 10));
+    case "grep_in_file": return grepInFile(
+      ctx, p("path"), p("pattern"),
+      p("case_sensitive") === "true",
+      p("offset") ? parseInt(p("offset"), 10) : 0,
+      p("context_lines") ? parseInt(p("context_lines"), 10) : 0,
+    );
+    case "batch_read":   return batchReadFiles(ctx, p("paths"));
+    case "get_code_outline": return getCodeOutline(ctx, p("path"));
+    case "read_function":    return readFunction(
+      ctx, p("path"), p("function_name"),
+      p("occurrence") ? parseInt(p("occurrence"), 10) : 1,
+      p("ref") || undefined,
+    );
+    case "list_branches":     return listBranches(ctx);
+    case "list_commits":      return listCommits(ctx, p("path") || undefined, p("branch") || targetBranch);
+    case "create_branch":     return createBranch(ctx, p("branch"), p("from") || targetBranch);
+    case "list_pull_requests": return listPullRequests(ctx, p("state", "open"));
+    case "create_pr":         return createPullRequest(ctx, p("title"), p("head"), p("base"), p("body"));
+    case "merge_pull_request": return mergePullRequest(ctx, p("pull_number"), p("merge_method", "squash"), p("commit_title") || undefined);
+    case "list_issues":   return listIssues(ctx, p("state", "open"));
+    case "create_issue":  return createIssue(ctx, p("title"), p("body"), p("labels") || undefined);
+    case "search_issues": return searchIssues(
+      ctx, p("query"),
+      p("state", "open"),
+      p("labels") || undefined,
+      p("assignee") || undefined,
+      p("limit") ? parseInt(p("limit"), 10) : 20,
+    );
+    case "get_issue_details": return getIssueDetails(ctx, p("issue_number"));
+    case "update_issue":  return updateIssue(
+      ctx, p("issue_number"),
+      p("title") || undefined, p("body") || undefined, p("state") || undefined,
+      p("labels") || undefined, p("assignees") || undefined,
+    );
+    case "list_workflows":      return listWorkflows(ctx);
+    case "get_workflow_runs":   return getWorkflowRuns(ctx, p("workflow_id"), parseInt(p("limit", "10"), 10));
+    case "get_run_jobs":        return getRunJobs(ctx, p("run_id"));
+    case "get_job_logs":        return getJobLogs(
+      ctx, p("job_id"),
+      p("start_line") ? parseInt(p("start_line"), 10) : undefined,
+      p("end_line")   ? parseInt(p("end_line"),   10) : undefined,
+    );
+    case "trigger_workflow":    return triggerWorkflow(ctx, p("workflow_id"), p("ref"), undefined);
+    case "check_run_status":    return checkRunStatus(
+      ctx, p("run_id"),
+      (p("workflow_type") as "fast" | "normal" | "build_apk") || "normal",
+    );
+    case "cancel_workflow_run": return cancelWorkflowRun(ctx, p("run_id"));
+    case "rerun_workflow_run":  return rerunWorkflowRun(ctx, p("run_id"), p("failed_jobs_only") === "true");
+    case "list_actions_secrets": return listActionsSecrets(ctx);
+    case "list_actions_variables": return listActionsVariables(ctx);
+    case "set_actions_variable": return setActionsVariable(ctx, p("name"), p("value"));
+    case "get_repo_info":        return getRepoInfo(ctx);
+    case "add_comment":          return addComment(ctx, p("issue_number") || p("pull_number"), p("body"));
+    case "close_issue":          return closeIssue(ctx, p("issue_number"), p("comment") || undefined);
+    case "close_pr":             return closePR(ctx, p("pull_number"), p("comment") || undefined);
+    case "get_commit_diff":      return getCommitDiff(ctx, p("sha"));
+    case "get_pr_files":         return getPRFiles(ctx, p("pull_number"));
+    case "compare_commits":      return compareCommits(ctx, p("base"), p("head"));
+    case "search_and_replace":   return searchAndReplace(
+      ctx, p("pattern"), p("replacement"), p("file_pattern") || undefined,
+      p("message"), p("branch") || targetBranch,
+    );
+    case "auto_review":          return autoReview(
+      ctx,
+      p("commit_count") ? parseInt(p("commit_count"), 10) : 1,
+      p("sha") || undefined,
+    );
+    case "create_release":       return createRelease(ctx, p("tag_name"), p("name"), p("body"), p("draft") === "true", p("prerelease") === "true", p("branch") || targetBranch);
+    case "list_releases":        return listReleases(ctx, parseInt(p("limit", "10"), 10));
+    case "submit_pr_review":     return submitPRReview(ctx, p("pull_number"), p("event"), p("body"));
+    case "get_latest_release":   return getLatestRelease(ctx);
+    case "get_merged_prs_since": return getMergedPRsSince(ctx, p("since"));
+    case "preview_diff":         return previewDiff(ctx, p("path"), parseInt(p("start_line"), 10), parseInt(p("end_line"), 10), p("content"));
+    case "undo_last_commit":     return undoLastCommit(ctx, p("branch") || targetBranch);
+    case "run_lint":             return runLint(ctx, p("branch") || targetBranch);
+    case "check_security":       return checkSecurity(ctx, p("path") || "");
+    case "trigger_and_monitor_build": return triggerAndMonitorBuild(
+      ctx, p("workflow_id"), p("ref"), p("branch") || targetBranch,
+      p("max_fix_attempts") ? parseInt(p("max_fix_attempts"), 10) : 3,
+    );
+    case "get_run_artifacts":        return getRunArtifacts(ctx, p("run_id"));
+    case "npm_search":             return searchNpmPackages(p("query"), p("size") ? parseInt(p("size"), 10) : 5);
+    default: {
+      if (mcpReady && mcpClient && mcpToolNames.has(String(call.tool))) {
+        const mcp = mcpClient;
+        if (mcpFailed) {
+          return Promise.resolve(
+            `❌ MCP 服务当前不可达（连接失败），工具 ${String(call.tool)} 暂不可用。请改用本地工具（read_file/write_file/search_code 等）完成操作。`,
+          );
+        }
+        return (async () => {
+          const args: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(call)) {
+            if (k !== "tool" && v !== undefined && v !== null && v !== "") args[k] = v;
+          }
+          try {
+            const result = await mcp.callTool(String(call.tool), args);
+            mcpFailed = false;
+            if (result.isError) {
+              return `❌ MCP 工具 ${String(call.tool)} 返回错误：${result.text}`;
+            }
+            return result.text || `✅ MCP 工具 ${String(call.tool)} 执行完成（无文本输出）`;
+          } catch (e) {
+            return `❌ MCP 工具 ${String(call.tool)} 执行失败：${e instanceof Error ? e.message : String(e)}`;
+          }
+        })();
+      }
+      return Promise.resolve(`未知工具: ${String(call.tool)}`);
+    }
+  }
+}
+
+interface LocalWorkflowRow {
+  id: string;
+  user_id: string;
+  repo: string;
+  task_summary: string;
+  status: string;
+  total_steps: number;
+  done_steps: number;
+  fail_steps: number;
+  interrupted: boolean;
+  messages_snapshot?: unknown[] | null;
+  last_step_id?: string | null;
+  created_at: string;
+  finished_at?: string | null;
+}
+
+interface LocalWfStepRow {
+  workflow_id: string;
+  step_id: string;
+  seq: number;
+  title: string;
+  description: string;
+  status: string;
+  retry_count?: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+const WF_STORE_KEY = "ai_local_workflows";
+const WF_MAX_ROWS = 50;
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch { return fallback; }
+}
+
+function writeJson(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+function readWorkflows(): LocalWorkflowRow[] {
+  return readJson<LocalWorkflowRow[]>(WF_STORE_KEY, []);
+}
+
+function writeWorkflows(rows: LocalWorkflowRow[]) {
+  writeJson(WF_STORE_KEY, rows.slice(-WF_MAX_ROWS));
+}
+
+function readSteps(workflowId: string): LocalWfStepRow[] {
+  return readJson<LocalWfStepRow[]>(`ai_local_wf_steps_${workflowId}`, []);
+}
+
+function writeSteps(workflowId: string, rows: LocalWfStepRow[]) {
+  writeJson(`ai_local_wf_steps_${workflowId}`, rows);
+}
+
+function dbMarkRunning(workflowId: string) {
+  try {
+    const rows = readWorkflows();
+    const row = rows.find(r => r.id === workflowId);
+    if (row) { row.status = "running"; row.interrupted = false; }
+    writeWorkflows(rows);
+  } catch (e) { console.error("[local-wf] markRunning exception", (e as Error).message); }
+}
+
+function dbMarkInterrupted(workflowId: string) {
+  try {
+    const rows = readWorkflows();
+    const row = rows.find(r => r.id === workflowId);
+    if (row) { row.status = "running"; row.interrupted = true; }
+    writeWorkflows(rows);
+  } catch (e) { console.error("[local-wf] markInterrupted exception", (e as Error).message); }
+}
+
+async function dbCreateWorkflow(
+  userId: string,
+  repo: string,
+  taskSummary: string,
+  steps: PlanStep[],
+): Promise<string | null> {
+  try {
+    const id = `wf_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const rows = readWorkflows();
+    rows.push({
+      id,
+      user_id: userId,
+      repo,
+      task_summary: taskSummary.slice(0, 200),
+      status: "running",
+      total_steps: steps.length,
+      done_steps: 0,
+      fail_steps: 0,
+      interrupted: false,
+      created_at: new Date().toISOString(),
+    });
+    writeWorkflows(rows);
+
+    writeSteps(id, steps.map((s, i) => ({
+      workflow_id: id,
+      step_id: s.id,
+      seq: i,
+      title: s.title,
+      description: s.desc,
+      status: "pending",
+    })));
+
+    return id;
+  } catch (e) { console.error("[local-wf] createWorkflow exception", (e as Error).message); return null; }
+}
+
+async function dbUpdateStep(
+  workflowId: string,
+  stepId: string,
+  patch: { status?: string; retry_count?: number; started_at?: string; finished_at?: string },
+) {
+  try {
+    const rows = readSteps(workflowId);
+    const row = rows.find(r => r.step_id === stepId);
+    if (row) Object.assign(row, patch);
+    writeSteps(workflowId, rows);
+  } catch (e) { console.error("[local-wf] updateStep exception", (e as Error).message); }
+}
+
+function sanitizeToolCallMessages(msgs: Message[]): Message[] {
+  if (msgs.length === 0) return [];
+  const result = [...msgs];
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i];
+    if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      let ok = true;
+      for (let k = 0; k < msg.tool_calls.length; k++) {
+        const next = result[i + 1 + k];
+        if (!next || next.role !== "tool" || next.tool_call_id !== msg.tool_calls[k].id) { ok = false; break; }
+      }
+      if (!ok) result.splice(i, 1);
+    }
+  }
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i];
+    if (msg.role === "tool" && msg.tool_call_id) {
+      let j = i - 1;
+      while (j >= 0 && result[j].role === "tool") j--;
+      const prev = j >= 0 ? result[j] : undefined;
+      const ok =
+        prev &&
+        prev.role === "assistant" &&
+        Array.isArray(prev.tool_calls) &&
+        prev.tool_calls.some((tc) => tc.id === msg.tool_call_id);
+      if (!ok) result.splice(i, 1);
+    }
+  }
+  return result;
+}
+
+const LLM_HISTORY_LIMIT = 24;
+const DIGEST_TRIGGER = 8;
+const DIGEST_MAX_CHARS = 1500;
+
+let historyDigest = "";
+let digestPending: Message[] = [];
+
+async function summarizeHistory(frag: Message[], cfg: ModelConfig, signal?: AbortSignal): Promise<string> {
+  const req = buildLLMRequest(cfg);
+  const lines = frag.map((m) => {
+    let content = typeof m.content === "string" ? m.content : "";
+    if (m.tool_calls?.length) {
+      content = `[工具调用] ${m.tool_calls.map((t) => t.function?.name ?? "").join(", ")}`;
+    }
+    if (m.role === "tool") content = `[工具结果] ${content}`;
+    return `${m.role}: ${content.replace(/\s+/g, " ").slice(0, 180)}`;
+  }).filter(Boolean).join("\n");
+  const body: Record<string, unknown> = {
+    model: (req.bodyExtra.model as string) ?? "deepseek-v4-flash",
+    messages: [
+      {
+        role: "system",
+        content:
+          "你是对话压缩器。把对话片段压缩成紧凑要点摘要（中文，≤300字）：保留用户目标、关键事实与数据、已完成步骤、未完成事项、重要决定与结论。不要客套，直接输出要点。",
+      },
+      { role: "user", content: lines },
+    ],
+    stream: false,
+    max_tokens: 2000,
+    temperature: 0.3,
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort("digest-timeout"), 30_000);
+  const onOuterAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onOuterAbort);
+  try {
+    const resp = await fetch(req.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...req.headers },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) throw new Error(`摘要调用 HTTP ${resp.status}`);
+    const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+    const msg = data?.choices?.[0]?.message;
+    const text = msg?.content?.trim() || msg?.reasoning_content?.trim() || "";
+    if (!text) throw new Error("摘要响应为空");
+    return text;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+function localSkeleton(frag: Message[]): string {
+  const lines = frag.map((m) => {
+    let content = typeof m.content === "string" ? m.content : "";
+    if (m.tool_calls?.length) content = `[工具调用] ${m.tool_calls.map((t) => t.function?.name ?? "").join(", ")}`;
+    if (m.role === "tool") content = `[工具结果] ${content}`;
+    const who = m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : "工具";
+    return `${who}: ${content.replace(/\s+/g, " ").slice(0, 120)}`;
+  }).filter(Boolean);
+  const shown = lines.slice(0, 20);
+  return shown.join("\n") + (lines.length > shown.length ? `\n…（其余 ${lines.length - shown.length} 条已略）` : "");
+}
+
+function mergeDigest(oldDigest: string, add: string): string {
+  const merged = oldDigest ? `${oldDigest}\n---\n${add}` : add;
+  return merged.length > DIGEST_MAX_CHARS ? merged.slice(-DIGEST_MAX_CHARS) : merged;
+}
+
+async function buildLLMContext(
+  msgs: Message[],
+  cfg: ModelConfig,
+  signal?: AbortSignal,
+): Promise<Message[]> {
+  const sys = msgs.filter((m) => m.role === "system");
+  const rest = msgs.filter(
+    (m) =>
+      m.role !== "system" &&
+      !(
+        m.role === "user" &&
+        typeof m.content === "string" &&
+        m.content.startsWith("【历史对话摘要")
+      ),
+  );
+  if (rest.length > LLM_HISTORY_LIMIT) {
+    const overflow = sanitizeToolCallMessages(rest.slice(0, rest.length - LLM_HISTORY_LIMIT));
+    const kept = sanitizeToolCallMessages(rest.slice(-LLM_HISTORY_LIMIT));
+    digestPending.push(...overflow);
+    if (digestPending.length >= DIGEST_TRIGGER) {
+      const pending = digestPending;
+      digestPending = [];
+      try {
+        const add = await summarizeHistory(pending, cfg, signal);
+        historyDigest = mergeDigest(historyDigest, add);
+        console.log(`[ctx] history digest updated: +${pending.length} msgs → ${historyDigest.length} chars`);
+      } catch (e) {
+        console.warn(`[ctx] digest summary failed (${(e as Error).message}), fallback to local skeleton`);
+        historyDigest = mergeDigest(historyDigest, localSkeleton(pending));
+      }
+    }
+    const head: Message[] = historyDigest
+      ? [{ role: "user", content: `【历史对话摘要（早期内容已压缩，视为已知背景）】\n${historyDigest.slice(0, DIGEST_MAX_CHARS)}` }]
+      : [];
+    return [...sys, ...head, ...kept];
+  }
+  const head: Message[] = historyDigest
+    ? [{ role: "user", content: `【历史对话摘要（早期内容已压缩，视为已知背景）】\n${historyDigest.slice(0, DIGEST_MAX_CHARS)}` }]
+    : [];
+  return [...sys, ...head, ...rest];
+}
+
+async function dbSaveSnapshot(
+  workflowId: string,
+  messages: Message[],
+  lastStepId: string | null,
+  interrupted: boolean,
+) {
+  try {
+    const snapshot = sanitizeToolCallMessages(messages.slice(-60));
+    const rows = readWorkflows();
+    const row = rows.find(r => r.id === workflowId);
+    if (row) {
+      row.messages_snapshot = snapshot;
+      row.last_step_id = lastStepId;
+      row.interrupted = interrupted;
+      writeWorkflows(rows);
+    }
+  } catch (e) { console.error("[local-wf] saveSnapshot exception", (e as Error).message); }
+}
+
+async function dbLoadSnapshot(
+  workflowId: string,
+): Promise<{ messages: Message[]; lastStepId: string | null; taskSummary: string } | null> {
+  try {
+    const rows = readWorkflows();
+    const row = rows.find(r => r.id === workflowId);
+    if (!row) return null;
+    const rawMessages = (row.messages_snapshot ?? []) as Message[];
+    return {
+      messages: sanitizeToolCallMessages(rawMessages),
+      lastStepId: row.last_step_id ?? null,
+      taskSummary: row.task_summary ?? "",
+    };
+  } catch (e) { console.error("[local-wf] loadSnapshot exception", (e as Error).message); return null; }
+}
+
+async function dbFinishWorkflow(
+  workflowId: string,
+) {
+  try {
+    const steps = readSteps(workflowId);
+    const done = steps.filter(s => s.status === "done").length;
+    const fail = steps.filter(s => s.status === "error").length;
+    const status = fail > 0 ? "partial_fail" : "done";
+    const rows = readWorkflows();
+    const row = rows.find(r => r.id === workflowId);
+    if (row) {
+      row.status = status;
+      row.done_steps = done;
+      row.fail_steps = fail;
+      row.finished_at = new Date().toISOString();
+      row.interrupted = false;
+      writeWorkflows(rows);
+    }
+  } catch (e) { console.error("[local-wf] finishWorkflow exception", (e as Error).message); }
+}
+
+interface LocalAiToolProposalRow {
+  id: string;
+  tool_name: string;
+  issue: string;
+  severity: string;
+  context: string;
+  explanation?: string;
+  code_before?: string | null;
+  code_after?: string | null;
+  submitted_by: string;
+  status: string;
+  created_at: string;
+}
+
+const AI_PROPOSALS_KEY = "ai_local_tool_proposals";
+
+function readProposals(): LocalAiToolProposalRow[] {
+  return readJson<LocalAiToolProposalRow[]>(AI_PROPOSALS_KEY, []);
+}
+
+function writeProposals(rows: LocalAiToolProposalRow[]) {
+  writeJson(AI_PROPOSALS_KEY, rows.slice(-100));
+}
+
+function saveAiToolIssue(payload: {
+  tool_name: string;
+  issue: string;
+  severity: string;
+  context: string;
+  submitted_by: string;
+}): string | null {
+  try {
+    const id = `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const rows = readProposals();
+    rows.push({ id, ...payload, status: "pending", created_at: new Date().toISOString() });
+    writeProposals(rows);
+    return id;
+  } catch (e) { console.error("[local] saveAiToolIssue error", (e as Error).message); return null; }
+}
+
+function saveAiToolFix(payload: {
+  tool_name: string;
+  explanation: string;
+  code_before: string;
+  code_after: string;
+  context: string;
+  submitted_by: string;
+}): string | null {
+  try {
+    const rows = readProposals();
+    const existing = [...rows].reverse().find(r => r.tool_name === payload.tool_name && r.status === "pending");
+    if (existing) {
+      existing.explanation = payload.explanation;
+      existing.code_before = payload.code_before || null;
+      existing.code_after = payload.code_after || null;
+      writeProposals(rows);
+      return existing.id;
+    }
+    const id = `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    rows.push({
+      id,
+      tool_name: payload.tool_name,
+      issue: payload.explanation,
+      explanation: payload.explanation,
+      code_before: payload.code_before || null,
+      code_after: payload.code_after || null,
+      severity: "medium",
+      context: payload.context,
+      submitted_by: payload.submitted_by,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    });
+    writeProposals(rows);
+    return id;
+  } catch (e) { console.error("[local] saveAiToolFix error", (e as Error).message); return null; }
+}
+
+function createSSEStream(streamId: string, turnId: string, onEvent: (data: string) => void) {
+  let seq = 0;
+
+  const sendTyped = (payload: Record<string, unknown>) => {
+    const envelope = {
+      stream_id: streamId,
+      turn_id: turnId,
+      seq: seq++,
+      timestamp: Date.now(),
+      ...payload,
+    };
+    try {
+      onEvent(JSON.stringify(envelope));
+    } catch (e) {
+      console.error("[aiAgentCore] onEvent 回调异常", (e as Error).message);
+    }
+    return Promise.resolve();
+  };
+
+  const sendChunk = (content: string) =>
+    sendTyped({ type: "content", content });
+
+  const sendDone = () => sendTyped({ type: "done", total_seq: seq });
+
+  const sendError = (code: string, message: string) =>
+    sendTyped({ type: "error", code, message });
+
+  return { sendTyped, sendChunk, sendDone, sendError };
+}
+
+async function streamAnswer(
+  text: string,
+  sendChunk: (s: string) => Promise<void>,
+  delayMs = 10,
+  isAborted?: () => boolean,
+) {
+  if (!text) return;
+
+  if (text.startsWith("```") && text.trimEnd().endsWith("```")) {
+    await sendChunk(text);
+    return;
+  }
+
+  const lines = text.split("\n");
+  let inCodeBlock = false;
+  let codeBuffer = "";
+
+  for (let li = 0; li < lines.length; li++) {
+    if (isAborted?.()) return;
+    const line = lines[li];
+    const suffix = li < lines.length - 1 ? "\n" : "";
+
+    if (line.startsWith("```")) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeBuffer = line + "\n";
+      } else {
+        inCodeBlock = false;
+        codeBuffer += line + suffix;
+        await sendChunk(codeBuffer);
+        codeBuffer = "";
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer += line + "\n";
+      continue;
+    }
+
+    const segments: string[] = [];
+    let buf = "";
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      const isCJK = ch >= "\u4e00" && ch <= "\u9fff";
+      if (isCJK) {
+        if (buf) { segments.push(buf); buf = ""; }
+        buf += ch;
+        if (buf.length >= 3) { segments.push(buf); buf = ""; }
+      } else if (ch === " " || ch === "\t") {
+        buf += ch;
+        segments.push(buf);
+        buf = "";
+      } else {
+        buf += ch;
+      }
+    }
+    if (buf) segments.push(buf);
+
+    for (let si = 0; si < segments.length; si++) {
+      if (isAborted?.()) return;
+      await sendChunk(segments[si]);
+      if (si < segments.length - 1 || suffix) {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+    if (suffix) await sendChunk(suffix);
+  }
+
+  if (codeBuffer) await sendChunk(codeBuffer);
+}
+
+class ToolCircuitBreaker {
+  private failures = new Map<string, { count: number; lastFailure: number }>();
+  private threshold = 3;
+  private resetTimeoutMs = 60000;
+
+  isOpen(toolName: string): boolean {
+    const record = this.failures.get(toolName);
+    if (!record) return false;
+    if (record.count >= this.threshold) {
+      if (Date.now() - record.lastFailure > this.resetTimeoutMs) {
+        record.count = this.threshold - 1;
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  recordSuccess(toolName: string) {
+    this.failures.delete(toolName);
+  }
+
+  recordFailure(toolName: string) {
+    const record = this.failures.get(toolName) || { count: 0, lastFailure: 0 };
+    record.count++;
+    record.lastFailure = Date.now();
+    this.failures.set(toolName, record);
+  }
+}
+const globalCircuitBreaker = new ToolCircuitBreaker();
+
+class ConcurrencySemaphore {
+  private active = 0;
+  constructor(private maxConcurrent: number) {}
+  
+  async acquire(): Promise<void> {
+    while (this.active >= this.maxConcurrent) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    this.active++;
+  }
+  
+  release(): void {
+    this.active = Math.max(0, this.active - 1);
+  }
+}
+const writeOpSemaphore = new ConcurrencySemaphore(1);
+
+type TaskState = "queued" | "running" | "retrying" | "completed" | "failed";
+interface WriteTask {
+  id: string;
+  tool: string;
+  state: TaskState;
+  retryCount: number;
+  result?: string;
+  error?: string;
+}
+
+class WriteTaskQueue {
+  private tasks = new Map<string, WriteTask>();
+
+  enqueue(id: string, tool: string) {
+    this.tasks.set(id, { id, tool, state: "queued", retryCount: 0 });
+    console.log(`[TaskQueue] 写操作任务入队: ${id} (${tool})`);
+  }
+
+  updateState(id: string, state: TaskState, updates?: Partial<WriteTask>) {
+    const task = this.tasks.get(id);
+    if (task) {
+      task.state = state;
+      if (updates) Object.assign(task, updates);
+      console.log(`[TaskQueue] 状态流转 [${id}]: -> ${state}`);
+    }
+  }
+
+  getTask(id: string) {
+    return this.tasks.get(id);
+  }
+}
+const writeTaskQueue = new WriteTaskQueue();
+
+class SecurityPolicyEngine {
+  private static protectedFiles = new Set(["package.json", "tsconfig.json", "supabase/functions/ai-assistant/index.ts"]);
+  
+  private static protectedBranches = new Set(["main", "master", "production"]);
+
+  static validate(toolName: string, callParams: Record<string, unknown>, targetBranch?: string): void {
+    const p = (k: string) => String(callParams[k] || "");
+    const opBranch = p("branch") || targetBranch || "";
+    
+    if (toolName === "delete_file" && this.protectedFiles.has(p("path"))) {
+      throw new Error(`【安全风控】禁止直接删除核心配置文件：${p("path")}`);
+    }
+
+    const writeTools = new Set(["write_file", "patch_file", "batch_patch"]);
+    if (writeTools.has(toolName) && this.protectedBranches.has(opBranch)) {
+      throw new Error(`【安全风控】禁止直接向受保护分支 "${opBranch}" 写入代码。请先调用 create_branch 切换到新分支，完成后提交 PR。`);
+    }
+
+    const mcpWriteTools = new Set(["create_or_update_file", "push_files"]);
+    if (mcpWriteTools.has(toolName)) {
+      const mcpBranch = String(callParams.branch ?? "");
+      if (mcpBranch && this.protectedBranches.has(mcpBranch)) {
+        throw new Error(`【安全风控】禁止通过 MCP 直接向受保护分支 "${mcpBranch}" 写入。请先创建新分支，完成后提交 PR。`);
+      }
+    }
+  }
+}
+
+class MetricsLogger {
+  static log(payload: {
+    tool: string;
+    status: "success" | "fail";
+    elapsedMs: number;
+    cached: boolean;
+    errorMsg?: string;
+  }) {
+    console.log("[METRICS_AUDIT]", JSON.stringify({
+      timestamp: new Date().toISOString(),
+      ...payload
+    }));
+  }
+}
+
+function normalizeResultProtocol(result: string, isError: boolean): string {
+  try {
+    JSON.parse(result);
+    return result;
+  } catch {
+    return JSON.stringify({
+      status: isError ? "error" : "success",
+      summary: isError ? "工具执行遭遇异常" : "工具执行完成",
+      structured_data: isError ? null : result,
+      error_message: isError ? result : null
+    });
+  }
+}
+
+export interface RunAgentOptions {
+  requestBody: Record<string, unknown>;
+  signal?: AbortSignal;
+  onData: (data: string) => void;
+  onComplete: () => void;
+  onError: (error: Error) => void;
+  onMetrics?: (metrics: AgentMetrics) => void;
+  onIdle?: () => void;
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+}
+
+export type AgentMetrics = Partial<StreamMetrics>;
+
+export async function runAiAgent(options: RunAgentOptions): Promise<void> {
+  const { requestBody, signal, onData, onComplete, onError, onMetrics } = options;
+  const startedAt = Date.now();
+  let firstTokenAt: number | undefined;
+  let totalChars = 0;
+
+  const requestCache = new Map<string, string>();
+
+  let messages: Message[], githubToken: string, owner: string, repo: string;
+  let modelConfig: ModelConfig = { type: "deepseek" };
+  let targetBranch: string | undefined;
+  let userId = "anonymous";
+  let resumeWorkflowId: string | undefined;
+  let isAutoMode = false;
+  let idempotencyKey: string | undefined;
+
+  try {
+    const body = requestBody;
+    messages = body.messages as Message[];
+    githubToken = String(body.github_token ?? "");
+    owner = String(body.owner ?? "");
+    repo = String(body.repo ?? "");
+    targetBranch = body.target_branch ? String(body.target_branch) : undefined;
+    if (body.model_config) modelConfig = body.model_config as ModelConfig;
+    if (body.user_id) userId = String(body.user_id);
+    if (body.resume_workflow_id) resumeWorkflowId = String(body.resume_workflow_id);
+    if (body.idempotency_key) idempotencyKey = String(body.idempotency_key);
+    isAutoMode = !!body.auto_mode || !!resumeWorkflowId;
+    const userLastMessage = Array.isArray(messages)
+      ? (messages.filter(m => m.role === "user").pop()?.content ?? "")
+      : "";
+    modelConfig.temperature = inferTemperature(
+      userLastMessage,
+      isAutoMode,
+      modelConfig.temperature,
+    );
+    console.log(`[model-route] type=${modelConfig.type} temperature=${modelConfig.temperature} autoMode=${isAutoMode}`);
+    if (!messages?.length || !githubToken || !owner || !repo) {
+      throw new Error("缺少必要参数：messages, github_token, owner, repo");
+    }
+    if (modelConfig.type !== "custom" && !modelConfig.api_key) {
+      throw new Error(`使用 ${modelConfig.type} 模型需要提供 API Key`);
+    }
+  } catch (err) {
+    onError(err as Error);
+    return;
+  }
+
+  const ctx: GithubContext = { token: githubToken, owner, repo };
+
+  const streamId = `s_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const turnId = idempotencyKey ?? `t_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+  const emit = (data: string) => {
+    try {
+      const parsed = JSON.parse(data) as Record<string, unknown>;
+      if (parsed.type === "content" && typeof parsed.content === "string") {
+        if (!firstTokenAt) {
+          firstTokenAt = Date.now();
+          onMetrics?.({ ttft: firstTokenAt - startedAt, startedAt, streamId });
+        }
+        totalChars += parsed.content.length;
+      }
+    } catch {}
+    onData(data);
+  };
+
+  const { sendTyped, sendChunk, sendDone, sendError } = createSSEStream(streamId, turnId, emit);
+
+  const abortSig = signal ?? new AbortController().signal;
+
+  try {
+    await (async () => {
+    historyDigest = "";
+    digestPending = [];
+
+    try {
+      const cached = loadCachedTools();
+      if (cached && Date.now() - cached.cachedAt < 24 * 3_600_000) {
+        applyMcpTools(cached.tools);
+        console.log(`[mcp] cached tools registered: ${cached.tools.length}`);
+      }
+      if (!mcpClient) {
+        mcpClient = new GitHubMcpClient({ token: githubToken, timeoutMs: 45_000 });
+      }
+      if (mcpClient.state !== "ready") {
+        await mcpClient.connect(abortSig);
+      }
+      const mcpTools = await mcpClient.listTools(abortSig);
+      if (mcpTools.length > 0) {
+        applyMcpTools(mcpTools);
+        saveCachedTools(mcpTools);
+        mcpFailed = false;
+        console.log(`[mcp] connected: ${mcpTools.length} tools (github-mcp-server/remote)`);
+      }
+      if (mcpClient.instructions) saveCachedInstructions(mcpClient.instructions);
+    } catch (e) {
+      mcpFailed = true;
+      console.warn(`[mcp] init failed (${(e as Error).message}); local tools fallback`);
+    }
+    try {
+    let workflowDbId: string | null = null;
+
+    let isResuming = false;
+    let resumedLastStepId: string | null = null;
+    if (resumeWorkflowId) {
+      const snap = await dbLoadSnapshot(resumeWorkflowId);
+      if (snap && snap.messages.length > 0) {
+        messages = snap.messages.filter(m => m.role !== "system");
+        resumedLastStepId = snap.lastStepId;
+        workflowDbId = resumeWorkflowId;
+        isResuming = true;
+        dbMarkRunning(resumeWorkflowId);
+        console.log(`[resume] workflow=${resumeWorkflowId} lastStep=${resumedLastStepId} msgs=${messages.length}`);
+      }
+    }
+
+    let systemPromptText = buildSystemPrompt(targetBranch, isAutoMode, modelConfig.type, modelConfig);
+    if (mcpReady) {
+      const mcpNote = [
+        `\n\n【官方 GitHub MCP 工具面】`,
+        `已接入 GitHub 官方 Remote MCP（${mcpToolNames.size} 个官方工具），覆盖 issues/PRs/文件读写/搜索/CI/仓库管理等场景。`,
+        `MCP 工具参数为 JSON Schema 强类型：owner/repo 为必填字符串，数字/布尔参数直接传原始值（不要加引号）。`,
+        `本地同名工具优先；官方工具名不在本地注册表中时直接按 Schema 调用即可。`,
+        mcpFailed ? "⚠️ MCP 当前不可达，请优先使用本地工具（read_file/write_file/search_code 等）。" : "",
+      ].filter(Boolean).join("\n");
+      systemPromptText += mcpNote;
+    }
+    const skillsAppendix = [
+      `\n\n【Bug 修复方法论】`,
+      `1. 先读报错日志与失败构建输出，定位确切错误信息与行号；`,
+      `2. 判断根因类型（代码逻辑/配置/依赖版本/环境），不要盲目改代码；`,
+      `3. 最小修复：只改动必要文件，保持变更范围最小，避免顺手重构；`,
+      `4. 修复后验证：跑 lint/构建/相关测试确认通过后再提交；`,
+      `5. 修复失败时回读日志调整方案，不要重复同样的修改。`,
+      `【前端开发最佳实践（本项目为 React + Vite + TypeScript）】`,
+      `1. 数据获取放在事件处理器或 useEffect 中，避免渲染期间副作用；`,
+      `2. 大列表分页或虚拟化，避免一次渲染上千个节点；`,
+      `3. 组件保持单一职责，避免巨型组件；状态提升最小化，减少不必要 re-render；`,
+      `4. 图片与静态资源懒加载，控制首屏 bundle 体积；`,
+      `5. 新依赖先查证真实版本（可用 npm_search 工具），不凭空编造版本号。`,
+    ].join("\n");
+    systemPromptText += skillsAppendix;
+    let fullMessages: Message[] = await buildLLMContext(
+      [{ role: "system", content: systemPromptText }, ...messages],
+      modelConfig,
+      abortSig,
+    );
+    console.log(`[main] model=${modelConfig.type} hasApiKey=${!!modelConfig.api_key} owner=${owner} repo=${repo} resume=${isResuming} autoMode=${isAutoMode}`);
+    const historyHasReasoning = messages.some(m => m.role === "assistant" && m.reasoning_content);
+    
+    const heartbeat = () => sendTyped({ type: "heartbeat" });
+    const heartbeatTimer = setInterval(heartbeat, 15000);
+
+    const TOOL_LABELS: Record<string, string> = {
+      list_files: "列出目录", read_file: "读取文件", get_file_info: "文件信息", patch_file: "局部修改文件",
+      write_file: "写入文件", delete_file: "删除文件", search_code: "搜索代码",
+      file_tree: "文件树", grep_in_file: "文件内搜索", batch_read: "批量读取文件",
+      grep_in_repo: "全仓库搜索", batch_patch: "批量局部修改",
+      get_code_outline: "提取代码骨架", read_function: "读取函数体",
+      list_branches: "列出分支", list_commits: "提交历史", create_branch: "新建分支",
+      list_pull_requests: "列出 PR", create_pr: "创建 PR", merge_pull_request: "合并 PR",
+      list_issues: "列出 Issues", create_issue: "创建 Issue",
+      search_issues: "搜索 Issues", get_issue_details: "Issue 详情", update_issue: "更新 Issue",
+      list_workflows: "列出工作流", get_workflow_runs: "查看运行记录",
+      get_run_jobs: "查看 Jobs", get_job_logs: "下载/分段读取日志",
+      trigger_workflow: "触发工作流", check_run_status: "等待运行完成",
+      cancel_workflow_run: "取消运行",
+      rerun_workflow_run: "重新运行", list_actions_secrets: "查看 Secrets",
+      list_actions_variables: "查看 Variables", set_actions_variable: "设置 Variable",
+      request_file: "请求上传文件",
+      get_repo_info: "仓库信息",
+      add_comment: "添加评论", close_issue: "关闭 Issue", close_pr: "关闭 PR",
+      get_commit_diff: "查看提交变更", get_pr_files: "PR 文件变更",
+      compare_commits: "对比 commit/分支", search_and_replace: "全仓库搜索替换", auto_review: "自动代码审查",
+      create_release: "创建 Release", list_releases: "列出 Release",
+      submit_pr_review: "PR 代码审查",
+      get_latest_release: "获取最新 Release", get_merged_prs_since: "获取已合并 PR",
+      get_run_artifacts: "查询构建产物",
+      report_tool_issue: "上报工具问题", propose_tool_fix: "提交改进方案",
+    };
+    const MAX_ROUNDS_PER_BATCH = 20;
+    const MAX_BATCHES = 3;
+    const TASK_TIMEOUT_MS = 480_000;
+    const taskStartTime = Date.now();
+    const isTaskTimedOut = () => Date.now() - taskStartTime >= TASK_TIMEOUT_MS;
+    let currentStepId: string | null = resumedLastStepId;
+    let workflowPlan: PlanStep[] = [];
+    const stepFinalizedIds = new Set<string>();
+    let nudgeCount = 0;
+    const MAX_NUDGE = 2;
+    let totalRound = 0;
+    let planSent = false;
+    const stepFailCount = new Map<string, number>();
+    const MAX_SMART_RETRIES = 2;
+    let reasoningContentEverSeen = historyHasReasoning;
+
+    if (isResuming) {
+      fullMessages.push({
+        role: "user",
+        content: `⚠️ 系统提示：这是一次断点恢复执行。上次任务在步骤 "${resumedLastStepId ?? "未知"}" 时因批次耗尽而中断。` +
+          `\n请直接继续执行剩余未完成的步骤，不要重新输出 PLAN，直接从下一个工具调用开始。`,
+      });
+    }
+
+    for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    let batchDone = false;
+    for (let round = 0; round < MAX_ROUNDS_PER_BATCH; round++, totalRound++) {
+      if (abortSig.aborted) { batchDone = true; break; }
+
+      if (isTaskTimedOut()) {
+        console.warn(`[timeout] 任务超时（已运行 ${Math.round((Date.now() - taskStartTime) / 1000)}s），自动中断`);
+        if (workflowDbId) {
+          await dbSaveSnapshot(workflowDbId, fullMessages, currentStepId, true);
+        }
+        await sendTyped({ type: "status_info", message: "⏱️ 任务执行超时（超过 8 分钟），已自动暂停。您可以在「任务历史」中点击「恢复执行」继续。" });
+        await sendTyped({ type: "timeout", workflow_id: workflowDbId ?? undefined });
+        batchDone = true;
+        break;
+      }
+
+      let assistantText = "";
+      let thinkingStarted = false;
+      let fcToolCall: LLMResult["toolCall"] = null;
+      let lastReasoningContent: string | undefined;
+
+      const onThinkingChunk = async (chunk: string) => {
+        if (!thinkingStarted) {
+          await sendTyped({ type: "think_start" });
+          thinkingStarted = true;
+        }
+        await sendTyped({ type: "think_chunk", content: chunk });
+      };
+
+      const onUsageCb = (usage: LLMUsage) => {
+        sendTyped({ type: "usage", prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, total_tokens: usage.total_tokens, model: usage.model, providerType: usage.type }).catch(() => {});
+      };
+
+      try {
+        const llmResult = await callLLM(modelConfig, await buildLLMContext(fullMessages, modelConfig, abortSig), onThinkingChunk, heartbeat, onUsageCb);
+        assistantText = llmResult.text;
+        fcToolCall = llmResult.toolCall;
+        lastReasoningContent = llmResult.reasoningContent;
+        if (llmResult.reasoningContent) reasoningContentEverSeen = true;
+        if (thinkingStarted) await sendTyped({ type: "think_end" });
+      } catch (e) {
+        const errMsg = (e as Error).message ?? String(e);
+        const isPermanent =
+          errMsg.includes("HTTP 401") || errMsg.includes("HTTP 403") || errMsg.includes("HTTP 402") ||
+          errMsg.includes("401）") || errMsg.includes("403）") || errMsg.includes("402）") ||
+          errMsg.includes("认证失败") || errMsg.includes("无权限") || errMsg.includes("余额不足");
+        const isTransient =
+          errMsg.includes("HTTP 429") || errMsg.includes("429）") ||
+          errMsg.includes("限流") || errMsg.includes("超时") ||
+          errMsg.includes("LLM 网络") || errMsg.includes("5") && /HTTP 5\d\d/.test(errMsg);
+
+        if (isPermanent) {
+          console.error(`[batch ${batch}] 永久错误，终止任务：${errMsg}`);
+          await streamAnswer(`❌ AI 调用失败（配置错误）：${errMsg}`, sendChunk);
+          batchDone = true;
+          break;
+        }
+
+        if (isTransient && round < MAX_ROUNDS_PER_BATCH - 1) {
+          const retryDelay = 3000;
+          console.warn(`[batch ${batch} round ${round}] 瞬时错误，${retryDelay}ms 后重试：${errMsg}`);
+          await sendTyped({ type: "status_warning", message: `遇到临时错误，${retryDelay / 1000}s 后自动重试…` });
+          await new Promise(r => setTimeout(r, retryDelay));
+          continue;
+        }
+
+        console.error(`[batch ${batch} round ${round}] 错误终止：${errMsg}`);
+        await streamAnswer(`❌ AI 调用失败：${errMsg}`, sendChunk);
+        batchDone = true;
+        break;
+      }
+
+      const rawText = assistantText;
+      assistantText = stripCodeFences(assistantText);
+
+      if (!planSent && !isResuming) {
+        const plan = extractPlan(rawText);
+        if (plan && plan.length > 0) {
+          planSent = true;
+          workflowPlan = plan;
+          await sendTyped({ type: "plan", steps: plan });
+          const firstMsg = messages[messages.length - 1]?.content ?? "";
+          workflowDbId = await dbCreateWorkflow(userId, `${owner}/${repo}`, firstMsg, plan);
+        }
+        assistantText = assistantText.replace(/\bPLAN\s*:\s*\{[\s\S]*?\}\s*/i, "").trim();
+      }
+
+      const stepMarker = extractStepMarker(assistantText);
+      if (stepMarker && stepMarker !== currentStepId) {
+        if (currentStepId) {
+          await sendTyped({ type: "step_end", stepId: currentStepId, status: "done" });
+          stepFinalizedIds.add(currentStepId);
+          if (workflowDbId) {
+            await dbUpdateStep(workflowDbId, currentStepId, {
+              status: "done", finished_at: new Date().toISOString(),
+            });
+          }
+        }
+        currentStepId = stepMarker;
+        await sendTyped({ type: "step_start", stepId: currentStepId });
+        if (workflowDbId) {
+          await dbUpdateStep(workflowDbId, currentStepId, {
+            status: "running", started_at: new Date().toISOString(),
+          });
+        }
+      }
+      assistantText = assistantText.replace(/\bSTEP\s*:\s*\S+[ \t]*\n?/i, "").trim();
+
+      const toolCall = fcToolCall
+        ? {
+            tool: fcToolCall.name,
+            ...fcToolCall.arguments,
+            _fcId: fcToolCall.id,
+          }
+        : extractToolCall(assistantText);
+      if (!toolCall) {
+        const isTaskDone =
+          /\bTASK_DONE\b/.test(assistantText) ||
+          /(?:全部步骤已完成|所有步骤(?:均)?已完成|任务(?:已)?全部完成|已全部完成)/.test(assistantText);
+
+        const isFCModel = supportsFunctionCalling(modelConfig.type, modelConfig.model);
+        const taskOngoing = isAutoMode && !isTaskDone && !isFCModel;
+        if (taskOngoing && nudgeCount < MAX_NUDGE) {
+          nudgeCount++;
+          console.log(`[nudge ${nudgeCount}] totalRound=${totalRound} currentStepId=${currentStepId} 无工具调用，注入纠正提示`);
+          const displayText = assistantText.replace(/\bPLAN\s*:\s*\{[\s\S]*?\}/i, "").replace(/\bTASK_DONE\b\s*/g, "").trim();
+          if (displayText) await sendChunk(displayText + "\n");
+          fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+          fullMessages.push({
+            role: "user",
+            content: "⚠️ 系统提示：你刚才没有输出工具调用 JSON。请直接输出下一个工具的 JSON，不要有任何 markdown 围栏或额外解释，格式示例：\n{\"tool\":\"list_files\",\"path\":\"\"}\n请继续执行任务。",
+          });
+          continue;
+        }
+
+        if (currentStepId) {
+          await sendTyped({ type: "step_end", stepId: currentStepId, status: "done" });
+          stepFinalizedIds.add(currentStepId);
+          if (workflowDbId) {
+            await dbUpdateStep(workflowDbId, currentStepId, {
+              status: "done", finished_at: new Date().toISOString(),
+            });
+          }
+          currentStepId = null;
+        }
+        if (workflowPlan.length > 0) {
+          for (const s of workflowPlan) {
+            if (stepFinalizedIds.has(s.id)) continue;
+            stepFinalizedIds.add(s.id);
+            await sendTyped({ type: "step_end", stepId: s.id, status: "done" });
+            if (workflowDbId) {
+              await dbUpdateStep(workflowDbId, s.id, {
+                status: "done", finished_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+        if (workflowDbId) await dbFinishWorkflow(workflowDbId);
+        const finalDisplayText = assistantText.replace(/\bTASK_DONE\b\s*/g, "").trim();
+        await streamAnswer(finalDisplayText, sendChunk, 10, () => abortSig.aborted);
+        batchDone = true;
+        break;
+      }
+
+      nudgeCount = 0;
+
+      const _toolJsonStr = JSON.stringify(toolCall);
+      const toolKeyIdx = assistantText.indexOf('"tool"');
+      const braceIdx = toolKeyIdx !== -1 ? assistantText.lastIndexOf("{", toolKeyIdx) : -1;
+      const beforeText = braceIdx > 0 ? assistantText.slice(0, braceIdx).trim() : "";
+      if (beforeText) await sendChunk(beforeText + "\n\n");
+
+      const label = TOOL_LABELS[String(toolCall.tool)] || toolCall.tool;
+      const hint = toolCall.tool === "read_file" && (toolCall.start_line || toolCall.end_line)
+        ? `${toolCall.path} 第${toolCall.start_line || "1"}–${toolCall.end_line || "末尾"}行`
+        : toolCall.tool === "patch_file"
+          ? `${toolCall.path} 第${toolCall.start_line}–${toolCall.end_line}行`
+          : toolCall.tool === "get_workflow_runs"
+            ? `workflow: ${toolCall.workflow_id || "全部"}`
+            : toolCall.tool === "get_run_jobs" || toolCall.tool === "cancel_workflow_run" || toolCall.tool === "rerun_workflow_run"
+              ? `run_id: ${toolCall.run_id}`
+              : toolCall.tool === "get_job_logs"
+                ? toolCall.start_line
+                  ? `job_id: ${toolCall.job_id} 行 ${toolCall.start_line}–${toolCall.end_line || "末尾"}`
+                  : `job_id: ${toolCall.job_id}`
+                : toolCall.tool === "trigger_workflow"
+                  ? `${toolCall.workflow_id} @ ${toolCall.ref}`
+                  : toolCall.tool === "merge_pull_request"
+                    ? `PR #${toolCall.pull_number}`
+                    : toolCall.tool === "file_tree"
+                      ? `${toolCall.path || "/"} (深度${toolCall.depth || 3})`
+                      : toolCall.tool === "grep_in_file"
+                        ? `${toolCall.path} → "${toolCall.pattern}"`
+                        : toolCall.tool === "batch_read"
+                          ? toolCall.paths
+                          : toolCall.path || toolCall.query || toolCall.title || toolCall.branch || "";
+      
+      const toolCallId = `tool-${Date.now()}-${totalRound}`;
+
+      if (abortSig.aborted) { batchDone = true; break; }
+      if (!currentStepId && workflowPlan.length > 0) {
+        const nextStep = workflowPlan.find(s => !stepFinalizedIds.has(s.id));
+        if (nextStep) {
+          currentStepId = nextStep.id;
+          await sendTyped({ type: "step_start", stepId: currentStepId });
+          if (workflowDbId) {
+            await dbUpdateStep(workflowDbId, currentStepId, {
+              status: "running", started_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+      if (toolCall.tool === "request_file") {
+        const fileReqId = `freq-${Date.now()}`;
+        await sendTyped({
+          type: "file_request",
+          id: fileReqId,
+          filename: toolCall.filename || "file",
+          description: toolCall.description || "请上传所需文件",
+          mime_types: toolCall.mime_types || "",
+        });
+        if (fcToolCall) {
+          fullMessages.push({
+            role: "assistant", content: "",
+            tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }],
+          });
+          fullMessages.push({ role: "tool", content: `已向用户请求上传文件"${toolCall.filename || 'file'}"，请继续等待用户上传。`, tool_call_id: fcToolCall.id });
+        } else {
+          fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+          fullMessages.push({
+            role: "user",
+            content: `已向用户请求上传文件"${toolCall.filename || 'file'}"，请继续等待用户上传。上传完成后系统会将文件内容附加到对话中。`,
+          });
+        }
+        batchDone = true;
+        break;
+      }
+
+      if (toolCall.tool === "report_tool_issue") {
+        const toolName   = String(toolCall.tool_name || "unknown");
+        const issue      = String(toolCall.issue || "");
+        const severity   = String(toolCall.severity || "medium");
+        const context    = String(toolCall.context || `repo: ${owner}/${repo}`);
+        let savedId: string | null = null;
+
+        savedId = saveAiToolIssue({
+          tool_name: toolName, issue, severity, context,
+          submitted_by: `${modelConfig.type}@${owner}/${repo}`,
+        });
+
+        await sendTyped({ type: "tool_issue_reported", tool_name: toolName, severity, proposal_id: savedId });
+
+        const ack = `✅ 已上报工具问题（${toolName} · ${severity}）${savedId ? `，提案 ID: ${savedId.slice(0, 8)}` : ""}`;
+        if (fcToolCall) {
+          fullMessages.push({ role: "assistant", content: "", tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }] });
+          fullMessages.push({ role: "tool", content: ack, tool_call_id: fcToolCall.id });
+        } else {
+          fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+          fullMessages.push({ role: "user", content: ack });
+        }
+        continue;
+      }
+
+      if (toolCall.tool === "propose_tool_fix") {
+        const toolName    = String(toolCall.tool_name || "unknown");
+        const explanation = String(toolCall.explanation || "");
+        const codeBefore  = String(toolCall.code_before || "");
+        const codeAfter   = String(toolCall.code_after || "");
+        let savedId: string | null = null;
+
+        savedId = saveAiToolFix({
+          tool_name: toolName,
+          explanation,
+          code_before: codeBefore,
+          code_after: codeAfter,
+          context: `repo: ${owner}/${repo}`,
+          submitted_by: `${modelConfig.type}@${owner}/${repo}`,
+        });
+
+        await sendTyped({ type: "tool_fix_proposed", tool_name: toolName, proposal_id: savedId });
+
+        const ack = `✅ 已保存改进方案（${toolName}）${savedId ? `，提案 ID: ${savedId.slice(0, 8)}` : ""}`;
+        if (fcToolCall) {
+          fullMessages.push({ role: "assistant", content: "", tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }] });
+          fullMessages.push({ role: "tool", content: ack, tool_call_id: fcToolCall.id });
+        } else {
+          fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+          fullMessages.push({ role: "user", content: ack });
+        }
+        continue;
+      }
+
+      const startTime = Date.now();
+      let toolResult = "";
+      let isCached = false;
+      const toolName = String(toolCall.tool);
+      const cacheKey = `${toolName}:${JSON.stringify(toolCall)}`;
+      
+      const readOnlyTools = new Set([
+        "list_files", "read_file", "get_file_info", "search_code",
+        "grep_in_repo", "file_tree", "grep_in_file", "batch_read",
+        "get_code_outline", "read_function", "list_branches", "list_commits",
+        "list_pull_requests", "get_pr_files", "list_issues", "search_issues",
+        "get_issue_details", "get_repo_info", "get_commit_diff", "compare_commits",
+        "list_workflows", "get_workflow_runs", "check_run_status",
+        "get_run_jobs", "get_job_logs", "list_actions_secrets",
+        "list_actions_variables", "get_run_artifacts", "list_releases",
+        "get_latest_release", "get_merged_prs_since", "request_file"
+      ]);
+      
+      const writeOpTools = new Set([
+        "patch_file", "write_file", "delete_file", "batch_patch",
+        "create_branch", "create_pr", "resolve_git_conflict", "merge_pull_request", "add_comment",
+        "update_issue", "close_issue", "create_issue"
+      ]);
+      const isWriteOp = writeOpTools.has(toolName);
+
+      await sendTyped({ 
+        type: isWriteOp ? "tool_queued" : "tool_start", 
+        id: toolCallId, 
+        tool: toolCall.tool, 
+        label, 
+        hint 
+      });
+
+      try { 
+        await heartbeat();
+
+        if (globalCircuitBreaker.isOpen(toolName)) {
+          throw new Error(`【熔断拦截】工具 "${toolName}" 近期连续失败过多，为防止风险已自动熔断冷却。请暂缓或尝试其他方案。`);
+        }
+        
+        SecurityPolicyEngine.validate(toolName, toolCall, targetBranch);
+
+        if (readOnlyTools.has(toolName) && requestCache.has(cacheKey)) {
+          toolResult = requestCache.get(cacheKey)!;
+          isCached = true;
+          console.log(`[Cache Hit] ${toolName} -> ${cacheKey}`);
+        } else {
+          if (isWriteOp) {
+            writeTaskQueue.enqueue(toolCallId, toolName);
+            await writeOpSemaphore.acquire();
+            writeTaskQueue.updateState(toolCallId, "running");
+            await sendTyped({ type: "tool_start", id: toolCallId, tool: toolCall.tool, label, hint });
+          }
+
+          try {
+            toolResult = await executeTool(ctx, toolCall, targetBranch);
+          } finally {
+            if (isWriteOp) {
+              writeOpSemaphore.release();
+            }
+          }
+
+          if (readOnlyTools.has(toolName)) {
+            requestCache.set(cacheKey, toolResult);
+          }
+        }
+      }
+      catch (e) { toolResult = `工具执行出错：${(e as Error).message}`; }
+      
+      const elapsedMs = Date.now() - startTime;
+      const businessResultTools = new Set([
+        "trigger_and_monitor_build",
+        "check_run_status",
+      ]);
+      const isBusinessResult = businessResultTools.has(String(toolCall.tool));
+      const toolFailed = !isBusinessResult && (
+        toolResult.startsWith("工具执行出错：") || toolResult.startsWith("❌")
+      );
+      const toolStatus = toolFailed ? "fail" : "success";
+
+      if (toolFailed) {
+        globalCircuitBreaker.recordFailure(toolName);
+        if (isWriteOp) writeTaskQueue.updateState(toolCallId, "failed", { error: toolResult });
+      } else {
+        globalCircuitBreaker.recordSuccess(toolName);
+        if (isWriteOp) writeTaskQueue.updateState(toolCallId, "completed", { result: toolResult });
+      }
+
+      MetricsLogger.log({
+        tool: toolName,
+        status: toolStatus,
+        elapsedMs,
+        cached: isCached,
+        errorMsg: toolFailed ? toolResult.slice(0, 200) : undefined
+      });
+
+      const toolProtocolOutput = normalizeResultProtocol(toolResult, toolFailed);
+      
+      await sendTyped({ 
+        type: "tool_end", 
+        id: toolCallId, 
+        status: toolStatus, 
+        result: toolProtocolOutput.slice(0, 2000),
+        elapsedMs 
+      });
+      
+      toolResult = toolProtocolOutput;
+
+      if (toolFailed && currentStepId) {
+        const failKey = currentStepId;
+        const prevFails = (stepFailCount.get(failKey) ?? 0) + 1;
+        stepFailCount.set(failKey, prevFails);
+
+        if (workflowDbId) {
+          await dbUpdateStep(workflowDbId, currentStepId, { retry_count: prevFails });
+        }
+        await sendTyped({ type: "step_retry", stepId: currentStepId, retryCount: prevFails });
+
+        if (prevFails < MAX_SMART_RETRIES) {
+          console.log(`[smart-retry] step=${failKey} failCount=${prevFails}，注入错误分析，LLM 决定下一步`);
+          const retryContent = [
+            `⚠️ 工具执行失败（第 ${prevFails} 次，最多允许 ${MAX_SMART_RETRIES} 次）。`,
+            `\n\n错误详情：\n${toolResult.slice(0, 2000)}`,
+            `\n\n请分析上述错误，判断失败原因（参数错误？路径不存在？权限问题？），`,
+            `然后采取修正行动：换用正确参数重试、换一个工具、或拆分步骤。`,
+            `不要重复使用完全相同的参数。`,
+          ].join("");
+          if (fcToolCall) {
+            fullMessages.push({
+              role: "assistant", content: "",
+              tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }],
+            });
+            fullMessages.push({ role: "tool", content: retryContent, tool_call_id: fcToolCall.id });
+          } else {
+            fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+            fullMessages.push({ role: "user", content: retryContent });
+          }
+          break;
+        }
+
+        console.warn(`[smart-retry] step=${failKey} 已达失败上限 ${MAX_SMART_RETRIES}，终止`);
+        await sendTyped({ type: "step_end", stepId: currentStepId, status: "error" });
+        if (currentStepId) stepFinalizedIds.add(currentStepId);
+        if (workflowDbId) {
+          await dbUpdateStep(workflowDbId, currentStepId, {
+            status: "error", finished_at: new Date().toISOString(),
+          });
+          await dbFinishWorkflow(workflowDbId);
+        }
+        currentStepId = null;
+        const repairInstruction = [
+          `⚠️ 系统提示：步骤 "${failKey}" 已连续失败 ${MAX_SMART_RETRIES} 次，自动修复终止。`,
+          `\n最终错误：${toolResult.slice(0, 1000)}`,
+          `\n\n请根据以上错误信息，以 Markdown 清单格式输出完整的手动修复步骤，`,
+          `帮助用户自行处理问题。不要再调用工具，直接输出清单即可。`,
+        ].join("");
+        if (fcToolCall) {
+          fullMessages.push({
+            role: "assistant", content: "",
+            tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }],
+          });
+          fullMessages.push({ role: "tool", content: repairInstruction, tool_call_id: fcToolCall.id });
+        } else {
+          fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+          fullMessages.push({ role: "user", content: repairInstruction });
+        }
+        try {
+          const repairResult = await callLLM(
+            { ...modelConfig, temperature: 0.3 },
+            fullMessages,
+          );
+          await streamAnswer(repairResult.text, sendChunk, 10, () => abortSig.aborted);
+        } catch (_e) {
+          await streamAnswer(
+            `⚠️ 步骤 "${failKey}" 执行失败（已重试 ${MAX_SMART_RETRIES} 次），自动修复终止。请检查上方日志并手动处理。`,
+            sendChunk,
+          );
+        }
+        batchDone = true;
+        break;
+      }
+
+      const fileContentTools = ["read_file", "batch_read", "grep_in_file", "get_file_info", "get_code_outline", "read_function"];
+      const resultLimit = fileContentTools.includes(String(toolCall.tool)) ? 30000 : 4000;
+      const truncatedRaw = toolResult.length > resultLimit
+        ? toolResult.slice(0, resultLimit) + `\n…（内容已截断，原始长度 ${toolResult.length} 字符，如需完整内容请重新调用工具并缩小查询范围）`
+        : toolResult;
+        
+      const normalizedResult = JSON.stringify({
+        status: toolStatus,
+        cost: { latency_ms: elapsedMs, cached: isCached },
+        data: truncatedRaw
+      });
+      const truncatedResult = normalizedResult;
+      if (fcToolCall) {
+        fullMessages.push({
+          role: "assistant", content: "",
+          tool_calls: [{ id: fcToolCall.id, type: "function", function: { name: fcToolCall.name, arguments: JSON.stringify(fcToolCall.arguments) } }],
+        });
+        fullMessages.push({ role: "tool", content: truncatedResult, tool_call_id: fcToolCall.id });
+      } else {
+        fullMessages.push({ role: "assistant", content: rawText, ...(reasoningContentEverSeen ? { reasoning_content: lastReasoningContent ?? "" } : {}) });
+        fullMessages.push({
+          role: "user",
+          content: `工具执行结果：\n${truncatedResult}\n\n请根据结果继续执行下一步。若还有未完成的步骤，继续调用工具；若全部步骤已完成，在回复最开头输出 TASK_DONE，然后跟一句简洁的完成总结，不要再输出工具 JSON。`,
+        });
+      }
+
+      if (fullMessages.length > 60) {
+        const system = fullMessages[0];
+        const head   = fullMessages.slice(1, 5);
+        const tail   = fullMessages.slice(-20);
+        const mid    = fullMessages.slice(5, fullMessages.length - 20);
+        const toolCallCount = mid.filter(m => m.role === "assistant").length;
+        const summary: Message = {
+          role: "user",
+          content: `[系统摘要] 上面已省略 ${mid.length} 条中间过程消息（约 ${toolCallCount} 次工具调用）。` +
+            `任务仍在继续，请根据最近上下文继续执行剩余步骤。`,
+        };
+        fullMessages.splice(0, fullMessages.length, system, ...head, summary, ...tail);
+        fullMessages = sanitizeToolCallMessages(fullMessages);
+        console.log(`[ctx-compress] 压缩后 messages=${fullMessages.length}，省略了 ${mid.length} 条中间消息`);
+      }
+
+      if (workflowDbId && totalRound > 0 && totalRound % 5 === 0) {
+        await dbSaveSnapshot(workflowDbId, fullMessages, currentStepId, false);
+        console.log(`[auto-snapshot] totalRound=${totalRound} workflowId=${workflowDbId} 自动保存快照`);
+      }
+
+      if (round === MAX_ROUNDS_PER_BATCH - 1) {
+        const hasMoreBatches = batch < MAX_BATCHES - 1;
+        if (hasMoreBatches) {
+          console.log(`[auto-continue] batch=${batch} totalRound=${totalRound} 自动续跑`);
+          await sendTyped({ type: "status_info", message: `第 ${batch + 1} 批任务完成，继续执行剩余步骤…` });
+          if (workflowDbId) {
+            await dbSaveSnapshot(workflowDbId, fullMessages, currentStepId, false);
+          }
+          fullMessages.push({
+            role: "user",
+            content: "⚠️ 系统提示：由于任务较复杂，请继续执行剩余未完成的步骤。不要重新输出 PLAN，直接从下一个工具调用开始继续。",
+          });
+          nudgeCount = 0;
+        } else {
+          if (currentStepId) {
+            await sendTyped({ type: "step_end", stepId: currentStepId, status: "done" });
+            if (workflowDbId) {
+              await dbUpdateStep(workflowDbId, currentStepId, {
+                status: "done", finished_at: new Date().toISOString(),
+              });
+            }
+          }
+          if (workflowDbId) {
+            await dbSaveSnapshot(workflowDbId, fullMessages, currentStepId, true);
+            dbMarkInterrupted(workflowDbId);
+          }
+          await streamAnswer(
+            `⚠️ 已达到最大工具调用轮次（${totalRound + 1} 轮），任务可能未完全完成。\n` +
+            `💾 进度已自动保存，可在「任务历史」中点击「恢复执行」继续未完成的步骤。`,
+            sendChunk
+          );
+          batchDone = true;
+        }
+      }
+    }
+
+    if (batchDone || abortSig.aborted) break;
+    }
+
+    if (abortSig.aborted && workflowDbId) {
+      await dbSaveSnapshot(workflowDbId, fullMessages, currentStepId, true);
+      dbMarkInterrupted(workflowDbId);
+    }
+
+    if (!abortSig.aborted && workflowDbId) await dbFinishWorkflow(workflowDbId);
+    clearInterval(heartbeatTimer);
+    await sendDone();
+    } catch (fatalErr) {
+      console.error("[IIFE fatal]", (fatalErr as Error).message);
+      // @ts-ignore: heartbeatTimer is defined in outer scope
+      if (typeof heartbeatTimer !== 'undefined') clearInterval(heartbeatTimer);
+      try { await streamAnswer(`❌ 内部错误：${(fatalErr as Error).message}`, sendChunk); } catch {}
+      try { await sendError("INTERNAL_ERROR", (fatalErr as Error).message); } catch {}
+    }
+  })();
+
+    const finishedAt = Date.now();
+    const durationSec = (finishedAt - startedAt) / 1000;
+    onMetrics?.({
+      startedAt,
+      firstTokenAt,
+      finishedAt,
+      ttft: firstTokenAt ? firstTokenAt - startedAt : undefined,
+      throughput: durationSec > 0 ? Math.round(totalChars / durationSec) : undefined,
+      streamId,
+      interruptReason: abortSig.aborted ? "user_stop" : "completed",
+    });
+    onComplete();
+  } catch (fatalErr) {
+    console.error("[runAiAgent fatal]", (fatalErr as Error).message);
+    try { onError(fatalErr as Error); } catch {}
+  }
+}
