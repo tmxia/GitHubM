@@ -1,0 +1,2121 @@
+
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import FileTree from '@/components/code/FileTree';
+import MarkdownRenderer from '@/components/common/MarkdownRenderer';
+import { CodeEditor } from '@/components/code/CodeEditor';
+import type { CodeEditorRef } from '@/components/code/CodeEditor';
+import { EditorSearchPanel } from '@/components/code/EditorSearchPanel';
+import {
+  ChevronRight,
+  ArrowLeft,
+  Download,
+  Copy,
+  Pencil,
+  X,
+  Save,
+  Plus,
+  FilePlus,
+  FolderPlus,
+  Trash2,
+  MoveRight,
+  Loader2,
+  Upload,
+  XCircle,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  History,
+  FolderOpen,
+  ClipboardCopy,
+  Link,
+  FileEdit,
+  Image as ImageIcon,
+  Search,
+  ArrowUpNarrowWide,
+  ArrowUpDown,
+  ArrowDownWideNarrow,
+  ChevronUp,
+  ChevronDown,
+  ZoomIn,
+  ZoomOut,
+  PanelLeftOpen,
+  PanelLeftClose,
+  MoreHorizontal,
+  GitBranch,
+  TerminalSquare,
+  Maximize2,
+  Minimize2,
+  Undo2,
+  Redo2,
+  Menu,
+  BookOpen,
+  WrapText,
+  MessageSquare,
+
+  CheckSquare,
+  Square,} from 'lucide-react';
+import { gqlGetFilesLastCommit } from '@/services/github-graphql';
+import { FEATURE_FLAGS, getFeatureFlag, subscribeFeatureFlags } from '@/lib/preferences';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
+  getRepoContents,
+  getBranches,
+  updateFileContent,
+  createFileContent,
+  deleteFileContent,
+  getFileInfo,
+  deleteFolderContents,
+} from '@/services/github';
+import { useAuth } from '@/contexts/AuthContext';
+import type { GitHubContent, GitHubBranch } from '@/types/types';
+import { toast } from 'sonner';
+import { decodeBase64Content, copyToClipboard } from '@/lib/utils';
+import { getFileIconInfo, isImageFile } from '@/components/common/FileIcon';
+import i18n from "@/i18n";
+import { useRepoPermissions } from '@/hooks/use-repo-permissions';
+
+async function downloadCodeFile(url: string, filename: string, token: string): Promise<void> {
+  const bridge = (window as unknown as {
+    AndroidBridge?: { downloadFile?: (u: string, f: string, t: string) => void }
+  }).AndroidBridge;
+  if (bridge?.downloadFile) {
+    bridge.downloadFile(url, filename, token);
+    return;
+  }
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+
+type ActionMode =
+  | 'edit'
+  | 'new-file'
+  | 'new-folder'
+  | 'delete-file'
+  | 'delete-folder'
+  | 'rename'
+  | 'move'
+  | 'upload';
+
+interface UploadFile {
+  id: string;
+  file: File;
+  status: 'pending' | 'uploading' | 'success' | 'error' | 'skipped';
+  error?: string;
+  targetPath: string;
+}
+
+export interface EditorSyntaxError {
+  line: number;
+  column: number;
+  message: string;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result as ArrayBuffer);
+      const CHUNK = 8192;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      resolve(btoa(binary));
+    };
+    reader.onerror = () => reject(new Error(i18n.t('读取文件失败')));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function base64ToDataUri(base64: string, filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const mimeMap: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    bmp: 'image/bmp', ico: 'image/x-icon',
+  };
+  const mime = mimeMap[ext] || 'image/png';
+  return `data:${mime};base64,${base64}`;
+}
+
+function FileItemIcon({ filename, isDir, isOpen = false, size = 'w-4 h-4' }: {
+  filename: string;
+  isDir: boolean;
+  isOpen?: boolean;
+  size?: string;
+}) {
+  const { Icon, color } = getFileIconInfo(filename, isDir, isOpen);
+  return <Icon className={`${size} ${color} shrink-0`} />;
+}
+
+function codeNavKey(owner: string, repo: string) {
+  return `code_nav_${owner}_${repo}`;
+}
+function getCodeNavStack(owner: string, repo: string): string[] {
+  try { return JSON.parse(sessionStorage.getItem(codeNavKey(owner, repo)) || '[]'); }
+  catch { return []; }
+}
+function setCodeNavStack(owner: string, repo: string, stack: string[]) {
+  try { sessionStorage.setItem(codeNavKey(owner, repo), JSON.stringify(stack)); }
+  catch {}
+}
+
+function formatCommitTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return i18n.t('刚刚');
+  if (mins < 60) return `${mins}${i18n.t('分钟前')}`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}${i18n.t('小时前')}`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}${i18n.t('天前')}`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}${i18n.t('个月前')}`;
+  return `${Math.floor(months / 12)}${i18n.t('年前')}`;
+}
+
+export default function CodeBrowserPage() {
+  const { owner, repo, '*': filePath = '' } = useParams<{ owner: string; repo: string; '*': string }>();
+  const [searchParams] = useSearchParams();
+  const branchFromUrl = searchParams.get('branch') || '';
+  const returnTo = searchParams.get('returnTo') || `/repos/${owner}/${repo}`;
+  const actionParam = searchParams.get('action') || '';
+  const { canPush } = useRepoPermissions(owner, repo);
+  const navigate = useNavigate();
+  const { token } = useAuth();
+  const [contents, setContents] = useState<GitHubContent[]>([]);
+  const [commitMap, setCommitMap] = useState<Record<string, { date: string; message: string; author: string } | null>>({});
+  const [sortMode, setSortMode] = useState<'default' | 'desc' | 'asc'>(() => {
+    try {
+      const v = localStorage.getItem('code_sort_mode');
+      if (v === 'default' || v === 'desc' || v === 'asc') return v;
+    } catch {}
+    return 'default';
+  });
+  const cycleSortMode = () => {
+    setSortMode((prev) => {
+      const next = prev === 'default' ? 'desc' : prev === 'desc' ? 'asc' : 'default';
+      try { localStorage.setItem('code_sort_mode', next); } catch {}
+      return next;
+    });
+  };
+  const [fileTimeEnabled, setFileTimeEnabled] = useState(() => getFeatureFlag(FEATURE_FLAGS.fileTime));
+  const [sortIncludeDirs, setSortIncludeDirs] = useState(() => getFeatureFlag(FEATURE_FLAGS.sortIncludeDirs));
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileBase64, setFileBase64] = useState<string | null>(null);
+  const [currentFile, setCurrentFile] = useState<GitHubContent | null>(null);
+  const [branches, setBranches] = useState<GitHubBranch[]>([]);
+  const [currentBranch, setCurrentBranch] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  const [actionMode, setActionMode] = useState<ActionMode | null>(null);
+  const [actionTarget, setActionTarget] = useState<GitHubContent | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const [editorFullscreen, setEditorFullscreen] = useState(false);
+  const [editorReadOnly, setEditorReadOnly] = useState(false);
+  
+  const isExternalEntry = !!searchParams.get('returnTo');
+  const [isReadingMode, setIsReadingMode] = useState(false);
+
+  const [editorFontSize, setEditorFontSize] = useState(14);
+
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  
+  const cursorPositionRef = useRef('1:1');
+  const handleCursorChange = useCallback((pos: string) => {
+    cursorPositionRef.current = pos;
+    document.querySelectorAll('.editor-cursor-pos').forEach(el => {
+      el.textContent = pos;
+    });
+  }, []);
+
+  const [wordWrap, setWordWrap] = useState<'on' | 'off'>(
+    window.innerWidth < 768 ? 'on' : 'off'
+  );
+  
+  const [syntaxErrors, setSyntaxErrors] = useState<EditorSyntaxError[]>([]);
+  const [showSyntaxWarning, setShowSyntaxWarning] = useState(false);
+
+  const editorRef = useRef<CodeEditorRef | null>(null);
+
+  const [editContent, setEditContent] = useState('');
+  const [commitMsg, setCommitMsg] = useState('');
+  const [newFileName, setNewFileName] = useState('');
+  const [newFileContent, setNewFileContent] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
+  const [renameTo, setRenameTo] = useState('');
+  const [moveTo, setMoveTo] = useState('');
+
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+  const [uploadCommitMsg, setUploadCommitMsg] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [skipExisting, setSkipExisting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const currentIsImage = currentFile ? isImageFile(currentFile.name) : false;
+
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+  const [treeOpen, setTreeOpen] = useState(false);
+  const [treeVisible, setTreeVisible] = useState(true);
+  const [pendingDirPath, setPendingDirPath] = useState<string | null>(null);
+
+  const loadContents = useCallback(async () => {
+    if (!owner || !repo || !currentBranch) return;
+    setLoading(true);
+    setFileContent(null);
+    setFileBase64(null);
+    setCurrentFile(null);
+    setEditorFullscreen(false);
+    setActionMode(null);
+    setEditContent('');
+    setCommitMsg('');
+    try {
+      const data = await getRepoContents(owner, repo, filePath, currentBranch);
+      if (Array.isArray(data)) {
+        const sorted = [...data].sort((a, b) => {
+          if (a.type === 'dir' && b.type !== 'dir') return -1;
+          if (a.type !== 'dir' && b.type === 'dir') return 1;
+          return a.name.localeCompare(b.name);
+        });
+        setContents(sorted);
+        if (getFeatureFlag(FEATURE_FLAGS.fileTime)) {
+          try {
+            const allItems = sorted.filter((f) => f.type === 'file' || f.type === 'dir');
+
+            if (allItems.length > 0 && currentBranch) {
+
+              const map = await gqlGetFilesLastCommit(owner, repo, currentBranch, allItems.map((f) => f.path));
+              setCommitMap((prev) => ({ ...prev, ...map }));
+            }
+          } catch {}
+        }
+      } else {
+        setCurrentFile(data);
+        if (data.content && data.encoding === 'base64') {
+          const raw = data.content.replace(/\n/g, '');
+          
+          const sizeBytes = Math.floor(raw.length * 0.75);
+          const MAX_EDIT_SIZE = 1.5 * 1024 * 1024;
+          if (sizeBytes > MAX_EDIT_SIZE) {
+            const mb = (sizeBytes / 1024 / 1024).toFixed(2);
+            toast.warning(
+              `${i18n.t('文件过大')}（${mb}MB），${i18n.t('请下载后使用外部编辑器查看')}`,
+              {
+                action: data.download_url
+                  ? {
+                      label: i18n.t('下载'),
+                      onClick: () => {
+                        downloadCodeFile(data.download_url!, data.name, token ?? '').catch(() => {
+                          toast.error(i18n.t('下载失败'));
+                        });
+                      },
+                    }
+                  : undefined,
+                duration: 8000,
+              }
+            );
+            setCurrentFile(data);
+            setFileContent(i18n.t('（文件过大，未加载内容，请下载后查看）'));
+            return;
+          }
+          setFileBase64(raw);
+          if (!isImageFile(data.name)) {
+            const decoded = decodeBase64Content(data.content);
+            setFileContent(decoded);
+            setEditContent(decoded);
+            setCommitMsg(`Update ${data.name}`);
+            
+            if (actionParam === 'rename') {
+              setActionMode('rename');
+              setActionTarget(data);
+              setRenameTo(data.name);
+              setCommitMsg(`Rename ${data.name}`);
+            } else if (actionParam === 'move') {
+              setActionMode('move');
+              setActionTarget(data);
+              setMoveTo(data.path);
+              setCommitMsg(`Move ${data.name}`);
+            } else if (actionParam === 'delete' || actionParam === 'delete-file') {
+              setActionMode('delete-file');
+              setActionTarget(data);
+              setCommitMsg(`Delete ${data.name}`);
+            } else if (actionParam === 'view') {
+              
+              setActionMode('edit');
+              setEditorReadOnly(true);
+              setEditorFullscreen(window.innerWidth < 768);
+            } else {
+              
+              setActionMode('edit');
+              setEditorReadOnly(false);
+              setEditorFullscreen(window.innerWidth < 768);
+            }
+          }
+        } else {
+          setFileContent(i18n.t('（无法解码文件内容）'));
+        }
+      }
+    } catch (err) {
+      toast.error(i18n.t('加载文件内容失败'));
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [owner, repo, filePath, currentBranch]);
+
+
+  useEffect(() => {
+    if (!canPush && selectionMode) {
+      setSelectionMode(false);
+      setSelectedPaths(new Set());
+    }
+  }, [canPush, selectionMode]);
+
+  useEffect(() => {
+    if (!owner || !repo) return;
+    const fullPath = `/repos/${owner}/${repo}/code${filePath ? '/' + filePath : ''}`;
+    const stack = getCodeNavStack(owner, repo);
+    const existingIdx = stack.lastIndexOf(fullPath);
+    if (existingIdx >= 0) {
+      setCodeNavStack(owner, repo, stack.slice(0, existingIdx + 1));
+    } else {
+      setCodeNavStack(owner, repo, [...stack, fullPath]);
+    }
+  }, [owner, repo, filePath]);
+
+  useEffect(() => {
+    if (!owner || !repo) return;
+    getBranches(owner, repo)
+      .then((result) => {
+        setBranches(result.data);
+        if (branchFromUrl && result.data.some((b) => b.name === branchFromUrl)) {
+          setCurrentBranch(branchFromUrl);
+        } else if (result.data.length > 0 && !currentBranch) {
+          setCurrentBranch(result.data[0].name);
+        }
+      })
+      .catch(console.error);
+  }, [owner, repo, currentBranch, branchFromUrl]);
+
+  useEffect(() => { loadContents(); }, [loadContents]);
+
+  useEffect(() => {
+    const unsub = subscribeFeatureFlags(() => {
+      setFileTimeEnabled(getFeatureFlag(FEATURE_FLAGS.fileTime));
+      setSortIncludeDirs(getFeatureFlag(FEATURE_FLAGS.sortIncludeDirs));
+    });
+    return unsub;
+  }, []);
+
+  const displayedContents = useMemo(() => {
+    if (!fileTimeEnabled || sortMode === 'default') return contents;
+    // sortIncludeDirs=true：文件夹参与时间排序
+    // sortIncludeDirs=false：文件夹强制置顶，文件按时间排序（原行为）
+    if (!sortIncludeDirs) {
+      const dirs = contents.filter((c) => c.type === 'dir');
+      const files = contents.filter((c) => c.type !== 'dir');
+      const sortedFiles = [...files].sort((a, b) => {
+        const da = commitMap[a.path]?.date || '';
+        const db = commitMap[b.path]?.date || '';
+        if (!da && !db) return a.name.localeCompare(b.name);
+        if (!da) return 1;
+        if (!db) return -1;
+        const ta = new Date(da).getTime();
+        const tb = new Date(db).getTime();
+        return sortMode === 'desc' ? tb - ta : ta - tb;
+      });
+      return [...dirs, ...sortedFiles];
+    }
+    const sortedAll = [...contents].sort((a, b) => {
+      const da = commitMap[a.path]?.date || '';
+      const db = commitMap[b.path]?.date || '';
+      if (!da && !db) return a.name.localeCompare(b.name);
+      if (!da) return 1;
+      if (!db) return -1;
+      const ta = new Date(da).getTime();
+      const tb = new Date(db).getTime();
+      return sortMode === 'desc' ? tb - ta : ta - tb;
+    });
+    return sortedAll;
+  }, [contents, commitMap, sortMode, fileTimeEnabled, sortIncludeDirs]);
+
+  const closeAction = (returnToParent = false) => {
+    setActionMode(null);
+    setEditorReadOnly(false);
+    setActionTarget(null);
+    setCommitMsg('');
+    setNewFileName('');
+    setNewFileContent('');
+    setNewFolderName('');
+    setRenameTo('');
+    setMoveTo('');
+    setDeleteProgress(null);
+    setEditorFullscreen(false);
+    
+    if (returnToParent && searchParams.get('returnTo')) {
+      navigate(returnTo, { replace: true });
+      return;
+    }
+    if (returnToParent && filePath) {
+      const parentParts = filePath.split('/').slice(0, -1);
+      navigate(
+        `/repos/${owner}/${repo}/code${parentParts.length ? '/' + parentParts.join('/') : ''}`,
+        { replace: true }
+      );
+    }
+  };
+
+  const openAction = (mode: ActionMode, target?: GitHubContent, dirPath?: string) => {
+    setActionMode(mode);
+    setActionTarget(target || null);
+    setPendingDirPath(dirPath !== undefined ? dirPath : null);
+    if (mode === 'edit' && fileContent) {
+      setEditContent(fileContent);
+      setCommitMsg(`Update ${currentFile?.name || 'file'}`);
+      setEditorFullscreen(true);
+    }
+    if (mode === 'new-file') { setNewFileName(''); setNewFileContent(''); setCommitMsg('Add new file'); }
+    if (mode === 'new-folder') { setNewFolderName(''); setCommitMsg('Add new folder'); }
+    if (mode === 'upload') { setUploadFiles([]); setUploadCommitMsg('Upload files'); setUploadProgress(0); setSkipExisting(false); }
+    if (mode === 'rename' && target) { setRenameTo(target.name); setCommitMsg(`Rename ${target.name}`); }
+    if (mode === 'move' && target) { setMoveTo(target.path); setCommitMsg(`Move ${target.name}`); }
+    if (mode === 'delete-file' && target) setCommitMsg(`Delete ${target.name}`);
+    if (mode === 'delete-folder' && target) setCommitMsg(`Delete folder ${target.name}`);
+  };
+
+  const handleSaveEdit = async (force = false) => {
+    if (!owner || !repo || !currentFile || !commitMsg.trim()) { toast.error(i18n.t('请填写提交信息')); return; }
+    if (syntaxErrors.length > 0 && !force) {
+      setShowSyntaxWarning(true);
+      return;
+    }
+    setShowSyntaxWarning(false);
+    setActionBusy(true);
+    try {
+      await updateFileContent(owner, repo, currentFile.path, {
+        message: commitMsg.trim(),
+        content: btoa(unescape(encodeURIComponent(editContent))),
+        sha: currentFile.sha,
+        branch: currentBranch,
+      });
+      toast.success(i18n.t('文件已保存并提交'));
+      closeAction(true);
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('保存失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleCreateFile = async () => {
+    if (!owner || !repo || !newFileName.trim()) { toast.error(i18n.t('请填写文件名')); return; }
+    const baseDir = pendingDirPath !== null ? pendingDirPath : filePath;
+    const targetPath = baseDir ? `${baseDir}/${newFileName.trim()}` : newFileName.trim();
+    const finalMsg = commitMsg.trim() || `Add ${newFileName.trim()}`;
+    setActionBusy(true);
+    try {
+      const existing = await getFileInfo(owner, repo, targetPath, currentBranch);
+      if (existing) { toast.error(i18n.t('文件已存在，请换一个名字')); return; }
+      const b64 = newFileContent ? btoa(unescape(encodeURIComponent(newFileContent))) : btoa('');
+      await createFileContent(owner, repo, targetPath, { message: finalMsg, content: b64, branch: currentBranch });
+      toast.success(`已创建文件 ${newFileName.trim()}`);
+      if (isExternalEntry) {
+        closeAction(true);
+      } else {
+        closeAction();
+        loadContents();
+        setTreeRefreshKey(k => k + 1);
+      }
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('创建失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleCreateFolder = async () => {
+    if (!owner || !repo || !newFolderName.trim()) { toast.error(i18n.t('请填写文件夹名')); return; }
+    const baseDir = pendingDirPath !== null ? pendingDirPath : filePath;
+    const gitkeepPath = baseDir ? `${baseDir}/${newFolderName.trim()}/.gitkeep` : `${newFolderName.trim()}/.gitkeep`;
+    const finalMsg = commitMsg.trim() || `Add ${newFolderName.trim()} folder`;
+    setActionBusy(true);
+    try {
+      await createFileContent(owner, repo, gitkeepPath, { message: finalMsg, content: btoa(''), branch: currentBranch });
+      toast.success(`已创建文件夹 ${newFolderName.trim()}`);
+      if (isExternalEntry) {
+        closeAction(true);
+      } else {
+        closeAction();
+        loadContents();
+      }
+      setTreeRefreshKey(k => k + 1);
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('创建失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const addUploadFiles = useCallback((fileList: FileList | null) => {
+    if (!fileList) return;
+    const prefix = filePath ? `${filePath}/` : '';
+    const newItems: UploadFile[] = Array.from(fileList).map((f) => ({
+      id: `${f.name}-${f.lastModified}-${Math.random()}`,
+      file: f, status: 'pending',
+      targetPath: `${prefix}${f.name}`,
+    }));
+    setUploadFiles((prev) => [...prev, ...newItems]);
+  }, [filePath]);
+
+  const handleUpload = async () => {
+    if (!owner || !repo) return;
+    const pending = uploadFiles.filter((f) => f.status === 'pending' || f.status === 'error');
+    if (pending.length === 0) { toast.error(i18n.t('没有待上传的文件')); return; }
+    const msg = uploadCommitMsg.trim() || 'Upload files';
+    setUploading(true);
+    setUploadProgress(0);
+    let ok = 0, fail = 0, skip = 0;
+    for (let i = 0; i < pending.length; i++) {
+      const f = pending[i];
+      const tp = f.targetPath.replace(/^\/+/, '');
+      if (!tp) {
+        setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'error', error: i18n.t('路径不能为空') } : x));
+        fail++; continue;
+      }
+      setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'uploading' } : x));
+      try {
+        const base64 = await fileToBase64(f.file);
+        const existing = await getFileInfo(owner, repo, tp, currentBranch);
+        if (existing && skipExisting) {
+          setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'skipped' } : x));
+          skip++;
+        } else if (existing) {
+          await updateFileContent(owner, repo, tp, { message: msg, content: base64, sha: existing.sha, branch: currentBranch });
+          setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'success' } : x));
+          ok++;
+        } else {
+          await createFileContent(owner, repo, tp, { message: msg, content: base64, branch: currentBranch });
+          setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'success' } : x));
+          ok++;
+        }
+      } catch (err) {
+        const msg2 = err instanceof Error ? err.message : i18n.t('上传失败');
+        setUploadFiles((p) => p.map((x) => x.id === f.id ? { ...x, status: 'error', error: msg2 } : x));
+        fail++;
+      }
+      setUploadProgress(Math.round(((i + 1) / pending.length) * 100));
+    }
+    setUploading(false);
+    const parts = [ok > 0 && `${ok} 个成功`, skip > 0 && `${skip} 个跳过`, fail > 0 && `${fail} 个失败`].filter(Boolean).join('，');
+    if (fail === 0) { toast.success(`上传完成：${parts}`); loadContents(); }
+    else toast.warning(`上传完成：${parts}`);
+  };
+
+  const handleDeleteFile = async () => {
+    if (!owner || !repo || !actionTarget || !commitMsg.trim()) { toast.error(i18n.t('请填写提交信息')); return; }
+    setActionBusy(true);
+    try {
+      await deleteFileContent(owner, repo, actionTarget.path, {
+        message: commitMsg.trim(), sha: actionTarget.sha, branch: currentBranch,
+      });
+      toast.success(`已删除文件 ${actionTarget.name}`);
+      setTreeRefreshKey(k => k + 1);
+      if (isExternalEntry) {
+        closeAction(true);
+      } else {
+        closeAction();
+        if (currentFile?.path === actionTarget.path) {
+          const parentParts = filePath.split('/').slice(0, -1);
+          navigate(`/repos/${owner}/${repo}/code${parentParts.length ? '/' + parentParts.join('/') : ''}`);
+        } else { loadContents(); }
+      }
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('删除失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const toggleSelection = (path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedPaths.size === displayedContents.length) {
+      setSelectedPaths(new Set());
+    } else {
+      setSelectedPaths(new Set(displayedContents.map((i) => i.path)));
+    }
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedPaths(new Set());
+  };
+
+  const handleBatchDelete = async () => {
+    if (!owner || !repo || selectedPaths.size === 0) return;
+    if (!canPush) { toast.error(i18n.t('无删除权限')); return; }
+    setBatchDeleting(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      const items = displayedContents.filter((i) => selectedPaths.has(i.path));
+      for (const item of items) {
+        try {
+          if (item.type === 'file') {
+            await deleteFileContent(owner, repo, item.path, {
+              message: `Delete ${item.name}`,
+              sha: item.sha,
+              branch: currentBranch,
+            });
+          } else {
+            await deleteFolderContents(
+              owner,
+              repo,
+              item.path,
+              currentBranch,
+              `Delete folder ${item.name}`,
+            );
+          }
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
+      if (fail === 0) toast.success(`已删除 ${ok} 项`);
+      else toast.warning(`删除完成：成功 ${ok}，失败 ${fail}`);
+      setBatchDeleteConfirmOpen(false);
+      exitSelectionMode();
+      setTreeRefreshKey((k) => k + 1);
+      loadContents();
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!owner || !repo || !actionTarget || !commitMsg.trim()) { toast.error(i18n.t('请填写提交信息')); return; }
+    setActionBusy(true);
+    setDeleteProgress({ done: 0, total: 0 });
+    try {
+      const result = await deleteFolderContents(
+        owner, repo, actionTarget.path, currentBranch, commitMsg.trim(),
+        (done, total) => setDeleteProgress({ done, total })
+      );
+      if (result.failed === 0) toast.success(`已删除文件夹 ${actionTarget.name}（共 ${result.success} 个文件）`);
+      else toast.warning(`删除完成：${result.success} 个成功，${result.failed} 个失败`);
+      setTreeRefreshKey(k => k + 1);
+      if (isExternalEntry) {
+        closeAction(true);
+      } else {
+        closeAction();
+        loadContents();
+      }
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('删除失败')); }
+    finally { setActionBusy(false); setDeleteProgress(null); }
+  };
+
+  const handleRename = async () => {
+    if (!owner || !repo || !actionTarget || !renameTo.trim() || !commitMsg.trim()) {
+      toast.error(i18n.t('请填写新名称和提交信息')); return;
+    }
+    if (renameTo.trim() === actionTarget.name) { toast.error(i18n.t('新名称与原名称相同')); return; }
+    setActionBusy(true);
+    try {
+      const dirParts = actionTarget.path.split('/');
+      dirParts[dirParts.length - 1] = renameTo.trim();
+      const newPath = dirParts.join('/');
+      if (actionTarget.type === 'file') {
+        const fileInfo = await getFileInfo(owner, repo, actionTarget.path, currentBranch);
+        if (!fileInfo || !fileInfo.content) throw new Error(i18n.t('无法读取文件内容'));
+        await createFileContent(owner, repo, newPath, { message: `${commitMsg.trim()} (rename)`, content: fileInfo.content.replace(/\n/g, ''), branch: currentBranch });
+        await deleteFileContent(owner, repo, actionTarget.path, { message: `${commitMsg.trim()} (remove old)`, sha: actionTarget.sha, branch: currentBranch });
+        toast.success(`已重命名为 ${renameTo.trim()}`);
+        setTreeRefreshKey(k => k + 1);
+        if (isExternalEntry) {
+          closeAction(true);
+        } else {
+          closeAction();
+          navigate(`/repos/${owner}/${repo}/code/${newPath}`);
+        }
+      } else {
+        toast.info(i18n.t('文件夹重命名需要一段时间，请稍候...'));
+        const treeData = await getRepoContents(owner, repo, actionTarget.path, currentBranch) as GitHubContent[];
+        const allFiles: Array<{ path: string; content: string; sha: string }> = [];
+        const collectFiles = async (items: GitHubContent[]) => {
+          for (const item of items) {
+            if (item.type === 'file') {
+              const info = await getFileInfo(owner, repo, item.path, currentBranch);
+              if (info?.content) allFiles.push({ path: item.path, content: info.content.replace(/\n/g, ''), sha: info.sha });
+            } else if (item.type === 'dir') {
+              const sub = await getRepoContents(owner, repo, item.path, currentBranch) as GitHubContent[];
+              await collectFiles(sub);
+            }
+          }
+        };
+        await collectFiles(treeData);
+        for (const f of allFiles) {
+          const newFilePath = newPath + f.path.substring(actionTarget.path.length);
+          await createFileContent(owner, repo, newFilePath, { message: `${commitMsg.trim()} (rename)`, content: f.content, branch: currentBranch });
+        }
+        for (const f of allFiles) {
+          await deleteFileContent(owner, repo, f.path, { message: `${commitMsg.trim()} (remove old)`, sha: f.sha, branch: currentBranch });
+        }
+        toast.success(`已重命名文件夹为 ${renameTo.trim()}`);
+        setTreeRefreshKey(k => k + 1);
+        if (isExternalEntry) {
+          closeAction(true);
+        } else {
+          closeAction();
+          loadContents();
+        }
+      }
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('重命名失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleMove = async () => {
+    if (!owner || !repo || !actionTarget || !moveTo.trim() || !commitMsg.trim()) {
+      toast.error(i18n.t('请填写目标路径和提交信息')); return;
+    }
+    if (moveTo.trim() === actionTarget.path) { toast.error(i18n.t('目标路径与当前路径相同')); return; }
+    if (actionTarget.type !== 'file') { toast.error(i18n.t('暂只支持移动文件')); return; }
+    setActionBusy(true);
+    try {
+      const fileInfo = await getFileInfo(owner, repo, actionTarget.path, currentBranch);
+      if (!fileInfo?.content) throw new Error(i18n.t('无法读取文件内容'));
+      await createFileContent(owner, repo, moveTo.trim(), { message: `${commitMsg.trim()} (move to ${moveTo.trim()})`, content: fileInfo.content.replace(/\n/g, ''), branch: currentBranch });
+      await deleteFileContent(owner, repo, actionTarget.path, { message: `${commitMsg.trim()} (remove original)`, sha: actionTarget.sha, branch: currentBranch });
+      toast.success(`已移动到 ${moveTo.trim()}`);
+      setTreeRefreshKey(k => k + 1);
+      if (isExternalEntry) {
+        closeAction(true);
+      } else {
+        closeAction();
+        loadContents();
+      }
+    } catch (err) { toast.error(err instanceof Error ? err.message : i18n.t('移动失败')); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleCopyPath = (path: string) => {
+    copyToClipboard(path);
+    toast.success(i18n.t('路径已复制'));
+  };
+
+  const handleCopyRawLink = (path: string) => {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${currentBranch}/${path}`;
+    copyToClipboard(rawUrl);
+    toast.success(i18n.t('Raw 链接已复制'));
+  };
+
+  const pathParts = filePath ? filePath.split('/') : [];
+
+  const FileContextMenuContent = ({ item }: { item: GitHubContent }) => (
+    <ContextMenuContent className="bg-popover border-border w-48">
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => navigate(`/repos/${owner}/${repo}/code/${item.path}`)}>
+        <FileItemIcon filename={item.name} isDir={false} size="w-3.5 h-3.5 mr-2" />
+        {i18n.t('查看文件')}</ContextMenuItem>
+      {!isImageFile(item.name) && (
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+          onClick={() => navigate(`/repos/${owner}/${repo}/code/${item.path}`)}>
+          <Pencil className="w-3.5 h-3.5 mr-2" />{i18n.t('编辑文件')}</ContextMenuItem>
+      )}
+      {item.download_url && (
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+          onClick={async () => {
+            try {
+              await downloadCodeFile(item.download_url!, item.name, token ?? '');
+            } catch {
+              toast.error(i18n.t('下载失败，请检查网络或权限'));
+            }
+          }}>
+          <Download className="w-3.5 h-3.5 mr-2" />{i18n.t('下载文件')}</ContextMenuItem>
+      )}
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => handleCopyPath(item.path)}>
+        <ClipboardCopy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制路径')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => handleCopyRawLink(item.path)}>
+        <Link className="w-3.5 h-3.5 mr-2" />{i18n.t('复制 Raw 链接')}</ContextMenuItem>
+      <ContextMenuSeparator className="bg-border" />
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => openAction('rename', item)}>
+        <Pencil className="w-3.5 h-3.5 mr-2" />{i18n.t('重命名')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => openAction('move', item)}>
+        <MoveRight className="w-3.5 h-3.5 mr-2" />{i18n.t('移动到...')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => navigate(`/repos/${owner}/${repo}/commits/${currentBranch}?path=${item.path}`)}>
+        <History className="w-3.5 h-3.5 mr-2" />{i18n.t('查看历史')}</ContextMenuItem>
+      <ContextMenuSeparator className="bg-border" />
+      {canPush && (
+      <ContextMenuItem className="text-destructive cursor-pointer text-sm focus:text-destructive"
+        onClick={() => { setCommitMsg(`Delete ${item.name}`); openAction('delete-file', item); }}>
+        <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除文件')}</ContextMenuItem>
+      )}
+    </ContextMenuContent>
+  );
+
+  const FolderContextMenuContent = ({ item }: { item: GitHubContent }) => (
+    <ContextMenuContent className="bg-popover border-border w-52">
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => navigate(`/repos/${owner}/${repo}/code/${item.path}`)}>
+        <FolderOpen className="w-3.5 h-3.5 mr-2 text-yellow-400" />{i18n.t('打开文件夹')}</ContextMenuItem>
+      <ContextMenuSeparator className="bg-border" />
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => { navigate(`/repos/${owner}/${repo}/code/${item.path}`); setTimeout(() => openAction('new-file'), 100); }}>
+        <FilePlus className="w-3.5 h-3.5 mr-2" />{i18n.t('新建文件')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => { navigate(`/repos/${owner}/${repo}/code/${item.path}`); setTimeout(() => openAction('new-folder'), 100); }}>
+        <FolderPlus className="w-3.5 h-3.5 mr-2" />{i18n.t('新建子文件夹')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => { navigate(`/repos/${owner}/${repo}/code/${item.path}`); setTimeout(() => openAction('upload'), 100); }}>
+        <Upload className="w-3.5 h-3.5 mr-2" />{i18n.t('上传文件')}</ContextMenuItem>
+      <ContextMenuSeparator className="bg-border" />
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => handleCopyPath(item.path)}>
+        <ClipboardCopy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制路径')}</ContextMenuItem>
+      <ContextMenuItem className="text-foreground cursor-pointer text-sm"
+        onClick={() => openAction('rename', item)}>
+        <Pencil className="w-3.5 h-3.5 mr-2" />{i18n.t('重命名')}</ContextMenuItem>
+      <ContextMenuSeparator className="bg-border" />
+      {canPush && (
+      <ContextMenuItem className="text-destructive cursor-pointer text-sm focus:text-destructive"
+        onClick={() => { setCommitMsg(`Delete folder ${item.name}`); openAction('delete-folder', item); }}>
+        <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除文件夹')}</ContextMenuItem>
+      )}
+    </ContextMenuContent>
+  );
+
+  const fsLineCount = editContent.split('\n').length;
+  const fsIsLarge = fsLineCount > 500;
+
+  useEffect(() => {
+    if (actionMode === 'edit') {
+      const timer = setTimeout(() => editorRef.current?.focus(), 80);
+      return () => clearTimeout(timer);
+    }
+  }, [actionMode]);
+
+  return (
+    <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="hidden md:flex flex-col w-12 border-r border-border bg-sidebar shrink-0 items-center py-3 gap-4 z-10">
+        <Button variant="ghost" size="icon" className={`w-10 h-10 rounded-xl ${treeVisible ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => setTreeVisible(true)} title={i18n.t('资源管理器')}>
+          <FolderOpen className="w-5 h-5" />
+        </Button>
+        <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl text-muted-foreground hover:text-foreground" onClick={() => setShowSearchPanel(true)} title={i18n.t('搜索')}>
+          <Search className="w-5 h-5" />
+        </Button>
+        <div className="mt-auto mb-2 flex flex-col gap-4">
+          <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl text-muted-foreground hover:text-foreground" onClick={() => navigate('/repos')} title={i18n.t('返回仓库列表')}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-1 min-w-0 h-full overflow-hidden flex-col md:flex-row">
+        
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/80 shrink-0 min-h-[44px]">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden h-8 w-8 text-muted-foreground hover:bg-secondary shrink-0"
+            onClick={() => setTreeOpen(true)}
+            title={i18n.t('打开文件树')}
+          >
+            <PanelLeftOpen className="w-4 h-4" />
+          </Button>
+        <div className="flex items-center gap-1 text-sm text-muted-foreground flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-none">
+          <button type="button" className="hover:text-primary transition-colors shrink-0 max-w-[100px] truncate" onClick={() => navigate(returnTo)}>{repo}</button>
+          <ChevronRight className="w-3 h-3 shrink-0" />
+          {pathParts.length > 2 && (
+            <span className="flex items-center gap-1 shrink-0">
+              <ChevronRight className="w-3 h-3 text-muted-foreground" />
+              <span className="text-muted-foreground">…</span>
+            </span>
+          )}
+          {pathParts.slice(-2).map((part, i) => {
+            const realIdx = pathParts.length - Math.min(2, pathParts.length) + i;
+            const targetPath = pathParts.slice(0, realIdx + 1).join('/');
+            const targetFullPath = `/repos/${owner}/${repo}/code/${targetPath}`;
+            const isLast = realIdx === pathParts.length - 1;
+            const handleBreadcrumbClick = () => {
+              const stack = getCodeNavStack(owner!, repo!);
+              const targetIdx = stack.lastIndexOf(targetFullPath);
+              const currentIdx = stack.length - 1;
+              if (targetIdx >= 0 && targetIdx < currentIdx) {
+                navigate(targetIdx - currentIdx);
+              } else {
+                navigate(targetFullPath);
+              }
+            };
+            return (
+              <span key={targetPath} className="flex items-center gap-1 shrink-0">
+                <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                <button
+                  type="button"
+                  className={`text-sm ${isLast ? 'text-foreground font-medium cursor-default' : 'text-primary hover:underline cursor-pointer'}`}
+                  onClick={isLast ? undefined : handleBreadcrumbClick}
+                >
+                  {part}
+                </button>
+              </span>
+            );
+          })}
+        </div>
+
+        {branches.length > 0 && currentBranch && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="md:hidden h-7 px-1.5 text-xs gap-1 border-border hover:bg-secondary shrink-0 max-w-[80px]"
+                title={i18n.t('切换分支')}
+              >
+                <GitBranch className="w-3 h-3 text-muted-foreground shrink-0" />
+                <span className="truncate font-mono">{currentBranch}</span>
+                <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52 max-h-64 overflow-y-auto">
+              {branches.map((b) => (
+                <DropdownMenuItem
+                  key={b.name}
+                  onClick={() => setCurrentBranch(b.name)}
+                  className={`font-mono text-xs gap-2 ${b.name === currentBranch ? 'text-primary font-semibold' : ''}`}
+                >
+                  <GitBranch className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate flex-1">{b.name}</span>
+                  {b.name === currentBranch && (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-primary" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {currentBranch && (
+          <Badge variant="outline" className="border-border text-muted-foreground hidden md:flex items-center gap-1 h-6 text-xs shrink-0">
+            <GitBranch className="w-3 h-3" />{currentBranch}
+          </Badge>
+        )}
+
+        </div>
+
+        <div className="flex flex-1 min-w-0 h-full overflow-hidden">
+          
+          {treeVisible && (
+            <aside className="hidden md:flex flex-col w-64 shrink-0 border-r border-border bg-sidebar overflow-hidden">
+              <div className="h-10 px-4 flex items-center justify-between border-b border-border shrink-0">
+                <span className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">{i18n.t('资源管理器')}</span>
+                <Button variant="ghost" size="icon" className="w-6 h-6 text-muted-foreground hover:bg-secondary" onClick={() => setTreeVisible(false)} title={i18n.t('收起侧边栏')}>
+                  <PanelLeftClose className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <FileTree
+              commitMap={commitMap}
+              owner={owner!}
+              repo={repo!}
+              branch={currentBranch}
+              branches={branches}
+              onBranchChange={setCurrentBranch}
+              activePath={filePath || undefined}
+              refreshKey={treeRefreshKey}
+              onFileClick={(item) => navigate(`/repos/${owner}/${repo}/code/${item.path}`)}
+              onNewFile={(dirPath) => openAction('new-file', undefined, dirPath)}
+              onNewFolder={(dirPath) => openAction('new-folder', undefined, dirPath)}
+              onUpload={(dirPath) => { setPendingDirPath(dirPath); openAction('upload', undefined, dirPath); }}
+              onRename={(item) => openAction('rename', item)}
+              onMove={(item) => openAction('move', item)}
+              onDelete={(item) => {
+                setCommitMsg(`Delete ${item.name}`);
+                openAction(item.type === 'dir' ? 'delete-folder' : 'delete-file', item);
+              }}
+              onDownload={(item) => {
+                if (item.download_url) {
+                  downloadCodeFile(item.download_url, item.name, token ?? '').catch(() =>
+                    toast.error(i18n.t('下载失败，请检查网络或权限'))
+                  );
+                }
+              }}
+            />
+          </div>
+          </aside>
+        )}
+
+        <Sheet open={treeOpen} onOpenChange={setTreeOpen}>
+          <SheetContent side="left" className="w-72 p-0 flex flex-col bg-sidebar">
+            <SheetHeader className="px-3 py-2 border-b border-border">
+              <SheetTitle className="text-sm font-medium text-foreground">{repo} {i18n.t('文件树')}</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <FileTree
+                owner={owner!}
+                repo={repo!}
+                branch={currentBranch}
+                branches={branches}
+                onBranchChange={(b) => { setCurrentBranch(b); setTreeOpen(false); }}
+                activePath={filePath || undefined}
+                refreshKey={treeRefreshKey}
+                onFileClick={(item) => { navigate(`/repos/${owner}/${repo}/code/${item.path}`); setTreeOpen(false); }}
+                onNewFile={(dirPath) => { openAction('new-file', undefined, dirPath); setTreeOpen(false); }}
+                onNewFolder={(dirPath) => { openAction('new-folder', undefined, dirPath); setTreeOpen(false); }}
+                onUpload={(dirPath) => { setPendingDirPath(dirPath); openAction('upload', undefined, dirPath); setTreeOpen(false); }}
+                onRename={(item) => { openAction('rename', item); setTreeOpen(false); }}
+                onMove={(item) => { openAction('move', item); setTreeOpen(false); }}
+                onDelete={(item) => {
+                  setCommitMsg(`Delete ${item.name}`);
+                  openAction(item.type === 'dir' ? 'delete-folder' : 'delete-file', item);
+                  setTreeOpen(false);
+                }}
+                onDownload={(item) => {
+                  if (item.download_url) {
+                    downloadCodeFile(item.download_url, item.name, token ?? '').catch(() =>
+                      toast.error(i18n.t('下载失败，请检查网络或权限'))
+                    );
+                  }
+                  setTreeOpen(false);
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        <div className="flex-1 min-w-0 flex flex-col h-full bg-background relative overflow-hidden">
+          
+          {filePath && (
+            <div className="hidden md:flex flex-col shrink-0">
+              <div className="flex items-end px-2 pt-2 h-9 bg-muted/30">
+                <div className="flex items-center gap-2 px-3 h-7 bg-background border-t border-x border-border rounded-t-sm text-sm text-foreground shrink-0 cursor-pointer min-w-[120px] max-w-[200px]">
+                  <FileItemIcon filename={currentFile?.name ?? ''} isDir={false} size="w-4 h-4" />
+                  <span className="truncate flex-1">{currentFile?.name}</span>
+                  <X className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-0.5" onClick={(e) => { e.stopPropagation(); closeAction(true); }} />
+                </div>
+              </div>
+              <div className="flex items-center px-4 h-7 border-b border-border bg-background text-xs text-muted-foreground shrink-0 overflow-x-auto whitespace-nowrap scrollbar-none">
+                <span className="hover:text-foreground cursor-pointer" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</span>
+                <ChevronRight className="w-3 h-3 mx-1 opacity-50" />
+                <span className="hover:text-foreground cursor-pointer" onClick={() => navigate(returnTo)}>{owner}/{repo}</span>
+                <ChevronRight className="w-3 h-3 mx-1 opacity-50" />
+                <span className="hover:text-foreground cursor-pointer" onClick={() => navigate(`/repos/${owner}/${repo}/code`)}>{i18n.t('代码')}</span>
+                {pathParts.map((part, i) => {
+                  const targetPath = pathParts.slice(0, i + 1).join('/');
+                  const targetFullPath = `/repos/${owner}/${repo}/code/${targetPath}`;
+                  const isLast = i === pathParts.length - 1;
+                  const handleBreadcrumbClick = () => {
+                    const stack = getCodeNavStack(owner!, repo!);
+                    const targetIdx = stack.lastIndexOf(targetFullPath);
+                    const currentIdx = stack.length - 1;
+                    if (targetIdx >= 0 && targetIdx < currentIdx) {
+                      navigate(targetIdx - currentIdx);
+                    } else {
+                      navigate(targetFullPath);
+                    }
+                  };
+                  return (
+                    <span key={targetPath} className="flex items-center shrink-0">
+                      <ChevronRight className="w-3 h-3 mx-1 opacity-50" />
+                      <span
+                        className={`${isLast ? 'text-foreground font-medium' : 'hover:text-foreground cursor-pointer'}`}
+                        onClick={isLast ? undefined : handleBreadcrumbClick}
+                      >
+                        {part}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {actionMode === 'edit' && (
+            <div className={`flex flex-col bg-background ${editorFullscreen ? 'fixed inset-0 z-50' : 'hidden md:flex flex-1 min-h-0'}`}>
+              {!isReadingMode && (
+                <div className="flex flex-col">
+                  <div className="flex md:hidden items-center justify-between px-2 h-12 bg-[#2d2d2d] text-white shrink-0 border-b border-white/10 select-none">
+                    <Button variant="ghost" size="icon" className="w-10 h-10 text-white hover:bg-white/10" onClick={() => closeAction(true)} title={i18n.t('返回')}>
+                      <ArrowLeft className="w-5 h-5" />
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="w-9 h-9 text-white hover:bg-white/10" onClick={() => editorRef.current?.undo()} title={i18n.t('撤销')}>
+                        <Undo2 className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="w-9 h-9 text-white hover:bg-white/10" onClick={() => editorRef.current?.redo()} title={i18n.t('重做')}>
+                        <Redo2 className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="w-9 h-9 text-white hover:bg-white/10" onClick={() => setShowSearchPanel(true)} title={i18n.t('搜索/替换')}>
+                        <Search className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="w-9 h-9 text-white hover:bg-white/10" onClick={() => setIsReadingMode(true)} title={i18n.t('阅读模式')}>
+                        <BookOpen className="w-4 h-4" />
+                      </Button>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="w-9 h-9 text-white hover:bg-white/10" title={i18n.t('更多')}>
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56 bg-[#2d2d2d] text-white border-white/10" onCloseAutoFocus={(e) => e.preventDefault()}>
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="text-sm">{i18n.t('字号')}</span>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" className="w-7 h-7 hover:bg-white/10"
+                                onClick={(e) => { e.preventDefault(); setEditorFontSize(s => Math.max(10, s - 1)); }} disabled={editorFontSize <= 10}>
+                                <ZoomOut className="w-4 h-4" />
+                              </Button>
+                              <span className="text-sm w-6 text-center tabular-nums">{editorFontSize}</span>
+                              <Button variant="ghost" size="icon" className="w-7 h-7 hover:bg-white/10"
+                                onClick={(e) => { e.preventDefault(); setEditorFontSize(s => Math.min(22, s + 1)); }} disabled={editorFontSize >= 22}>
+                                <ZoomIn className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <DropdownMenuSeparator className="bg-white/10" />
+                          <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={() => { setWordWrap(w => w === 'on' ? 'off' : 'on'); }}>
+                            <WrapText className="w-4 h-4 mr-2" />
+                            {wordWrap === 'on' ? i18n.t('取消自动换行') : i18n.t('自动换行')}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="bg-white/10" />
+                          <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('代码已复制')); }}>
+                            <Copy className="w-4 h-4 mr-2" />{i18n.t('复制内容')}</DropdownMenuItem>
+                          {currentFile?.download_url && (
+                            <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={async () => { try { await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? ''); } catch { toast.error(i18n.t('下载失败')); } }}>
+                              <Download className="w-4 h-4 mr-2" />{i18n.t('下载文件')}</DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                  <div className="flex md:hidden items-center justify-between px-3 h-8 bg-[#1e1e1e] text-gray-400 text-xs shrink-0 font-mono">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="truncate text-white">{editContent !== currentFile?.content ? '*' : ''}{currentFile?.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="editor-cursor-pos">{cursorPositionRef.current}</span>
+                      <span>UTF-8</span>
+                    </div>
+                  </div>
+
+                  <div className="hidden md:flex items-center gap-2 px-3 h-11 shrink-0 border-b border-border bg-card/95 select-none">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <FileItemIcon filename={currentFile?.name ?? ''} isDir={false} size="w-4 h-4" />
+                    <span className="text-sm font-mono text-foreground truncate">{currentFile?.name}</span>
+                    {currentFile && (
+                      <span className="text-xs text-muted-foreground hidden lg:inline">
+                        · {formatFileSize(currentFile.size)} · {fsLineCount} {i18n.t('行')}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <Button variant='ghost' size="icon"
+                      className="w-7 h-7 text-muted-foreground hover:bg-secondary hidden md:flex"
+                      onClick={() => { editorRef.current?.undo(); }}
+                      title={i18n.t('撤销 (Ctrl+Z)')}>
+                      <Undo2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant='ghost' size="icon"
+                      className="w-7 h-7 text-muted-foreground hover:bg-secondary hidden md:flex"
+                      onClick={() => { editorRef.current?.redo(); }}
+                      title={i18n.t('重做 (Ctrl+Y)')}>
+                      <Redo2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <div className="w-px h-4 bg-border shrink-0 hidden md:block mx-0.5" />
+                    <Button variant='ghost' size="icon"
+                      className="w-7 h-7 text-muted-foreground hover:bg-secondary"
+                      onClick={() => setShowSearchPanel(!showSearchPanel)}
+                      title={i18n.t('搜索 (Ctrl+F)')}>
+                      <Search className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant='ghost' size="icon"
+                      className={`w-7 h-7 hover:bg-secondary hidden md:flex ${wordWrap === 'on' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+                      onClick={() => setWordWrap(w => w === 'on' ? 'off' : 'on')}
+                      title={wordWrap === 'on' ? i18n.t('取消自动换行') : i18n.t('自动换行')}>
+                      <WrapText className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant='ghost' size="icon"
+                      className="w-7 h-7 text-muted-foreground hover:bg-secondary hidden md:flex"
+                      onClick={() => setEditorFullscreen(!editorFullscreen)}
+                      title={editorFullscreen ? i18n.t('退出全屏') : i18n.t('全屏模式')}>
+                      {editorFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </Button>
+                    <Button variant='ghost' size="icon"
+                      className="w-7 h-7 text-muted-foreground hover:bg-secondary md:hidden"
+                      onClick={() => setIsReadingMode(!isReadingMode)}
+                      title={isReadingMode ? i18n.t('退出阅读模式') : i18n.t('阅读模式')}>
+                      {isReadingMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </Button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-secondary">
+                          <MoreHorizontal className="w-3.5 h-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
+                        <div className="flex items-center justify-between px-2 py-1.5">
+                          <span className="text-xs text-muted-foreground">{i18n.t('字号')}</span>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="icon" className="w-6 h-6 hover:bg-secondary"
+                              onClick={(e) => { e.preventDefault(); setEditorFontSize(s => Math.max(10, s - 1)); }} disabled={editorFontSize <= 10}>
+                              <ZoomOut className="w-3 h-3" />
+                            </Button>
+                            <span className="text-xs w-5 text-center tabular-nums">{editorFontSize}</span>
+                            <Button variant="ghost" size="icon" className="w-6 h-6 hover:bg-secondary"
+                              onClick={(e) => { e.preventDefault(); setEditorFontSize(s => Math.min(22, s + 1)); }} disabled={editorFontSize >= 22}>
+                              <ZoomIn className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <DropdownMenuItem onSelect={() => setShowSearchPanel(true)}>
+                          <Search className="w-3.5 h-3.5 mr-2" />{i18n.t('搜索 / 替换')}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('代码已复制')); }}>
+                          <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制内容')}</DropdownMenuItem>
+                        {currentFile?.download_url && (
+                          <DropdownMenuItem onSelect={async () => { try { await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? ''); } catch { toast.error(i18n.t('下载失败')); } }}>
+                            <Download className="w-3.5 h-3.5 mr-2" />{i18n.t('下载文件')}</DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <div className="w-px h-4 bg-border shrink-0 mx-0.5" />
+                    <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-secondary"
+                      onClick={() => closeAction(true)} title={i18n.t('关闭编辑器')}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="relative flex-1 min-h-0 flex overflow-hidden">
+                {isReadingMode ? (
+                  <div className="w-full h-full overflow-y-auto bg-background p-4 md:p-6" style={{ fontSize: editorFontSize }}>
+                    <style>{`.reading-mode-markdown pre code { font-size: inherit !important; } .reading-mode-markdown pre { margin: 0; min-height: 100%; border: none; background: transparent; }`}</style>
+                    <MarkdownRenderer 
+                      content={`\`\`\`${currentFile?.name?.split('.').pop() || 'text'}\n${editContent}\n\`\`\``}
+                      className="max-w-none font-mono reading-mode-markdown"
+                    />
+                  </div>
+                ) : (
+                  <CodeEditor
+                    key={currentFile?.path || currentFile?.name || 'editor'}
+                    ref={editorRef}
+                    value={editContent}
+                    readOnly={editorReadOnly}
+                      onChange={setEditContent}
+                    fileName={currentFile?.name || ''}
+                    fontSize={editorFontSize}
+                    wordWrap={wordWrap}
+                    onFontSizeChange={setEditorFontSize}
+                    onSearch={() => setShowSearchPanel(true)}
+                    onCursorChange={handleCursorChange}
+                  />
+                )}
+                
+                <EditorSearchPanel 
+                  view={editorRef.current?.getView() ?? null} 
+                  content={editContent}
+                  visible={showSearchPanel} 
+                  onClose={() => setShowSearchPanel(false)}
+                  readOnly={isReadingMode}
+                />
+
+                <AlertDialog open={showSyntaxWarning} onOpenChange={setShowSyntaxWarning}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle className="flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-destructive" />
+                        {i18n.t('存在语法错误')}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {i18n.t('当前代码存在')}{syntaxErrors.length} {i18n.t('个语法错误。是否仍要强行保存？')}</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{i18n.t('返回修改')}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => {
+                        handleSaveEdit(true);
+                      }}>{i18n.t('强行保存')}</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                
+                {isReadingMode && (
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-4 right-4 z-50 rounded-full shadow-lg h-10 w-10 opacity-80 hover:opacity-100 bg-background border border-border md:hidden"
+                    onClick={() => setIsReadingMode(false)}
+                    title={i18n.t('退出阅读模式')}
+                  >
+                    <Minimize2 className="w-5 h-5 text-foreground" />
+                  </Button>
+                )}
+              </div>
+
+              {!isReadingMode && (
+                <div className="flex flex-col shrink-0 border-t border-border bg-card/95 select-none">
+                  {syntaxErrors.length > 0 && (
+                    <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20 text-xs text-destructive max-h-24 overflow-y-auto">
+                      <div className="font-semibold mb-1 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{i18n.t('发现')}{syntaxErrors.length} {i18n.t('个语法错误：')}</div>
+                      <ul className="list-disc list-inside pl-4 space-y-0.5">
+                        {syntaxErrors.map((err, i) => (
+                          <li key={i}>[{err.line}:{err.column}] {err.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 px-3 h-12">
+                    <div className="flex-1 min-w-0">
+                      <Input value={commitMsg} onChange={(e) => {
+                        setCommitMsg(e.target.value);
+                        setShowSyntaxWarning(false);
+                      }}
+                      placeholder={i18n.t('提交信息（必填）...')}
+                      className="h-8 bg-secondary border-border text-foreground placeholder:text-muted-foreground text-sm" />
+                  </div>
+                  <Button variant="ghost" size="sm"
+                    className="h-8 text-xs text-muted-foreground border border-border hover:bg-secondary shrink-0 px-3"
+                    onClick={() => closeAction(true)}>
+                    <X className="w-3 h-3 mr-1" />{i18n.t('取消')}</Button>
+                  <Button size="sm" className={`h-8 text-xs shrink-0 px-3 ${syntaxErrors.length > 0 ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
+                    onClick={() => handleSaveEdit()} disabled={actionBusy || !commitMsg.trim()}>
+                    {actionBusy
+                      ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />{i18n.t('提交中...')}</>
+                      : <><Save className="w-3 h-3 mr-1" />{i18n.t('保存并提交')}</>}
+                  </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className={`flex items-center gap-2 px-3 py-1.5 border-b border-border bg-secondary/20 shrink-0 ${actionMode === 'edit' ? 'md:hidden' : ''}`}>
+            {filePath ? (
+              <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 shrink-0 px-2"
+                onClick={() => {
+                  const stack = getCodeNavStack(owner!, repo!);
+                  if (stack.length >= 2) {
+                    navigate(-1);
+                  } else {
+                    const parentParts = pathParts.slice(0, -1);
+                    navigate(`/repos/${owner}/${repo}/code${parentParts.length > 0 ? '/' + parentParts.join('/') : ''}`);
+                  }
+                }}>
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{i18n.t('返回上级')}</span>
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground px-1 font-mono">/</span>
+            )}
+            <div className="flex-1" />
+            {!currentFile && (
+              <div className="flex items-center gap-1 shrink-0 min-h-[28px]">
+                {!selectionMode && fileTimeEnabled && contents.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground border border-border hover:bg-secondary"
+                    onClick={cycleSortMode}
+                    title={
+                      sortMode === 'default'
+                        ? i18n.t('默认排序（字母序）')
+                        : sortMode === 'desc'
+                          ? i18n.t('按时间倒序（最新优先）')
+                          : i18n.t('按时间正序（最早优先）')
+                    }
+                  >
+                    {sortMode === 'default' && <ArrowUpDown className="w-3.5 h-3.5" />}
+                    {sortMode === 'desc' && <ArrowDownWideNarrow className="w-3.5 h-3.5 text-primary" />}
+                    {sortMode === 'asc' && <ArrowUpNarrowWide className="w-3.5 h-3.5 text-primary" />}
+                  </Button>
+                )}
+              {canPush && !selectionMode && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                  onClick={() => setSelectionMode(true)}>
+                  <CheckSquare className="w-3 h-3" /><span className="hidden sm:inline">{i18n.t('选择')}</span>
+                </Button>
+              )}
+              {canPush && selectionMode && (
+                <>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                    onClick={toggleSelectAll}>
+                    <CheckSquare className="w-3 h-3" />
+                    {selectedPaths.size === displayedContents.length && displayedContents.length > 0
+                      ? i18n.t('取消全选')
+                      : i18n.t('全选')}
+                  </Button>
+                  <span className="text-xs text-muted-foreground px-1">
+                    {i18n.t('已选')} {selectedPaths.size}
+                  </span>
+                  <Button variant="ghost" size="sm"
+                    className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10 gap-1 px-2"
+                    onClick={() => setBatchDeleteConfirmOpen(true)}
+                    disabled={selectedPaths.size === 0}>
+                    <Trash2 className="w-3 h-3" />{i18n.t('删除')}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary px-2"
+                    onClick={exitSelectionMode}>
+                    {i18n.t('取消')}
+                  </Button>
+                </>
+              )}
+                {canPush && !selectionMode && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                  onClick={() => openAction('new-file')}>
+                  <FilePlus className="w-3 h-3" /><span className="hidden sm:inline">{i18n.t('新建文件')}</span>
+                </Button>
+                )}
+                {canPush && !selectionMode && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                  onClick={() => openAction('new-folder')}>
+                  <FolderPlus className="w-3 h-3" /><span className="hidden sm:inline">{i18n.t('新建文件夹')}</span>
+                </Button>
+                )}
+                {canPush && !selectionMode && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                  onClick={() => openAction('upload')}>
+                  <Upload className="w-3 h-3" /><span className="hidden sm:inline">{i18n.t('上传')}</span>
+                </Button>
+                )}
+              </div>
+            )}
+            {currentFile && !selectionMode && (
+              <div className="flex items-center gap-1 shrink-0 min-h-[28px]">
+                {currentFile.download_url && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 px-2"
+                    title={i18n.t('下载文件')}
+                    onClick={async () => {
+                      try { await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? ''); }
+                      catch { toast.error(i18n.t('下载失败')); }
+                    }}>
+                    <Download className="w-3.5 h-3.5" /><span className="hidden sm:inline">{i18n.t('下载')}</span>
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 px-2"
+                  title={i18n.t('复制路径')}
+                  onClick={() => { copyToClipboard(currentFile.path); toast.success(i18n.t('路径已复制')); }}>
+                  <ClipboardCopy className="w-3.5 h-3.5" /><span className="hidden md:inline">{i18n.t('复制路径')}</span>
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 px-2"
+                  title={i18n.t('查看提交历史')}
+                  onClick={() => navigate(`/repos/${owner}/${repo}/commits/${currentBranch}?path=${currentFile.path}`)}>
+                  <History className="w-3.5 h-3.5" /><span className="hidden md:inline">{i18n.t('历史')}</span>
+                </Button>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:bg-secondary shrink-0">
+                      <MoreHorizontal className="w-3.5 h-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem onClick={() => { const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${currentBranch}/${currentFile.path}`; copyToClipboard(rawUrl); toast.success(i18n.t('Raw 链接已复制')); }}>
+                      <Link className="w-3.5 h-3.5 mr-2" />{i18n.t('复制 Raw 链接')}</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => openAction('rename', currentFile)}>
+                      <Pencil className="w-3.5 h-3.5 mr-2" />{i18n.t('重命名')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openAction('move', currentFile)}>
+                      <MoveRight className="w-3.5 h-3.5 mr-2" />{i18n.t('移动到...')}</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => { setCommitMsg(`Delete ${currentFile.name}`); openAction('delete-file', currentFile); }}>
+                      <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除文件')}</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
+
+          <div className={`flex-1 min-h-0 overflow-y-auto ${actionMode === 'edit' ? 'md:hidden' : ''}`}>
+      <div className="bg-card border-x-0 overflow-hidden">
+        {loading ? (
+          <div className="p-4 space-y-2">
+            {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-9 bg-muted rounded" />)}
+          </div>
+        ) : currentFile ? (
+          <div>
+            {currentIsImage && fileBase64 ? (
+              <div>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30">
+                  <div className="flex items-center gap-2">
+                    <FileItemIcon filename={currentFile.name} isDir={false} size="w-4 h-4" />
+                    <span className="text-sm font-mono text-foreground">{currentFile.name}</span>
+                    <span className="text-xs text-muted-foreground">{formatFileSize(currentFile.size)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs border-border text-muted-foreground px-1.5 py-0 h-4 flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3" />{i18n.t('图片预览')}</Badge>
+                    {currentFile.download_url && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:bg-secondary h-8"
+                        onClick={async () => {
+                          try {
+                            await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? '');
+                          } catch {
+                            toast.error(i18n.t('下载失败，请检查网络或权限'));
+                          }
+                        }}
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" />{i18n.t('下载')}</Button>
+                    )}
+                  </div>
+                </div>
+                <div className="p-6 flex flex-col items-center gap-4">
+                  <img
+                    src={base64ToDataUri(fileBase64, currentFile.name)}
+                    alt={currentFile.name}
+                    className="max-w-full max-h-[60vh] object-contain rounded-lg border border-border shadow-md"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {currentFile.name} · {formatFileSize(currentFile.size)}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex md:hidden flex-col items-center justify-center py-16 gap-4">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <FileEdit className="w-6 h-6 text-primary animate-pulse" />
+                  <span className="text-sm">{i18n.t('正在打开编辑器...')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <FileItemIcon filename={currentFile.name} isDir={false} size="w-4 h-4" />
+                  <span className="text-sm font-mono text-foreground/70">{currentFile.path}</span>
+                </div>
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {contents.length === 0 ? (
+              <div className="py-12 text-center">
+                <FolderOpen className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground text-sm">{i18n.t('空目录')}</p>
+                {canPush && (
+                <Button variant="ghost" size="sm" className="mt-3 h-8 text-xs text-muted-foreground border border-border hover:bg-secondary"
+                  onClick={() => openAction('new-file')}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />{i18n.t('创建第一个文件')}</Button>
+                )}
+              </div>
+            ) : (
+              displayedContents.map((item) => {
+                const isDir = item.type === 'dir';
+                return (
+                  <ContextMenu key={item.sha}>
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center group hover:bg-secondary/50 transition-colors cursor-pointer">
+                        <button
+                          type="button"
+                          className="flex-1 flex items-center gap-3 px-4 py-2.5 text-left min-w-0"
+                          onClick={() => {
+                            if (selectionMode) {
+                              toggleSelection(item.path);
+                            } else {
+                              navigate(`/repos/${owner}/${repo}/code/${item.path}`);
+                            }
+                          }}
+                        >
+                          {selectionMode && (
+                            <span className="shrink-0 flex items-center justify-center w-5 h-5">
+                              {selectedPaths.has(item.path) ? (
+                                <CheckSquare className="w-5 h-5 text-primary" />
+                              ) : (
+                                <Square className="w-5 h-5 text-muted-foreground" />
+                              )}
+                            </span>
+                          )}
+                          <FileItemIcon filename={item.name} isDir={isDir} size="w-4 h-4" />
+                          <span className={`text-sm font-mono flex-1 min-w-0 truncate ${isDir ? 'text-foreground font-medium' : 'text-foreground/90'} group-hover:text-primary transition-colors`}>
+                            {item.name}
+                          </span>
+                          {commitMap?.[item.path] && (
+                            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                              {formatCommitTime(commitMap[item.path]!.date)}
+                            </span>
+                          )}
+                          {item.size > 0 && (
+                            <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+                              {item.size < 1024 ? `${item.size} B` : `${(item.size / 1024).toFixed(1)} KB`}
+                            </span>
+                          )}
+                        </button>
+                        <div
+                          className="hidden md:flex items-center gap-0.5 mr-2 transition-colors shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {!isDir && item.download_url && (
+                            <Button variant="ghost" size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                              title={i18n.t('下载')}
+                              onClick={async (e) => { e.stopPropagation(); try { await downloadCodeFile(item.download_url!, item.name, token ?? ''); } catch { toast.error(i18n.t('下载失败')); } }}>
+                              <Download className="w-3 h-3" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                            title={i18n.t('复制路径')}
+                            onClick={(e) => { e.stopPropagation(); handleCopyPath(item.path); }}>
+                            <ClipboardCopy className="w-3 h-3" />
+                          </Button>
+                          <DropdownMenu modal={false}>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                title={i18n.t('更多操作')}>
+                                <MoreHorizontal className="w-3 h-3" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => openAction('rename', item)}>
+                                <Pencil className="w-3.5 h-3.5 mr-2" />{i18n.t('重命名')}</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openAction('move', item)}>
+                                <MoveRight className="w-3.5 h-3.5 mr-2" />{i18n.t('移动到...')}</DropdownMenuItem>
+                              {!isDir && (
+                                <DropdownMenuItem onClick={() => handleCopyRawLink(item.path)}>
+                                  <Link className="w-3.5 h-3.5 mr-2" />{i18n.t('复制 Raw 链接')}</DropdownMenuItem>
+                              )}
+                              {!isDir && (
+                                <DropdownMenuItem onClick={() => navigate(`/repos/${owner}/${repo}/commits/${currentBranch}?path=${item.path}`)}>
+                                  <History className="w-3.5 h-3.5 mr-2" />{i18n.t('查看历史')}</DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => { setCommitMsg(`Delete ${item.name}`); openAction(isDir ? 'delete-folder' : 'delete-file', item); }}>
+                                <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除')}{isDir ? i18n.t('文件夹') : i18n.t('文件')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0 mr-3 group-hover:text-primary transition-colors md:group-hover:opacity-0" />
+                      </div>
+                    </ContextMenuTrigger>
+                    {isDir
+                      ? <FolderContextMenuContent item={item} />
+                      : <FileContextMenuContent item={item} />
+                    }
+                  </ContextMenu>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+      <Dialog open={actionMode === 'new-file'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <FilePlus className="w-4 h-4 text-primary" />{i18n.t('新建文件')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('文件名 *')}</Label>
+              <Input value={newFileName} onChange={(e) => setNewFileName(e.target.value)} placeholder="example.txt"
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
+              {(() => { const d = pendingDirPath !== null ? pendingDirPath : filePath; return d ? <p className="text-xs text-muted-foreground">{i18n.t('将在')}<code className="font-mono bg-secondary px-1 rounded">{d}/</code> {i18n.t('目录下创建')}</p> : <p className="text-xs text-muted-foreground">{i18n.t('将在根目录下创建')}</p>; })()}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('文件内容（可选）')}</Label>
+              <Textarea value={newFileContent} onChange={(e) => setNewFileContent(e.target.value)}
+                placeholder={i18n.t('在此输入文件内容...')} rows={6}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono text-xs resize-none" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+              <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Create ${newFileName || 'file'}`}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreateFile} disabled={actionBusy || !newFileName.trim()}>
+              {actionBusy ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('创建中...')}</> : <><FilePlus className="w-4 h-4 mr-2" />{i18n.t('创建文件')}</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={actionMode === 'new-folder'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <FolderPlus className="w-4 h-4 text-primary" />{i18n.t('新建文件夹')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('文件夹名称 *')}</Label>
+              <Input value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="my-folder"
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
+              <p className="text-xs text-muted-foreground">{i18n.t('会自动在文件夹内创建')}<code className="font-mono bg-secondary px-1 rounded">.gitkeep</code> {i18n.t('占位文件')}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+              <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Create folder ${newFolderName || 'folder'}`}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreateFolder} disabled={actionBusy || !newFolderName.trim()}>
+              {actionBusy ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('创建中...')}</> : <><FolderPlus className="w-4 h-4 mr-2" />{i18n.t('创建文件夹')}</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={actionMode === 'delete-file'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">{i18n.t('确认删除文件')}</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              {i18n.t('将删除')}<code className="font-mono text-foreground bg-secondary px-1.5 py-0.5 rounded">{actionTarget?.path}</code>{i18n.t('，此操作不可撤销。')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-1 py-2">
+            <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+            <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Delete ${actionTarget?.name}`}
+              className="mt-1.5 bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteFile} disabled={actionBusy || !commitMsg.trim()}>
+              {actionBusy ? i18n.t('删除中...') : i18n.t('确认删除')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={actionMode === 'delete-folder'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">{i18n.t('确认删除文件夹')}</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              {i18n.t('将递归删除')}<code className="font-mono text-foreground bg-secondary px-1.5 py-0.5 rounded">{actionTarget?.path}</code> {i18n.t('下的所有文件，此操作不可撤销。')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-1 py-2 space-y-2">
+            <div>
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+              <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Delete folder ${actionTarget?.name}`}
+                className="mt-1.5 bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+            {deleteProgress && (
+              <p className="text-xs text-muted-foreground">{i18n.t('正在删除...')}{deleteProgress.done}/{deleteProgress.total}</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteFolder} disabled={actionBusy || !commitMsg.trim()}>
+              {actionBusy ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />{i18n.t('删除中...')}</> : i18n.t('确认删除')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={batchDeleteConfirmOpen} onOpenChange={setBatchDeleteConfirmOpen}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-md bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-destructive" />
+              {i18n.t('批量删除')}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground text-sm">
+              {i18n.t('确定删除选中的')} <strong className="text-foreground">{selectedPaths.size}</strong> {i18n.t('项吗？此操作不可恢复。')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border hover:bg-secondary" disabled={batchDeleting}>
+              {i18n.t('取消')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => { e.preventDefault(); handleBatchDelete(); }}
+              disabled={batchDeleting}
+            >
+              {batchDeleting ? i18n.t('删除中...') : i18n.t('确认删除')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={actionMode === 'rename'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">{i18n.t('重命名')}{actionTarget?.type === 'dir' ? i18n.t('文件夹') : i18n.t('文件')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-muted-foreground">{i18n.t('当前名称')}</Label>
+              <p className="text-sm font-mono text-foreground bg-secondary rounded px-3 py-2">{actionTarget?.name}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('新名称 *')}</Label>
+              <Input value={renameTo} onChange={(e) => setRenameTo(e.target.value)} placeholder={i18n.t('新名称...')}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+              <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Rename ${actionTarget?.name} to ${renameTo || '...'}`}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleRename}
+              disabled={actionBusy || !renameTo.trim() || !commitMsg.trim()}>
+              {actionBusy ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('处理中...')}</> : i18n.t('确认重命名')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={actionMode === 'move'} onOpenChange={(open) => { if (!open) closeAction(true); }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <MoveRight className="w-4 h-4 text-primary" />{i18n.t('移动文件')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-muted-foreground">{i18n.t('当前路径')}</Label>
+              <p className="text-sm font-mono text-foreground bg-secondary rounded px-3 py-2">{actionTarget?.path}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('目标路径 *')}</Label>
+              <Input value={moveTo} onChange={(e) => setMoveTo(e.target.value)} placeholder="src/new/location/file.txt"
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground font-mono" />
+              <p className="text-xs text-muted-foreground">{i18n.t('请输入完整路径（含文件名），如')}<code className="font-mono">src/utils/helper.ts</code></p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息 *')}</Label>
+              <Input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder={`Move ${actionTarget?.name}`}
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary" onClick={() => closeAction(true)}>{i18n.t('取消')}</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleMove}
+              disabled={actionBusy || !moveTo.trim() || !commitMsg.trim()}>
+              {actionBusy ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('移动中...')}</> : <><MoveRight className="w-4 h-4 mr-2" />{i18n.t('确认移动')}</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={actionMode === 'upload'} onOpenChange={(open) => { if (!open) { setActionMode(null); } }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <Upload className="w-4 h-4 text-primary" />{i18n.t('上传文件到')}<code className="font-mono text-sm bg-secondary px-1.5 py-0.5 rounded">
+                {filePath || i18n.t('根目录')}
+              </code>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-normal text-foreground">{i18n.t('提交信息')}</Label>
+              <Input value={uploadCommitMsg} onChange={(e) => setUploadCommitMsg(e.target.value)} placeholder="Upload files"
+                className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input id="skip-cb" type="checkbox" checked={skipExisting}
+                onChange={(e) => setSkipExisting(e.target.checked)}
+                className="w-4 h-4 accent-primary" />
+              <label htmlFor="skip-cb" className="text-sm text-foreground cursor-pointer">{i18n.t('跳过已存在的文件（不覆盖）')}</label>
+            </div>
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => { e.preventDefault(); setIsDragging(false); addUploadFiles(e.dataTransfer.files); }}
+              className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
+                isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+              }`}
+              onClick={() => uploadInputRef.current?.click()}
+            >
+              <input ref={uploadInputRef} type="file" multiple className="hidden"
+                onChange={(e) => addUploadFiles(e.target.files)} />
+              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-foreground font-medium">{i18n.t('点击或拖放文件到此处')}</p>
+              <p className="text-xs text-muted-foreground mt-1">{i18n.t('支持多文件，上传至当前路径')}</p>
+            </div>
+
+            {uploadFiles.length > 0 && (
+              <div className="bg-secondary/40 border border-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-xs flex-wrap">
+                    <span className="text-foreground font-medium">{uploadFiles.length} {i18n.t('个文件')}</span>
+                    {uploadFiles.filter(f => f.status === 'pending').length > 0 &&
+                      <Badge variant="outline" className="text-xs border-border text-muted-foreground">{uploadFiles.filter(f => f.status === 'pending').length} {i18n.t('待上传')}</Badge>}
+                    {uploadFiles.filter(f => f.status === 'success').length > 0 &&
+                      <Badge className="bg-success/10 text-success border-success/30 text-xs">{uploadFiles.filter(f => f.status === 'success').length} {i18n.t('成功')}</Badge>}
+                    {uploadFiles.filter(f => f.status === 'error').length > 0 &&
+                      <Badge className="bg-destructive/10 text-destructive border-destructive/30 text-xs">{uploadFiles.filter(f => f.status === 'error').length} {i18n.t('失败')}</Badge>}
+                  </div>
+                  <div className="flex gap-1.5">
+                    {uploadFiles.some(f => f.status === 'error') && (
+                      <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground hover:bg-secondary border border-border"
+                        onClick={() => setUploadFiles(p => p.map(f => f.status === 'error' ? { ...f, status: 'pending', error: undefined } : f))}>
+                        <RefreshCw className="w-3 h-3 mr-1" />{i18n.t('重试')}</Button>
+                    )}
+                    <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground hover:bg-secondary border border-border"
+                      onClick={() => setUploadFiles([])}>{i18n.t('清空')}</Button>
+                  </div>
+                </div>
+                <div className="divide-y divide-border max-h-52 overflow-y-auto">
+                  {uploadFiles.map((f) => (
+                    <div key={f.id} className="flex items-center gap-2.5 px-3 py-2">
+                      <div className="shrink-0">
+                        {f.status === 'pending' && <FileItemIcon filename={f.file.name} isDir={false} size="w-4 h-4" />}
+                        {f.status === 'uploading' && <Loader2 className="w-4 h-4 text-warning animate-spin" />}
+                        {f.status === 'success' && <CheckCircle2 className="w-4 h-4 text-success" />}
+                        {f.status === 'error' && <XCircle className="w-4 h-4 text-destructive" />}
+                        {f.status === 'skipped' && <AlertCircle className="w-4 h-4 text-muted-foreground" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-foreground truncate">{f.file.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">{formatFileSize(f.file.size)}</span>
+                        </div>
+                        <input type="text" value={f.targetPath}
+                          onChange={(e) => setUploadFiles(p => p.map(x => x.id === f.id ? { ...x, targetPath: e.target.value } : x))}
+                          disabled={f.status !== 'pending' && f.status !== 'error'}
+                          className="w-full mt-0.5 text-xs font-mono bg-transparent border-0 border-b border-dashed border-border/60 focus:outline-none focus:border-primary text-muted-foreground disabled:opacity-50 px-0"
+                          placeholder={i18n.t('目标路径...')} />
+                        {f.error && <p className="text-xs text-destructive mt-0.5">{f.error}</p>}
+                        {f.status === 'skipped' && <p className="text-xs text-muted-foreground mt-0.5">{i18n.t('文件已存在，已跳过')}</p>}
+                      </div>
+                      {(f.status === 'pending' || f.status === 'error') && (
+                        <Button variant="ghost" size="icon" className="w-6 h-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                          onClick={() => setUploadFiles(p => p.filter(x => x.id !== f.id))}>
+                          <X className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {uploading && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{i18n.t('上传中...')}</span><span>{uploadProgress}%</span>
+                </div>
+                <Progress value={uploadProgress} className="h-1.5" />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="border border-border text-muted-foreground hover:bg-secondary"
+              onClick={() => setActionMode(null)}>{i18n.t('关闭')}</Button>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={handleUpload}
+              disabled={uploading || uploadFiles.filter(f => f.status === 'pending' || f.status === 'error').length === 0}>
+              {uploading
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{i18n.t('上传中...')}</>
+                : <><Upload className="w-4 h-4 mr-2" />{i18n.t('提交上传（')}{uploadFiles.filter(f => f.status === 'pending' || f.status === 'error').length} {i18n.t('个）')}</>
+              }
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </div>
+      </div>
+      </div>
+      
+      <div className="hidden md:flex items-center justify-between px-3 h-6 border-t border-border bg-[#007acc] text-white text-[10px] shrink-0 font-mono z-20 select-none">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1 cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors"><GitBranch className="w-3 h-3"/> {currentBranch}</span>
+          {syntaxErrors.length > 0 && <span className="flex items-center gap-1 cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors"><AlertCircle className="w-3 h-3"/> {syntaxErrors.length}</span>}
+        </div>
+        <div className="flex items-center gap-4">
+          {actionMode === 'edit' && <span className="cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors editor-cursor-pos">{cursorPositionRef.current}</span>}
+          <span className="cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors">UTF-8</span>
+          <span className="cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors">TypeScript React</span>
+          <span className="cursor-pointer hover:bg-white/20 px-1 py-0.5 rounded transition-colors">Spaces: 2</span>
+        </div>
+      </div>
+    </div>
+  );
+}
