@@ -371,25 +371,20 @@ export async function getRateLimit(): Promise<{ rate: GitHubRateLimit }> {
 
 export async function getUserEvents(
   login: string,
-  page = 1,
-  opts: { fresh?: boolean } = {}
+  page = 1
 ): Promise<GitHubEvent[]> {
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubEvent[]>(
-    `/users/${login}/events?per_page=30&page=${page}${t}`
+    `/users/${login}/events?per_page=30&page=${page}`
   );
 }
 
-export async function getUserRepos(
-  params: {
-    sort?: RepoSortField;
-    direction?: SortDirection;
-    per_page?: number;
-    page?: number;
-    type?: 'all' | 'owner' | 'member' | 'public' | 'private';
-  } = {},
-  opts: { fresh?: boolean } = {}
-): Promise<{ data: GitHubRepo[]; hasNextPage: boolean }> {
+export async function getUserRepos(params: {
+  sort?: RepoSortField;
+  direction?: SortDirection;
+  per_page?: number;
+  page?: number;
+  type?: 'all' | 'owner' | 'member' | 'public' | 'private';
+} = {}): Promise<{ data: GitHubRepo[]; hasNextPage: boolean }> {
   const {
     sort = 'updated',
     direction = 'desc',
@@ -397,9 +392,8 @@ export async function getUserRepos(
     page = 1,
     type = 'all',
   } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return requestWithPagination<GitHubRepo>(
-    `/user/repos?sort=${sort}&direction=${direction}&per_page=${per_page}&page=${page}&type=${type}${t}`
+    `/user/repos?sort=${sort}&direction=${direction}&per_page=${per_page}&page=${page}&type=${type}`
   );
 }
 
@@ -421,11 +415,9 @@ export async function getReposByLogin(
 
 export async function getRepo(
   owner: string,
-  repo: string,
-  opts: { fresh?: boolean } = {}
+  repo: string
 ): Promise<GitHubRepo> {
-  const t = opts.fresh ? `?_t=${Date.now()}` : '';
-  return request<GitHubRepo>(`/repos/${owner}/${repo}${t}`);
+  return request<GitHubRepo>(`/repos/${owner}/${repo}`);
 }
 
 export async function createRepo(params: {
@@ -486,11 +478,9 @@ export async function forkRepo(owner: string, repo: string, name?: string): Prom
 
 export async function getRepoLanguages(
   owner: string,
-  repo: string,
-  opts: { fresh?: boolean } = {}
+  repo: string
 ): Promise<Record<string, number>> {
-  const t = opts.fresh ? `?_t=${Date.now()}` : '';
-  return request<Record<string, number>>(`/repos/${owner}/${repo}/languages${t}`);
+  return request<Record<string, number>>(`/repos/${owner}/${repo}/languages`);
 }
 
 export async function getRepoTopics(
@@ -962,12 +952,10 @@ export async function compareBranches(
 export async function getCollaborators(
   owner: string,
   repo: string,
-  page = 1,
-  opts: { fresh?: boolean } = {}
+  page = 1
 ): Promise<{ data: GitHubCollaborator[]; hasNextPage: boolean }> {
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return requestWithPagination<GitHubCollaborator>(
-    `/repos/${owner}/${repo}/collaborators?per_page=30&page=${page}${t}`
+    `/repos/${owner}/${repo}/collaborators?per_page=30&page=${page}`
   );
 }
 
@@ -1013,19 +1001,15 @@ export async function updateCollaboratorPermission(
   );
 }
 
-export async function getNotifications(
-  params: {
-    all?: boolean;
-    participating?: boolean;
-    per_page?: number;
-    page?: number;
-  } = {},
-  opts: { fresh?: boolean } = {}
-): Promise<{ data: GitHubNotification[]; hasNextPage: boolean }> {
+export async function getNotifications(params: {
+  all?: boolean;
+  participating?: boolean;
+  per_page?: number;
+  page?: number;
+} = {}): Promise<{ data: GitHubNotification[]; hasNextPage: boolean }> {
   const { all = false, participating = false, per_page = 50, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return requestWithPagination<GitHubNotification>(
-    `/notifications?all=${all}&participating=${participating}&per_page=${per_page}&page=${page}${t}`
+    `/notifications?all=${all}&participating=${participating}&per_page=${per_page}&page=${page}`
   );
 }
 
@@ -1045,40 +1029,34 @@ export async function getRepoContents(
   owner: string,
   repo: string,
   path = '',
-  ref?: string,
-  opts: { fresh?: boolean } = {}
+  ref?: string
 ): Promise<GitHubContent | GitHubContent[]> {
-  const qp = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  const t = opts.fresh ? (ref ? `&_t=${Date.now()}` : `?_t=${Date.now()}`) : '';
+  const queryParams = ref ? `?ref=${encodeURIComponent(ref)}` : '';
   const encodedPath = path ? `/${path.split('/').map(encodeURIComponent).join('/')}` : '';
   return request<GitHubContent | GitHubContent[]>(
-    `/repos/${owner}/${repo}/contents${encodedPath}${qp}${t}`
+    `/repos/${owner}/${repo}/contents${encodedPath}${queryParams}`
   );
 }
 
 export async function getReadme(
   owner: string,
   repo: string,
-  ref?: string,
-  opts: { fresh?: boolean } = {}
+  ref?: string
 ): Promise<GitHubContent> {
-  const qp = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  const t = opts.fresh ? (ref ? `&_t=${Date.now()}` : `?_t=${Date.now()}`) : '';
-  return request<GitHubContent>(`/repos/${owner}/${repo}/readme${qp}${t}`);
+  const queryParams = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return request<GitHubContent>(`/repos/${owner}/${repo}/readme${queryParams}`);
 }
 
 export async function getFileContent(
   owner: string,
   repo: string,
   path: string,
-  ref?: string,
-  opts: { fresh?: boolean } = {}
+  ref?: string
 ): Promise<{ content: string; encoding: string }> {
-  const qp = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  const t = opts.fresh ? (ref ? `&_t=${Date.now()}` : `?_t=${Date.now()}`) : '';
+  const queryParams = ref ? `?ref=${encodeURIComponent(ref)}` : '';
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   return request<{ content: string; encoding: string }>(
-    `/repos/${owner}/${repo}/contents/${encodedPath}${qp}${t}`
+    `/repos/${owner}/${repo}/contents/${encodedPath}${queryParams}`
   );
 }
 
@@ -1492,12 +1470,10 @@ export async function moveProjectCard(
 }
 
 export async function getGists(
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<import('@/types/types').GitHubGist[]> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
-  return request(`/gists?per_page=${per_page}&page=${page}${t}`);
+  return request(`/gists?per_page=${per_page}&page=${page}`);
 }
 
 export async function getGist(gistId: string): Promise<import('@/types/types').GitHubGistDetail> {
@@ -1865,13 +1841,11 @@ export interface GitHubTag {
 export async function getTags(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<GitHubTag[]> {
   const { per_page = 100, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubTag[]>(
-    `/repos/${owner}/${repo}/tags?per_page=${per_page}&page=${page}${t}`
+    `/repos/${owner}/${repo}/tags?per_page=${per_page}&page=${page}`
   );
 }
 
@@ -1987,13 +1961,11 @@ export async function deleteFolderContents(
 export async function getRepoArtifacts(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<{ total_count: number; artifacts: GitHubArtifact[] }> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<{ total_count: number; artifacts: GitHubArtifact[] }>(
-    `/repos/${owner}/${repo}/actions/artifacts?per_page=${per_page}&page=${page}${t}`
+    `/repos/${owner}/${repo}/actions/artifacts?per_page=${per_page}&page=${page}`
   );
 }
 
@@ -2066,19 +2038,15 @@ export async function updateUserProfile(params: {
   });
 }
 
-export async function getStarredRepos(
-  params: {
-    per_page?: number;
-    page?: number;
-    sort?: 'created' | 'updated';
-    direction?: 'asc' | 'desc';
-  } = {},
-  opts: { fresh?: boolean } = {}
-): Promise<GitHubRepo[]> {
+export async function getStarredRepos(params: {
+  per_page?: number;
+  page?: number;
+  sort?: 'created' | 'updated';
+  direction?: 'asc' | 'desc';
+} = {}): Promise<GitHubRepo[]> {
   const { per_page = 30, page = 1, sort = 'created', direction = 'desc' } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   const data = await request<Array<{ starred_at: string; repo: GitHubRepo }>>(
-    `/user/starred?per_page=${per_page}&page=${page}&sort=${sort}&direction=${direction}&_starred_at=1${t}`,
+    `/user/starred?per_page=${per_page}&page=${page}&sort=${sort}&direction=${direction}&_starred_at=1`,
     { headers: { Accept: 'application/vnd.github.star+json' } }
   );
   return data.map((item) => item.repo);
@@ -2115,13 +2083,11 @@ export async function checkFollowing(username: string): Promise<boolean> {
 export async function getRepoForks(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number; sort?: 'newest' | 'oldest' | 'stargazers' | 'watchers' } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number; sort?: 'newest' | 'oldest' | 'stargazers' | 'watchers' } = {}
 ): Promise<GitHubRepo[]> {
   const { per_page = 30, page = 1, sort = 'newest' } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubRepo[]>(
-    `/repos/${owner}/${repo}/forks?per_page=${per_page}&page=${page}&sort=${sort}${t}`
+    `/repos/${owner}/${repo}/forks?per_page=${per_page}&page=${page}&sort=${sort}`
   );
 }
 
@@ -2139,13 +2105,11 @@ export async function getRepoWatchers(
 export async function getRepoStargazers(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<GitHubUser[]> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubUser[]>(
-    `/repos/${owner}/${repo}/stargazers?per_page=${per_page}&page=${page}${t}`
+    `/repos/${owner}/${repo}/stargazers?per_page=${per_page}&page=${page}`
   );
 }
 

@@ -23,12 +23,12 @@ export default function StargazersPage() {
 
   const PER_PAGE = 30;
 
-  const loadStargazers = useCallback(async (p = 1, append = false, force = false) => {
+  const loadStargazers = useCallback(async (p = 1, append = false) => {
     if (!owner || !repoName) return;
     if (p === 1) setLoading(true);
     else setLoadingMore(true);
     try {
-      const data = await getRepoStargazers(owner, repoName, { per_page: PER_PAGE, page: p }, { fresh: force });
+      const data = await getRepoStargazers(owner, repoName, { per_page: PER_PAGE, page: p });
       if (append) setStargazers((prev) => [...prev, ...data]);
       else setStargazers(data);
       setHasMore(data.length === PER_PAGE);
@@ -72,7 +72,7 @@ export default function StargazersPage() {
           variant="ghost"
           size="sm"
           className="border border-border text-muted-foreground hover:bg-secondary h-8"
-          onClick={() => loadStargazers(1, false, true)}
+          onClick={() => loadStargazers(1)}
           disabled={loading}
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

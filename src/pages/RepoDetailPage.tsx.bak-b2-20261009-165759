@@ -124,14 +124,14 @@ export default function RepoDetailPage() {
       return;
     }
 
-    const load = async (force = false) => {
+    const load = async () => {
       setLoading(true);
       try {
         const [repoData, langData, readmeData, commitsResult, starredVal] = await Promise.all([
-          getRepo(owner, repoName, { fresh: force }),
-          getRepoLanguages(owner, repoName, { fresh: force }),
-          getReadme(owner, repoName, undefined, { fresh: force }).catch(() => null),
-          getCommits(owner, repoName, { per_page: 10 }, { fresh: force }).catch(() => ({ data: [], hasNextPage: false })),
+          getRepo(owner, repoName),
+          getRepoLanguages(owner, repoName),
+          getReadme(owner, repoName).catch(() => null),
+          getCommits(owner, repoName, { per_page: 10 }).catch(() => ({ data: [], hasNextPage: false })),
           isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
         ]);
 

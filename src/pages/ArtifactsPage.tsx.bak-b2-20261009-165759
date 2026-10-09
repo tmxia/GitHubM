@@ -368,11 +368,11 @@ export default function ArtifactsPage() {
     }
   }, [owner, repo]);
 
-  const loadArtifacts = useCallback(async (force = false) => {
+  const loadArtifacts = useCallback(async () => {
     if (!owner || !repo) return;
     setLoadingArtifacts(true);
     try {
-      const data = await getRepoArtifacts(owner, repo, { per_page: 30 }, { fresh: force });
+      const data = await getRepoArtifacts(owner, repo, { per_page: 30 });
       setArtifacts(Array.isArray(data.artifacts) ? data.artifacts : []);
     } catch (err) {
       toast.error(i18n.t('加载 Artifacts 失败'));
@@ -431,7 +431,7 @@ export default function ArtifactsPage() {
 
   useEffect(() => { loadReleases(1); }, [loadReleases]);
 
-  const loadTags = useCallback(async (force = false) => {
+  const loadTags = useCallback(async () => {
     if (!owner || !repo) return;
     setLoadingTags(true);
     try {
@@ -441,7 +441,7 @@ export default function ArtifactsPage() {
       try {
         data = await gqlGetTags(owner, repo, 100) as unknown as GitHubTag[];
       } catch {
-        data = await getTags(owner, repo, { per_page: 100 }, { fresh: force });
+        data = await getTags(owner, repo, { per_page: 100 });
       }
       setTags(data);
       setSelectedTags(new Set());
@@ -557,7 +557,7 @@ export default function ArtifactsPage() {
   };
 
   return (
-    <PullToRefresh onRefresh={async () => { await Promise.all([loadReleases(1, false, true), loadArtifacts(true), loadTags(true)]); }}>
+    <PullToRefresh onRefresh={async () => { await Promise.all([loadReleases(1, false), loadArtifacts(), loadTags()]); }}>
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -651,7 +651,7 @@ export default function ArtifactsPage() {
                   )}
                 </>
               )}
-              <Button variant="ghost" size="icon" className="w-8 h-8 ml-auto text-muted-foreground hover:bg-secondary" onClick={() => loadTags(true)} disabled={loadingTags}>
+              <Button variant="ghost" size="icon" className="w-8 h-8 ml-auto text-muted-foreground hover:bg-secondary" onClick={loadTags} disabled={loadingTags}>
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingTags ? 'animate-spin' : ''}`} />
               </Button>
             </div>
@@ -726,7 +726,7 @@ export default function ArtifactsPage() {
 
         <TabsContent value="artifacts" className="mt-4">
           <div className="flex justify-end mb-3">
-            <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-8" onClick={() => loadArtifacts(true)} disabled={loadingArtifacts}>
+            <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-8" onClick={loadArtifacts} disabled={loadingArtifacts}>
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingArtifacts ? 'animate-spin' : ''}`} />{i18n.t('刷新')}</Button>
           </div>
           <div className="bg-card border border-border rounded-lg overflow-hidden">

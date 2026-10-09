@@ -371,12 +371,10 @@ export async function getRateLimit(): Promise<{ rate: GitHubRateLimit }> {
 
 export async function getUserEvents(
   login: string,
-  page = 1,
-  opts: { fresh?: boolean } = {}
+  page = 1
 ): Promise<GitHubEvent[]> {
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubEvent[]>(
-    `/users/${login}/events?per_page=30&page=${page}${t}`
+    `/users/${login}/events?per_page=30&page=${page}`
   );
 }
 
@@ -1013,19 +1011,15 @@ export async function updateCollaboratorPermission(
   );
 }
 
-export async function getNotifications(
-  params: {
-    all?: boolean;
-    participating?: boolean;
-    per_page?: number;
-    page?: number;
-  } = {},
-  opts: { fresh?: boolean } = {}
-): Promise<{ data: GitHubNotification[]; hasNextPage: boolean }> {
+export async function getNotifications(params: {
+  all?: boolean;
+  participating?: boolean;
+  per_page?: number;
+  page?: number;
+} = {}): Promise<{ data: GitHubNotification[]; hasNextPage: boolean }> {
   const { all = false, participating = false, per_page = 50, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return requestWithPagination<GitHubNotification>(
-    `/notifications?all=${all}&participating=${participating}&per_page=${per_page}&page=${page}${t}`
+    `/notifications?all=${all}&participating=${participating}&per_page=${per_page}&page=${page}`
   );
 }
 
@@ -1492,12 +1486,10 @@ export async function moveProjectCard(
 }
 
 export async function getGists(
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<import('@/types/types').GitHubGist[]> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
-  return request(`/gists?per_page=${per_page}&page=${page}${t}`);
+  return request(`/gists?per_page=${per_page}&page=${page}`);
 }
 
 export async function getGist(gistId: string): Promise<import('@/types/types').GitHubGistDetail> {
@@ -1987,13 +1979,11 @@ export async function deleteFolderContents(
 export async function getRepoArtifacts(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<{ total_count: number; artifacts: GitHubArtifact[] }> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<{ total_count: number; artifacts: GitHubArtifact[] }>(
-    `/repos/${owner}/${repo}/actions/artifacts?per_page=${per_page}&page=${page}${t}`
+    `/repos/${owner}/${repo}/actions/artifacts?per_page=${per_page}&page=${page}`
   );
 }
 
@@ -2115,13 +2105,11 @@ export async function checkFollowing(username: string): Promise<boolean> {
 export async function getRepoForks(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number; sort?: 'newest' | 'oldest' | 'stargazers' | 'watchers' } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number; sort?: 'newest' | 'oldest' | 'stargazers' | 'watchers' } = {}
 ): Promise<GitHubRepo[]> {
   const { per_page = 30, page = 1, sort = 'newest' } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubRepo[]>(
-    `/repos/${owner}/${repo}/forks?per_page=${per_page}&page=${page}&sort=${sort}${t}`
+    `/repos/${owner}/${repo}/forks?per_page=${per_page}&page=${page}&sort=${sort}`
   );
 }
 
@@ -2139,13 +2127,11 @@ export async function getRepoWatchers(
 export async function getRepoStargazers(
   owner: string,
   repo: string,
-  params: { per_page?: number; page?: number } = {},
-  opts: { fresh?: boolean } = {}
+  params: { per_page?: number; page?: number } = {}
 ): Promise<GitHubUser[]> {
   const { per_page = 30, page = 1 } = params;
-  const t = opts.fresh ? `&_t=${Date.now()}` : '';
   return request<GitHubUser[]>(
-    `/repos/${owner}/${repo}/stargazers?per_page=${per_page}&page=${page}${t}`
+    `/repos/${owner}/${repo}/stargazers?per_page=${per_page}&page=${page}`
   );
 }
 

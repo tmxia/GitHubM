@@ -110,17 +110,17 @@ export default function RepoSettingsPage() {
   }, [owner, repoName]);
 
   
-  const loadMirrorInfo = async (force = false) => {
+  const loadMirrorInfo = async () => {
     if (!owner || !repoName) return;
     setMirrorLoading(true);
     try {
-      const list = await getRepoContents(owner, repoName, '.github/workflows', undefined, { fresh: force });
+      const list = await getRepoContents(owner, repoName, '.github/workflows');
       const arr = Array.isArray(list) ? list : [];
       const entry = arr.find((f) => f.name === 'sync.yml');
       if (!entry) { setIsMirror(false); return; }
       setMirrorSha(entry.sha);
 
-      const data = await getFileContent(owner, repoName, '.github/workflows/sync.yml', undefined, { fresh: force });
+      const data = await getFileContent(owner, repoName, '.github/workflows/sync.yml');
       const content = decodeBase64Content(data.content);
       if (!content.includes('Auto Sync Source')) { setIsMirror(false); return; }
       setIsMirror(true);
@@ -170,7 +170,7 @@ export default function RepoSettingsPage() {
       } catch { /* 忽略 secret 更新失败 */ }
 
       toast.success(i18n.t('频率已更新'));
-      await loadMirrorInfo(true);
+      await loadMirrorInfo();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('更新失败'));
     } finally {

@@ -67,10 +67,10 @@ export default function GistsPage() {
   const [newPublic, setNewPublic] = useState(true);
   const [creating, setCreating] = useState(false);
 
-  const loadGists = useCallback(async (pg = 1, append = false, force = false) => {
+  const loadGists = useCallback(async (pg = 1, append = false) => {
     if (pg === 1) setLoading(true);
     try {
-      const data = await getGists({ per_page: 20, page: pg }, { fresh: force });
+      const data = await getGists({ per_page: 20, page: pg });
       if (append) setGists((prev) => [...prev, ...data]);
       else setGists(data);
       setHasMore(data.length === 20);
@@ -98,7 +98,7 @@ export default function GistsPage() {
       toast.success(i18n.t('Gist 创建成功'));
       setCreateOpen(false);
       setNewDesc(''); setNewFilename(''); setNewContent(''); setNewPublic(true);
-      loadGists(1, false, true);
+      loadGists(1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('创建失败'));
     } finally {
@@ -126,7 +126,7 @@ export default function GistsPage() {
     try {
       await forkGist(gistId);
       toast.success(i18n.t('已 Fork Gist'));
-      loadGists(1, false, true);
+      loadGists(1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('Fork 失败'));
     } finally {

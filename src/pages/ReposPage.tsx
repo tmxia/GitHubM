@@ -626,13 +626,16 @@ export default function ReposPage() {
     }
 
     try {
-      const result = await getUserRepos({
-        sort: sortField,
-        direction: sortDirection,
-        per_page: 100,
-        page: pageNum,
-        type: typeFilter,
-      });
+      const result = await getUserRepos(
+        {
+          sort: sortField,
+          direction: sortDirection,
+          per_page: 100,
+          page: pageNum,
+          type: typeFilter,
+        },
+        { fresh: force },
+      );
       if (append) {
         setRepos((prev) => [...prev, ...result.data]);
       } else {

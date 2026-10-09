@@ -104,7 +104,7 @@ export default function StarredPage() {
 
     try {
       const apiSort = (sort === 'updated' ? 'updated' : 'created') as 'created' | 'updated';
-      const data = await getStarredRepos({ per_page: 100, page: p, sort: apiSort });
+      const data = await getStarredRepos({ per_page: 100, page: p, sort: apiSort }, { fresh: force });
       const merged = append ? [...repos, ...data] : data;
       setRepos(merged);
       setHasMore(data.length === 100);

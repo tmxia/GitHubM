@@ -72,11 +72,11 @@ export default function CollaboratorsPage() {
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
 
-  const loadCollaborators = useCallback(async (force = false) => {
+  const loadCollaborators = useCallback(async () => {
     if (!owner || !repo) return;
     setLoading(true);
     try {
-      const result = await getCollaborators(owner, repo, 1, { fresh: force });
+      const result = await getCollaborators(owner, repo);
       setCollaborators(result.data);
     } catch (err) {
       toast.error(i18n.t('加载协作者列表失败'));
@@ -103,7 +103,7 @@ export default function CollaboratorsPage() {
       setAddDialogOpen(false);
       setNewUsername('');
       setNewPermission('push');
-      loadCollaborators(true);
+      loadCollaborators();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('邀请失败'));
     } finally {
@@ -144,7 +144,7 @@ export default function CollaboratorsPage() {
   };
 
   return (
-    <PullToRefresh onRefresh={() => loadCollaborators(true)}>
+    <PullToRefresh onRefresh={() => loadCollaborators()}>
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>

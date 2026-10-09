@@ -128,12 +128,12 @@ export default function ActivityPage() {
     }
   };
 
-  const loadEvents = async (pageNum = 1, append = false, force = false) => {
+  const loadEvents = async (pageNum = 1, append = false) => {
     if (!user) return;
     if (pageNum === 1) setLoading(true);
     else setLoadingMore(true);
     try {
-      const data = await getUserEvents(user.login, pageNum, { fresh: force });
+      const data = await getUserEvents(user.login, pageNum);
       if (append) {
         setEvents((prev) => [...prev, ...data]);
       } else {

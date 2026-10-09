@@ -107,7 +107,7 @@ export default function BranchesPage() {
     try {
       const [result, repoData] = await Promise.all([
         getBranches(owner, repo, pageNum, { fresh: force }),
-        pageNum === 1 ? getRepo(owner, repo) : Promise.resolve(null),
+        pageNum === 1 ? getRepo(owner, repo, { fresh: force }) : Promise.resolve(null),
       ]);
       const branchList = result.data as BranchWithCompare[];
       if (repoData) {

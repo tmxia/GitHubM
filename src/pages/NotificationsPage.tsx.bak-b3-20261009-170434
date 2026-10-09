@@ -50,7 +50,7 @@ export default function NotificationsPage() {
 
     setLoading(true);
     try {
-      const result = await getNotifications({ all: showAll, per_page: 50 }, { fresh: force });
+      const result = await getNotifications({ all: showAll, per_page: 50 });
       setNotifications(result.data);
       pageCache.set(cacheKey, result.data, 2 * 60 * 1000);
     } catch (err) {

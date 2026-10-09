@@ -44,12 +44,12 @@ export default function RepoForksPage() {
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<ForkSort>('newest');
 
-  const loadForks = useCallback(async (p = 1, sortBy: ForkSort = 'newest', append = false, force = false) => {
+  const loadForks = useCallback(async (p = 1, sortBy: ForkSort = 'newest', append = false) => {
     if (!owner || !repoName) return;
     if (p === 1) setLoading(true);
     else setLoadingMore(true);
     try {
-      const data = await getRepoForks(owner, repoName, { per_page: 30, page: p, sort: sortBy }, { fresh: force });
+      const data = await getRepoForks(owner, repoName, { per_page: 30, page: p, sort: sortBy });
       if (append) setForks((prev) => [...prev, ...data]);
       else setForks(data);
       setHasMore(data.length === 30);
@@ -111,7 +111,7 @@ export default function RepoForksPage() {
             variant="ghost"
             size="sm"
             className="border border-border text-muted-foreground hover:bg-secondary h-8"
-            onClick={() => loadForks(1, sort, false, true)}
+            onClick={() => loadForks(1, sort)}
             disabled={loading}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
