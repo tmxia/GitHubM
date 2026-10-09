@@ -1,0 +1,287 @@
+
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Bell,
+  BellOff,
+  GitPullRequest,
+  AlertCircle,
+  CheckCircle2,
+  Package,
+  RefreshCw,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import {
+  getNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  formatRelativeTime,
+  clearApiCache,
+} from '@/services/github';
+import type { GitHubNotification } from '@/types/types';
+import { toast } from 'sonner';
+import { pageCache } from '@/lib/page-cache';
+import i18n from "@/i18n";
+import PullToRefresh from '@/components/common/PullToRefresh';
+
+export default function NotificationsPage() {
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<GitHubNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
+
+  const loadNotifications = useCallback(async (force = false) => {
+    const cacheKey = `notifications:${showAll}`;
+
+    if (force) { clearApiCache(); pageCache.invalidate('notifications:'); }
+    if (!force) {
+      const cached = pageCache.get<GitHubNotification[]>(cacheKey);
+      if (cached) {
+        setNotifications(cached);
+        setLoading(false);
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const result = await getNotifications({ all: showAll, per_page: 50 });
+      setNotifications(result.data);
+      pageCache.set(cacheKey, result.data, 2 * 60 * 1000);
+    } catch (err) {
+      toast.error(i18n.t('加载通知失败'));
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [showAll]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  const handleMarkRead = async (id: string) => {
+    try {
+      await markNotificationRead(id);
+      setNotifications((prev) => {
+        const updated = prev.map((n) => (n.id === id ? { ...n, unread: false } : n));
+        pageCache.set(`notifications:${showAll}`, updated, 2 * 60 * 1000);
+        return updated;
+      });
+    } catch (err) {
+      toast.error(i18n.t('标记失败'));
+      console.error(err);
+    }
+  };
+
+  const resolveNotificationRoute = (notification: GitHubNotification): string | null => {
+    const repoFullName = notification.repository.full_name;
+    const url = notification.subject.url || '';
+    const type = notification.subject.type;
+
+    const numberMatch = url.match(/\/(\d+)$/);
+    const number = numberMatch ? numberMatch[1] : null;
+
+    switch (type) {
+      case 'Issue':
+        return number ? `/repos/${repoFullName}/issues/${number}` : `/repos/${repoFullName}/issues`;
+      case 'PullRequest':
+        return number ? `/repos/${repoFullName}/pulls/${number}` : `/repos/${repoFullName}/pulls`;
+      case 'Release':
+        return `/repos/${repoFullName}/artifacts`;
+      case 'CheckSuite':
+        return `/repos/${repoFullName}/actions`;
+      case 'Commit':
+        return `/repos/${repoFullName}/commits/${repoFullName.split('/')[1]}`;
+      default:
+        return `/repos/${repoFullName}`;
+    }
+  };
+
+  const handleNotificationClick = async (notification: GitHubNotification) => {
+    if (notification.unread) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notification.id ? { ...n, unread: false } : n))
+      );
+      markNotificationRead(notification.id).catch(() => {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notification.id ? { ...n, unread: true } : n))
+        );
+      });
+    }
+    const route = resolveNotificationRoute(notification);
+    if (route) navigate(route);
+  };
+
+  const handleMarkAllRead = async () => {
+    setMarkingAll(true);
+    try {
+      await markAllNotificationsRead();
+      setNotifications((prev) => {
+        const updated = prev.map((n) => ({ ...n, unread: false }));
+        pageCache.set(`notifications:${showAll}`, updated, 2 * 60 * 1000);
+        return updated;
+      });
+      toast.success(i18n.t('全部已标记为已读'));
+    } catch (err) {
+      toast.error(i18n.t('操作失败'));
+      console.error(err);
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case 'PullRequest':
+        return <GitPullRequest className="w-4 h-4 text-chart-4" />;
+      case 'Issue':
+        return <AlertCircle className="w-4 h-4 text-primary" />;
+      case 'CheckSuite':
+        return <CheckCircle2 className="w-4 h-4 text-success" />;
+      case 'Release':
+        return <Package className="w-4 h-4 text-accent" />;
+      default:
+        return <Bell className="w-4 h-4 text-muted-foreground" />;
+    }
+  };
+
+  const getTypeLabel = (type: string): string => {
+    const map: Record<string, string> = {
+      PullRequest: 'PR',
+      Issue: 'Issue',
+      CheckSuite: 'Actions',
+      Release: i18n.t('版本发布'),
+      Commit: i18n.t('提交'),
+      Discussion: i18n.t('讨论'),
+      RepositoryVulnerabilityAlert: i18n.t('安全警报'),
+      RepositoryAdvisory: i18n.t('安全公告'),
+      RepositoryDependabotAlertsThread: 'Dependabot',
+    };
+    return map[type] || type;
+  };
+
+  const unreadCount = notifications.filter((n) => n.unread).length;
+
+  return (
+    <PullToRefresh onRefresh={() => loadNotifications(true)}>
+    <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-foreground">{i18n.t('通知')}</h1>
+          {unreadCount > 0 && (
+            <Badge className="bg-primary text-primary-foreground text-xs">
+              {unreadCount}
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="show-all"
+              checked={showAll}
+              onCheckedChange={setShowAll}
+            />
+            <Label htmlFor="show-all" className="text-sm text-muted-foreground cursor-pointer">
+              {i18n.t('显示全部')}</Label>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:bg-secondary"
+            onClick={() => loadNotifications(true)}
+          >
+            <RefreshCw className="w-4 h-4 mr-1.5" />
+            {i18n.t('刷新')}</Button>
+          {unreadCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-border hover:bg-secondary"
+              onClick={handleMarkAllRead}
+              disabled={markingAll}
+            >
+              <CheckCircle2 className="w-4 h-4 mr-1.5" />
+              {markingAll ? i18n.t('处理中...') : i18n.t('全部已读')}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="divide-y divide-border">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="p-4">
+                <Skeleton className="h-5 w-3/4 bg-muted mb-2" />
+                <Skeleton className="h-4 w-1/3 bg-muted" />
+              </div>
+            ))}
+          </div>
+        ) : notifications.length === 0 ? (
+          <div className="py-16 text-center">
+            <BellOff className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+            <p className="text-foreground font-medium">{i18n.t('暂无通知')}</p>
+            <p className="text-muted-foreground text-sm mt-1">
+              {showAll ? i18n.t('没有任何通知') : i18n.t('没有未读通知')}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {notifications.map((notification) => (
+              <div
+                key={notification.id}
+                className={`p-4 transition-colors cursor-pointer ${notification.unread ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-secondary/50'}`}
+                onClick={() => handleNotificationClick(notification)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-1.5 shrink-0">
+                    {notification.unread ? (
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                    ) : (
+                      <div className="w-2 h-2 rounded-full bg-transparent border border-muted-foreground/30" />
+                    )}
+                  </div>
+                  <div className="mt-0.5 shrink-0">
+                    {getNotificationIcon(notification.subject.type)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm text-balance ${notification.unread ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                      {notification.subject.title}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-muted-foreground">
+                        {notification.repository.full_name}
+                      </span>
+                      <Badge variant="outline" className="text-xs h-4 px-1 border-border text-muted-foreground">
+                        {getTypeLabel(notification.subject.type)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {formatRelativeTime(notification.updated_at)}
+                      </span>
+                    </div>
+                  </div>
+                  {notification.unread && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0 text-muted-foreground hover:bg-secondary h-7 text-xs"
+                      onClick={(e) => { e.stopPropagation(); handleMarkRead(notification.id); }}
+                    >
+                      {i18n.t('标为已读')}</Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+    </PullToRefresh>
+  );
+}
