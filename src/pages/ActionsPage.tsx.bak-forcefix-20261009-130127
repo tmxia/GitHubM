@@ -1053,7 +1053,7 @@ export default function ActionsPage() {
       toast.success(`工作流 "${triggerDialog.name}" 已在 ${triggerRef} 分支触发`);
       window.dispatchEvent(new CustomEvent('compile-board-refresh'));
       setTriggerDialog(null);
-      setTimeout(() => loadRuns(1, false, true), 2000);
+      setTimeout(() => loadRuns(1), 2000);
       setTimeout(async () => {
         try {
           const res = await getWorkflowRuns(owner, repo, {
@@ -1111,7 +1111,7 @@ export default function ActionsPage() {
       await triggerWorkflow(owner, repo, lastTrigger.workflowId, lastTrigger.ref, lastTrigger.inputs);
       toast.success(`已重跑 ${lastTrigger.workflowName} @ ${lastTrigger.ref}`);
       window.dispatchEvent(new CustomEvent('compile-board-refresh'));
-      setTimeout(() => loadRuns(1, false, true), 2000);
+      setTimeout(() => loadRuns(1), 2000);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('重跑失败'));
     } finally {
@@ -1205,7 +1205,7 @@ export default function ActionsPage() {
       );
       setBulkOpen(false);
       setBulkTarget(null);
-      await loadRuns(1, false, true);
+      await loadRuns(1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('批量删除失败'));
     } finally {
@@ -1272,7 +1272,7 @@ export default function ActionsPage() {
 
   return (
     <>
-    <PullToRefresh onRefresh={() => loadRuns(1, false, true)}>
+    <PullToRefresh onRefresh={() => loadRuns(1)}>
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -1415,7 +1415,7 @@ export default function ActionsPage() {
               run={selectedRun}
               workflowPath={workflows.find((w) => w.id === selectedRun.workflow_id)?.path}
               onClose={() => setSelectedRun(null)}
-              onDeleted={() => { setSelectedRun(null); loadRuns(1, false, true); }}
+              onDeleted={() => { setSelectedRun(null); loadRuns(1); }}
               onRunUpdate={(latest) => {
                 setSelectedRun(latest);
                 if (latest.conclusion === 'cancelled') {
@@ -1455,7 +1455,7 @@ export default function ActionsPage() {
                   variant="ghost"
                   size="icon"
                   className="w-9 h-9 text-muted-foreground hover:bg-secondary"
-                  onClick={() => loadRuns(1, false, true)}
+                  onClick={() => loadRuns(1)}
                   disabled={loadingRuns}
                 >
                   <RefreshCw className={`w-4 h-4 ${loadingRuns ? 'animate-spin' : ''}`} />
