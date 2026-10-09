@@ -78,7 +78,7 @@ export default function PullsPage() {
         sort: sortField,
         per_page: 30,
         page: pageNum,
-      });
+      }, { fresh: force });
       if (append) {
         setPulls((prev) => [...prev, ...result.data]);
       } else {

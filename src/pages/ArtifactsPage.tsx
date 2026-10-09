@@ -355,7 +355,7 @@ export default function ArtifactsPage() {
     if (force) { clearApiCache(); pageCache.invalidate('releases:'); }
     if (page === 1) setLoadingReleases(true);
     try {
-      const data = await getReleases(owner, repo, { per_page: 20, page });
+      const data = await getReleases(owner, repo, { per_page: 20, page }, { fresh: force });
       if (append) setReleases((prev) => [...prev, ...data]);
       else setReleases(data);
       setHasMoreReleases(data.length === 20);

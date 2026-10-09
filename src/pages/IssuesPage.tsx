@@ -98,7 +98,7 @@ export default function IssuesPage() {
         direction: sortDirection,
         per_page: 30,
         page: pageNum,
-      });
+      }, { fresh: force });
       const issuesOnly = result.data.filter((i) => !i.pull_request);
       if (append) {
         setIssues((prev) => [...prev, ...issuesOnly]);

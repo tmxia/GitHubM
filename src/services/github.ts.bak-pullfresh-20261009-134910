@@ -630,8 +630,7 @@ export async function getPullRequests(
     page?: number;
     base?: string;
     head?: string;
-  } = {},
-  opts: { fresh?: boolean } = {}
+  } = {}
 ): Promise<{ data: GitHubPullRequest[]; hasNextPage: boolean }> {
   const {
     state = 'open',
@@ -649,7 +648,6 @@ export async function getPullRequests(
   });
   if (params.base) queryParams.set('base', params.base);
   if (params.head) queryParams.set('head', params.head);
-  if (opts.fresh) queryParams.set('_t', String(Date.now()));
 
   return requestWithPagination<GitHubPullRequest>(
     `/repos/${owner}/${repo}/pulls?${queryParams.toString()}`

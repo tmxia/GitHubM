@@ -120,7 +120,7 @@ export default function CommitsPage() {
         sha: selectedBranch,
         per_page: 30,
         page: pageNum,
-      });
+      }, { fresh: force });
       if (append) {
         setCommits((prev) => [...prev, ...result.data]);
       } else {
