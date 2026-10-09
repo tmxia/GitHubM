@@ -1126,11 +1126,7 @@ export default function ActionsPage() {
     try {
       const wfId = selectedWorkflow !== 'all' ? selectedWorkflow : undefined;
       const status = statusFilter !== 'all' ? statusFilter : undefined;
-      const res = await getWorkflowRuns(
-        owner, repo,
-        { workflow_id: wfId, status, per_page: 20, page: pg },
-        { fresh: force },  // force 时加 ?_t= 绕过 CDN 缓存
-      );
+      const res = await getWorkflowRuns(owner, repo, { workflow_id: wfId, status, per_page: 20, page: pg });
       
       const now = Date.now();
       const patched = res.workflow_runs.map((r) => {
