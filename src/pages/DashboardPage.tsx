@@ -229,6 +229,23 @@ async function runWithConcurrency<T, R>(
   if (onProgress) onProgress(results.slice());
   return results;
 }
+function fmtDuration(startIso: string | null | undefined, endIso: string | null | undefined): string {
+  if (!startIso) return '—';
+  const start = new Date(startIso).getTime();
+  const end = endIso ? new Date(endIso).getTime() : Date.now();
+  const ms = end - start;
+  if (ms < 0 || !isFinite(ms)) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = Math.round(sec % 60);
+  if (min < 60) return `${min}m ${remSec}s`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return `${hr}h ${remMin}m`;
+}
+
 export default function DashboardPage() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
@@ -945,7 +962,25 @@ export default function DashboardPage() {
                           <p className="text-xs text-muted-foreground truncate">
                             {run?.name} #{run?.run_number}
                             {' · '}
-                            {isRunning ? (run?.status === 'queued' ? i18n.t('排队中') : i18n.t('运行中')) : formatRelativeTime(run?.updated_at || run?.created_at || '')}
+                            {isRunning ? (run?.status === 'queued' ? i18n.t('排队中') : i18n.t('运行中')) : (
+                              <>
+                                {run?.conclusion === 'success' ? i18n.t('成功')
+                                  : run?.conclusion === 'failure' ? i18n.t('失败')
+                                  : run?.conclusion === 'cancelled' ? i18n.t('取消')
+                                  : run?.conclusion === 'skipped' ? i18n.t('跳过')
+                                  : run?.conclusion === 'timed_out' ? i18n.t('超时')
+                                  : run?.conclusion === 'action_required' ? i18n.t('需操作')
+                                  : run?.conclusion || ''}
+                                {' · '}
+                                {formatRelativeTime(run?.updated_at || run?.created_at || '')}
+                              </>
+                            )}
+                            {run && run.status !== 'queued' && run.run_started_at && (
+                              <>
+                                {' · '}
+                                {fmtDuration(run.run_started_at, run.status === 'completed' ? run.updated_at : null)}
+                              </>
+                            )}
                           </p>
                         </div>
                       </button>
