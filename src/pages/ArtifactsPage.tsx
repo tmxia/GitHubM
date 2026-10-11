@@ -94,6 +94,26 @@ async function downloadWithAuth(asset: { url: string; browser_download_url: stri
   toast.success(`已在新标签页中打开 ${asset.name} 的下载链接`);
 }
 
+const ASSET_MAX_SEEN_KEY = 'asset_max_seen_v1';
+
+function readMaxSeenMap(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(ASSET_MAX_SEEN_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeMaxSeen(assetId: number, value: number) {
+  try {
+    const map = readMaxSeenMap();
+    map[String(assetId)] = value;
+    localStorage.setItem(ASSET_MAX_SEEN_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
 function AssetItem({
   asset,
   onDownloaded,
@@ -103,22 +123,28 @@ function AssetItem({
 }) {
   const [downloading, setDownloading] = useState(false);
   
-  const [optimisticDelta, setOptimisticDelta] = useState(0);
+  const [maxSeen, setMaxSeen] = useState(0);
 
-  
   useEffect(() => {
-    setOptimisticDelta(0);
-  }, [asset.download_count]);
-
-  
-  const displayCount = (asset.download_count ?? 0) + optimisticDelta;
+    if (asset.id == null) return;
+    const stored = readMaxSeenMap()[String(asset.id)] ?? 0;
+    const apiCount = asset.download_count ?? 0;
+    const effective = Math.max(apiCount, stored);
+    setMaxSeen(effective);
+    if (apiCount > stored) {
+      writeMaxSeen(asset.id, apiCount);
+    }
+  }, [asset.id, asset.download_count]);
 
   const handleDownload = async () => {
     setDownloading(true);
     try {
       await downloadWithAuth(asset);
-      setOptimisticDelta((d) => d + 1);
       
+      const stored = readMaxSeenMap()[String(asset.id)] ?? maxSeen;
+      const newMax = Math.max(stored, maxSeen) + 1;
+      writeMaxSeen(asset.id, newMax);
+      setMaxSeen(newMax);
       onDownloaded?.();
     } finally {
       setDownloading(false);
@@ -134,7 +160,8 @@ function AssetItem({
           <span className="shrink-0">{formatBytes(asset.size)}</span>
           <span className="break-all">{asset.content_type}</span>
           <span className="flex items-center gap-0.5 shrink-0">
-            <Download className="w-3 h-3" />{displayCount}
+            <Download className="w-3 h-3" />
+            {maxSeen}
           </span>
         </div>
       </div>
@@ -145,14 +172,22 @@ function AssetItem({
         onClick={handleDownload}
         disabled={downloading}
       >
-        {downloading
-          ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />{i18n.t('下载中')}</>
-          : <><Download className="w-3.5 h-3.5 mr-1.5" />{i18n.t('下载')}</>
-        }
+        {downloading ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            {i18n.t('下载中')}
+          </>
+        ) : (
+          <>
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            {i18n.t('下载')}
+          </>
+        )}
       </Button>
     </div>
   );
 }
+
 
 function ReleaseItem({
   release,
