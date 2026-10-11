@@ -94,15 +94,32 @@ async function downloadWithAuth(asset: { url: string; browser_download_url: stri
   toast.success(`已在新标签页中打开 ${asset.name} 的下载链接`);
 }
 
-function AssetItem({ asset }: { asset: GitHubReleaseAsset }) {
+function AssetItem({
+  asset,
+  onDownloaded,
+}: {
+  asset: GitHubReleaseAsset;
+  onDownloaded?: () => void;
+}) {
   const [downloading, setDownloading] = useState(false);
-  const [localCount, setLocalCount] = useState(asset.download_count);
+  
+  const [optimisticDelta, setOptimisticDelta] = useState(0);
+
+  
+  useEffect(() => {
+    setOptimisticDelta(0);
+  }, [asset.download_count]);
+
+  
+  const displayCount = (asset.download_count ?? 0) + optimisticDelta;
 
   const handleDownload = async () => {
     setDownloading(true);
     try {
       await downloadWithAuth(asset);
-      setLocalCount((c) => c + 1);
+      setOptimisticDelta((d) => d + 1);
+      
+      onDownloaded?.();
     } finally {
       setDownloading(false);
     }
@@ -117,7 +134,7 @@ function AssetItem({ asset }: { asset: GitHubReleaseAsset }) {
           <span className="shrink-0">{formatBytes(asset.size)}</span>
           <span className="break-all">{asset.content_type}</span>
           <span className="flex items-center gap-0.5 shrink-0">
-            <Download className="w-3 h-3" />{localCount}
+            <Download className="w-3 h-3" />{displayCount}
           </span>
         </div>
       </div>
