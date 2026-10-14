@@ -305,7 +305,7 @@ export default function SettingsPage() {
       new Set(boardCustomWorkflows.map((w) => `${w.repoFullName}#${w.workflowId}`)),
     );
     setPickerOpen(true);
-    if (pickerRepos.length > 0) return;
+    // 每次都重新拉，确保新增/删除的仓库能及时反映
     setPickerLoading(true);
     try {
       const res = await getUserRepos({ sort: 'pushed', per_page: 100, type: 'owner' });
@@ -379,6 +379,12 @@ export default function SettingsPage() {
 
   const saveRepoPicker = () => {
     const list: MonitoredWorkflow[] = [];
+    // 原配置做成 Map，找不到新元数据时兜底复用，避免丢失
+    const oldMap = new Map<string, MonitoredWorkflow>();
+    for (const w of boardCustomWorkflows) {
+      oldMap.set(`${w.repoFullName}#${w.workflowId}`, w);
+    }
+
     for (const key of pickerSelected) {
       const idx = key.lastIndexOf('#');
       if (idx === -1) continue;
@@ -386,6 +392,7 @@ export default function SettingsPage() {
       const workflowId = parseInt(key.slice(idx + 1), 10);
       const wfs = pickerWorkflows.get(repoFullName) || [];
       const wf = wfs.find((w) => w.id === workflowId);
+
       if (wf) {
         list.push({
           repoFullName,
@@ -393,6 +400,9 @@ export default function SettingsPage() {
           workflowName: wf.name,
           workflowPath: wf.path,
         });
+      } else {
+        const fallback = oldMap.get(key);
+        if (fallback) list.push(fallback);
       }
     }
     setBoardCustomWorkflows(list);
