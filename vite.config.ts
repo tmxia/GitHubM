@@ -37,6 +37,7 @@ export default defineConfig({
       // lite 构建时把 AI 页面替换成 stub，真实文件不进依赖图
       ...(aiEnabled ? [] : [
         { find: /^@\/pages\/AiAssistantPage$/, replacement: AI_STUB },
+        { find: /^@\/components\/ai\/AiSettingsSection$/, replacement: path.resolve(__dirname, "./src/components/ai/_AiSettingsStub.tsx") },
       ]),
       { find: "@", replacement: path.resolve(__dirname, "./src") },
     ],
