@@ -1,5 +1,6 @@
 
 import { Link } from 'react-router-dom';
+import { AI_ENABLED } from "@/config/features";
 import {
   Home,
   BookOpen,
