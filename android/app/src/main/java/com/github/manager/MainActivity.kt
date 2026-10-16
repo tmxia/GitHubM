@@ -86,19 +86,18 @@ class MainActivity : AppCompatActivity() {
      * 使用前缀匹配，确保仓库详情等子页面也能正确高亮「仓库」Tab。
      * 顺序很重要：精确路径（"/"）必须排在最后，避免被子路径误命中。
      */
-    /** lite 版标记：assets/lite.marker 存在时为精简版，隐藏 AI 相关入口 */
-    private val isLiteBuild: Boolean by lazy {
-        runCatching {
-            assets.open("lite.marker").use { true }
-        }.getOrDefault(false)
-    }
+    /** lite 版标记：assets/lite.marker 存在时为精简版，隐藏 AI 相关入口。
+     *  必须在 onCreate 中检测（attachBaseContext 之前 assets 不可用）。 */
+    private var isLiteBuild: Boolean = false
 
-    private val navPathMap: Map<String, Int> = buildMap {
+    private val navPathMap: Map<String, Int> by lazy {
+        buildMap {
         put("/repos", R.id.nav_repos)
         put("/search", R.id.nav_search)
         if (!isLiteBuild) put("/ai-assistant", R.id.nav_ai)
         put("/settings", R.id.nav_settings)
         put("/", R.id.nav_home)
+        }
     }
     /** 当前激活的菜单项，避免重复导航 */
     private var currentNavItemId: Int = R.id.nav_home
@@ -872,6 +871,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 此处 assets 已可用：检测 lite.marker 是否存在
+        isLiteBuild = runCatching {
+            assets.open("lite.marker").use { true }
+        }.getOrDefault(false)
+        android.util.Log.d("GM_LITE", "isLiteBuild=$isLiteBuild")
 
         // 冷启动时读取上次保存的主题，默认浅色（light 模式）
         val savedTheme = getSharedPreferences("gm_prefs", MODE_PRIVATE)
