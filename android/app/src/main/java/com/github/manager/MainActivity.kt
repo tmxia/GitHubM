@@ -86,6 +86,13 @@ class MainActivity : AppCompatActivity() {
      * 使用前缀匹配，确保仓库详情等子页面也能正确高亮「仓库」Tab。
      * 顺序很重要：精确路径（"/"）必须排在最后，避免被子路径误命中。
      */
+    /** lite 版标记：assets/lite.marker 存在时为精简版，隐藏 AI 相关入口 */
+    private val isLiteBuild: Boolean by lazy {
+        runCatching {
+            assets.open("lite.marker").use { true }
+        }.getOrDefault(false)
+    }
+
     private val navPathMap: Map<String, Int> = buildMap {
         put("/repos", R.id.nav_repos)
         put("/search", R.id.nav_search)
@@ -1483,13 +1490,6 @@ class MainActivity : AppCompatActivity() {
                 (ll.getChildAt(1) as android.widget.TextView).setTextColor(color)
             }
         }
-    }
-
-    /** lite 版标记：assets/lite.marker 存在时为精简版，隐藏 AI 相关入口 */
-    private val isLiteBuild: Boolean by lazy {
-        runCatching {
-            assets.open("lite.marker").use { true }
-        }.getOrDefault(false)
     }
 
     private fun setupBottomNav() {
