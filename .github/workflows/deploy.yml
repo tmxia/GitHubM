@@ -80,7 +80,7 @@ jobs:
       - name: 安装依赖
         run: pnpm install --registry=https://registry.npmmirror.com
 
-      - name: 构建 Web 应用（注入版本号）
+      - name: 构建 Web 应用（正常版 + 精简版）
         run: |
           # 注入版本号
           export VITE_APP_VERSION="1.0.432"
@@ -99,13 +99,29 @@ jobs:
             done < .env
           fi
           export NODE_OPTIONS="--max_old_space_size=6144"
-          pnpm exec vite build
 
-      - name: 上传 Web 构建产物（供后续 Job 使用）
+          # 正常版（含 AI 助手）
+          pnpm exec vite build
+          mv dist dist-full
+
+          # 精简版（不含 AI 助手）
+          VITE_AI_ENABLED=false pnpm exec vite build
+          mv dist dist-lite
+
+          echo "✅ 两份构建完成：dist-full / dist-lite"
+
+      - name: 上传 Web 构建产物（正常版）
         uses: actions/upload-artifact@v4
         with:
-          name: web-dist
-          path: dist
+          name: web-dist-full
+          path: dist-full
+          retention-days: 1
+
+      - name: 上传 Web 构建产物（精简版）
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-lite
+          path: dist-lite
           retention-days: 1
 
       - name: 配置 GitHub Pages
@@ -114,7 +130,7 @@ jobs:
       - name: 上传 Pages 产物
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist-full
 
   # ── Job 2：部署到 GitHub Pages ─────────────────────────────────
   deploy-pages:
@@ -131,17 +147,25 @@ jobs:
 
   # ── Job 3：构建签名 Release APK 并发布 ────────────────────────
   build-apk:
-    name: 构建 Android APK 并发布 Release
+    name: 构建 APK (${{ matrix.variant }})
     needs: build-web
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: full
+            artifact: web-dist-full
+          - variant: lite
+            artifact: web-dist-lite
     steps:
       - name: 检出代码（含 android/ 项目源码）
         uses: actions/checkout@v4
 
-      - name: 下载 Web 构建产物
+      - name: 下载 Web 构建产物 (${{ matrix.variant }})
         uses: actions/download-artifact@v4
         with:
-          name: web-dist
+          name: ${{ matrix.artifact }}
           path: dist
 
       - name: 将 Web 资源复制到 Android assets
@@ -283,17 +307,49 @@ jobs:
         id: rename_apk
         run: |
           VERSION_NAME="1.0.432"
-          APK_NAME="github-manager-v${VERSION_NAME}.apk"
+          if [ "${{ matrix.variant }}" = "lite" ]; then
+            APK_NAME="github-manager-v${VERSION_NAME}-lite.apk"
+          else
+            APK_NAME="github-manager-v${VERSION_NAME}.apk"
+          fi
           # 始终使用 Release APK（两种签名方案均走 assembleRelease）
           cp "android/app/build/outputs/apk/release/app-release.apk" "${APK_NAME}"
           echo "apk_name=${APK_NAME}"       >> "$GITHUB_OUTPUT"
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
 
       # ── 创建 GitHub Release 并上传 APK ────────────────────────
+      - name: 上传 APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.variant }}
+          path: ${{ steps.rename_apk.outputs.apk_name }}
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job：创建 GitHub Release（等两个 APK 都构建完）
+  # ─────────────────────────────────────────────────────────────────
+  create-release:
+    name: 创建 GitHub Release
+    needs: build-apk
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载所有 APK
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apk-*
+          merge-multiple: true
+
+      - name: 列出已下载的 APK
+        run: ls -lh *.apk
+
       - name: 生成变更日志
         id: changelog
         run: |
-          # 获取上一个 Release tag（无则取所有提交）
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LAST_TAG" ]; then
             COMMITS=$(git log --pretty=format:"%s" | head -60)
@@ -301,7 +357,6 @@ jobs:
             COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s")
           fi
 
-          # 按 Conventional Commits 前缀分类
           FEATURES=$(echo "$COMMITS" | grep -E "^feat[:(]"   | sed 's/^feat[:(]/- ✨ /' | sed 's/)$//' || true)
           FIXES=$(echo "$COMMITS"    | grep -E "^fix[:(]"    | sed 's/^fix[:(]/- 🐛 /'  | sed 's/)$//' || true)
           PERF=$(echo "$COMMITS"     | grep -E "^perf[:(]"   | sed 's/^perf[:(]/- ⚡ /' | sed 's/)$//' || true)
@@ -323,25 +378,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          VERSION_NAME="${{ steps.rename_apk.outputs.version_name }}"
-          APK_NAME="${{ steps.rename_apk.outputs.apk_name }}"
+          VERSION_NAME="1.0.432"
           TAG="v${VERSION_NAME}"
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
 
-          # 根据是否使用了稳定 Secret Keystore 生成不同的签名说明
           if [ -n "${RELEASE_KEYSTORE_BASE64}" ]; then
             SIGN_NOTE="✅ **稳定 Release 签名**（可跨版本覆盖安装，正式分发）"
           else
-            SIGN_NOTE="⚠️ **临时 Release 签名**（keytool 自动生成，本次构建可安装，但无法覆盖安装其他构建版本；配置 RELEASE_KEYSTORE_BASE64 Secret 后升级为稳定签名）"
+            SIGN_NOTE="⚠️ **临时 Release 签名**（keytool 自动生成，本次构建可安装，但无法覆盖安装其他构建版本）"
           fi
-          # 如同名 tag 已存在则先删除（workflow_dispatch 重复触发场景）
+
+          NOTES="## GitHub Manager ${TAG}
+
+          **构建信息**
+          - 版本号：\`${VERSION_NAME}\`（versionCode: \`${{ github.run_number }}\`）
+          - 提交：[\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA})
+          - 构建时间：$(date -u '+%Y-%m-%d %H:%M UTC')
+          - ${SIGN_NOTE}
+
+          **两个版本**
+          - \`github-manager-v${VERSION_NAME}.apk\` — 完整版（含 AI 助手）
+          - \`github-manager-v${VERSION_NAME}-lite.apk\` — 精简版（不含 AI 助手）
+
+          ${{ steps.changelog.outputs.changelog }}
+
+          **系统要求**：Android 8.0（API 26）及以上"
+
           gh release delete "${TAG}" --yes 2>/dev/null || true
           git push origin --delete "${TAG}" 2>/dev/null || true
-
           gh release create "${TAG}" \
             --title "GitHub Manager ${TAG}" \
-            --notes "" \
+            --notes "${NOTES}" \
             --latest \
-            "${APK_NAME}"
-
+            *.apk

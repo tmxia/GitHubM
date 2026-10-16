@@ -55,8 +55,8 @@ const globalFeatures: GlobalFeature[] = [
   { label: '账号管理', desc: '多账号切换', path: '/accounts', icon: Users },
   { label: '数据导出', desc: '导出仓库/Issue 数据', path: '/export', icon: Download },
   { label: 'GraphQL Playground', desc: 'GraphQL 调试台', path: '/graphql-playground', icon: Braces },
-  { label: 'AI 助手', desc: 'AI 任务规划与执行', path: '/ai-assistant', icon: Sparkles },
-  { label: '设置', desc: '外观/账号/AI 配置', path: '/settings', icon: Settings },
+  ...(AI_ENABLED ? [{ label: 'AI 助手', desc: 'AI 任务规划与执行', path: '/ai-assistant', icon: Sparkles }] : []),
+  { label: '设置', desc: AI_ENABLED ? '外观/账号/AI 配置' : '外观/账号', path: '/settings', icon: Settings },
 ];
 
 const repoFeatures: RepoFeature[] = [

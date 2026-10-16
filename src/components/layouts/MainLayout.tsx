@@ -27,6 +27,7 @@ import {
   Languages,
   LayoutGrid,
 } from 'lucide-react';
+import { AI_ENABLED } from "@/config/features";
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -92,7 +93,7 @@ const navItems: NavItem[] = [
   { label: i18n.t('账号管理'), path: '/accounts', icon: Users },
   { label: i18n.t('数据导出'), path: '/export', icon: Download },
   { label: 'GraphQL', path: '/graphql-playground', icon: Braces },
-  { label: i18n.t('AI 助手'), path: '/ai-assistant', icon: Sparkles },
+  ...(AI_ENABLED ? [{ label: i18n.t('AI 助手'), path: '/ai-assistant', icon: Sparkles }] : []),
   { label: '全部功能', path: '/more', icon: LayoutGrid },
 ];
 
@@ -105,7 +106,7 @@ const themeIcons: Record<ThemeMode, React.ComponentType<{ className?: string }>>
 const bottomTabs = [
   { label: i18n.t('首页'),  path: '/',             icon: Home },
   { label: i18n.t('仓库'),  path: '/repos',        icon: BookOpen },
-  { label: 'AI',   path: '/ai-assistant', icon: Sparkles },
+  ...(AI_ENABLED ? [{ label: 'AI',   path: '/ai-assistant', icon: Sparkles }] : []),
   { label: i18n.t('通知'),  path: '/notifications', icon: Bell },
   { label: i18n.t('我的'),  path: '/settings',     icon: User },
 ];

@@ -1,4 +1,6 @@
 import { defineConfig } from "vite";
+const aiEnabled = process.env.VITE_AI_ENABLED !== "false";
+const AI_STUB = path.resolve(__dirname, "./src/pages/_AiStub.tsx");
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
 import path from "path";
@@ -31,9 +33,13 @@ export default defineConfig({
     },
   ],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      // lite 构建时把 AI 页面替换成 stub，真实文件不进依赖图
+      ...(aiEnabled ? [] : [
+        { find: /^@\/pages\/AiAssistantPage$/, replacement: AI_STUB },
+      ]),
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+    ],
   },
   // ── Vitest 配置 ────────────────────────────────────────────────────
   test: {
