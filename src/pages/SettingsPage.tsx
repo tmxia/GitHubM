@@ -305,7 +305,7 @@ export default function SettingsPage() {
       new Set(boardCustomWorkflows.map((w) => `${w.repoFullName}#${w.workflowId}`)),
     );
     setPickerOpen(true);
-    // 每次都重新拉，确保新增/删除的仓库能及时反映
+    
     setPickerLoading(true);
     try {
       const res = await getUserRepos({ sort: 'pushed', per_page: 100, type: 'owner' });
@@ -379,7 +379,7 @@ export default function SettingsPage() {
 
   const saveRepoPicker = () => {
     const list: MonitoredWorkflow[] = [];
-    // 原配置做成 Map，找不到新元数据时兜底复用，避免丢失
+    
     const oldMap = new Map<string, MonitoredWorkflow>();
     for (const w of boardCustomWorkflows) {
       oldMap.set(`${w.repoFullName}#${w.workflowId}`, w);
