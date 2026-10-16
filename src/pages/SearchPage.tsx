@@ -439,11 +439,12 @@ export default function SearchPage() {
               </div>
               <div className="max-h-48 overflow-y-auto">
                 {history.map((item, idx) => (
-                  <button
+                  <div
                     key={idx}
-                    type="button"
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-secondary/60 transition-colors text-left"
+                    className="group w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-secondary/60 transition-colors text-left cursor-pointer"
                     onMouseDown={(e) => {
+                      
+                      if ((e.target as HTMLElement).closest('[data-history-remove]')) return;
                       e.preventDefault();
                       setQuery(item);
                       handleSearch(item, searchType, 1);
@@ -451,16 +452,23 @@ export default function SearchPage() {
                   >
                     <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span className="flex-1 truncate">{item}</span>
-                    <X
-                      className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground shrink-0"
+                    <button
+                      type="button"
+                      data-history-remove
+                      aria-label={i18n.t('删除')}
+                      className="p-0.5 rounded hover:bg-secondary shrink-0"
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        e.preventDefault();
                         const next = history.filter((_, i) => i !== idx);
                         localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
                         setHistory(next);
                       }}
-                    />
-                  </button>
+                    >
+                      <X className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>

@@ -195,7 +195,17 @@ export default function FollowListPage() {
               const isSelf = isCurrentUser(u.login);
               return (
                 <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/40 transition-colors">
-                  <Avatar className="w-10 h-10 shrink-0">
+                  <button
+
+                    type="button"
+
+                    onClick={() => navigate(`/users/${u.login}/repos`)}
+
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
+
+                  >
+
+                    <Avatar className="w-10 h-10 shrink-0">
                     <AvatarImage src={u.avatar_url} alt={u.login} loading="lazy" />
                     <AvatarFallback className="bg-secondary text-secondary-foreground text-sm font-semibold">
                       {u.login.substring(0, 2).toUpperCase()}
@@ -207,6 +217,7 @@ export default function FollowListPage() {
                     </p>
                     <p className="text-xs text-muted-foreground truncate">@{u.login}</p>
                   </div>
+                  </button>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <Button
                       asChild
