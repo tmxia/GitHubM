@@ -86,13 +86,13 @@ class MainActivity : AppCompatActivity() {
      * 使用前缀匹配，确保仓库详情等子页面也能正确高亮「仓库」Tab。
      * 顺序很重要：精确路径（"/"）必须排在最后，避免被子路径误命中。
      */
-    private val navPathMap = linkedMapOf(
-        "/repos"         to R.id.nav_repos,
-        "/search"        to R.id.nav_search,
-        "/ai-assistant"  to R.id.nav_ai,
-        "/settings"      to R.id.nav_settings,
-        "/"              to R.id.nav_home,
-    )
+    private val navPathMap: Map<String, Int> = buildMap {
+        put("/repos", R.id.nav_repos)
+        put("/search", R.id.nav_search)
+        if (!isLiteBuild) put("/ai-assistant", R.id.nav_ai)
+        put("/settings", R.id.nav_settings)
+        put("/", R.id.nav_home)
+    }
     /** 当前激活的菜单项，避免重复导航 */
     private var currentNavItemId: Int = R.id.nav_home
     /** 当前底部导航栏选中色（由 notifyAccent 更新，随主题色方案变化） */
@@ -1420,13 +1420,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 构建鸿蒙兼容的底部导航栏 */
     private fun setupCustomBottomNav() {
-        val navs = listOf(
-            Triple("首页", R.id.nav_home, R.drawable.ic_nav_home),
-            Triple("仓库", R.id.nav_repos, R.drawable.ic_nav_repos),
-            Triple("AI助手", R.id.nav_ai, R.drawable.ic_nav_ai),
-            Triple("搜索", R.id.nav_search, R.drawable.ic_nav_search),
-            Triple("我的", R.id.nav_settings, R.drawable.ic_nav_settings)
-        )
+        val navs = buildList {
+            add(Triple("首页", R.id.nav_home, R.drawable.ic_nav_home))
+            add(Triple("仓库", R.id.nav_repos, R.drawable.ic_nav_repos))
+            if (!isLiteBuild) add(Triple("AI助手", R.id.nav_ai, R.drawable.ic_nav_ai))
+            add(Triple("搜索", R.id.nav_search, R.drawable.ic_nav_search))
+            add(Triple("我的", R.id.nav_settings, R.drawable.ic_nav_settings))
+        }
         val density = resources.displayMetrics.density
 
         customNavButtons = navs.map { (label, navId, iconRes) ->
@@ -1485,7 +1485,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** lite 版标记：assets/lite.marker 存在时为精简版，隐藏 AI 相关入口 */
+    private val isLiteBuild: Boolean by lazy {
+        runCatching {
+            assets.open("lite.marker").use { true }
+        }.getOrDefault(false)
+    }
+
     private fun setupBottomNav() {
+        // lite 版隐藏 AI 菜单项
+        if (isLiteBuild) {
+            bottomNav.menu.removeItem(R.id.nav_ai)
+        }
         bottomNav.selectedItemId = R.id.nav_home
         setupBottomNavListener()
     }

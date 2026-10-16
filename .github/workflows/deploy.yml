@@ -172,6 +172,11 @@ jobs:
         run: |
           mkdir -p android/app/src/main/assets
           cp -r dist/. android/app/src/main/assets/
+          # lite 版放 marker，Android 原生层据此隐藏 AI 入口
+          if [ "${{ matrix.variant }}" = "lite" ]; then
+            touch android/app/src/main/assets/lite.marker
+            echo "✅ 已放置 lite.marker"
+          fi
 
       - name: 设置 JDK 17
         uses: actions/setup-java@v4
