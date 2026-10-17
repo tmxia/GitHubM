@@ -514,6 +514,7 @@ jobs:
           PUSH_TOKEN: \${{ secrets.MIRROR_PUSH_TOKEN }}
           REPO: \${{ github.repository }}
         run: |
+          set -e
           TARGET_URL="https://x-access-token:$PUSH_TOKEN@github.com/$REPO.git"
 
           # 智能检测 LFS：任何分支的 .gitattributes 含 filter=lfs 即视为使用 LFS
@@ -539,6 +540,14 @@ jobs:
           git push --force "$TARGET_URL" \
             "refs/heads/*:refs/heads/*" \
             "refs/tags/*:refs/tags/*"
+
+            PUSH_EXIT=$?
+            if [ $PUSH_EXIT -ne 0 ]; then
+              echo "❌ git push 失败（退出码 $PUSH_EXIT）"
+              echo "可能原因：PUSH_TOKEN 权限不足 / 目标分支保护 / 认证失败"
+              exit 1
+            fi
+            echo "✅ 推送成功"
 
           if [ "$HAS_LFS" = "1" ]; then
             echo "📤 推送 LFS 对象..."
@@ -653,9 +662,9 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
       }
     } catch { /* 忽略 Pages 失败 */ }
 
-    // 6) 轮询 workflow 完成（最多 2 分钟）
+    // 6) 快速检查 30 秒；大仓库通常 5-10 分钟，直接返回，不阻塞用户
     let lastRun: { conclusion: string | null; status: string; html_url: string } | null = null;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       lastRun = await getWorkflowRunStatus(login, repoNameNew, 'sync.yml').catch(() => null);
       if (lastRun?.status === 'completed') break;
@@ -685,7 +694,10 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
         toast.error(i18n.t('同步失败，请去 Actions 页面查看'));
       }
     } else {
-      toast.warning(i18n.t('同步超时，请去 Actions 页面查看'));
+      toast.info(
+        i18n.t('任务已触发，大型仓库可能需要几分钟。请稍后到 Actions 页面查看进度'),
+        { duration: 8000 },
+      );
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : '未知错误';
@@ -855,15 +867,26 @@ export default function ReposPage() {
     const willCreateNew = createMode === 'blank' || (createMode === 'clone' && !keepForkMark);
     if (willCreateNew && newRepoName.trim()) {
       const login = currentUser?.login;
-      if (login) {
-        try {
-          await getRepo(login, newRepoName.trim());
-          toast.error(
-            i18n.t('仓库') + ` ${login}/${newRepoName.trim()} ` + i18n.t('已存在，请换一个名称')
-          );
+      if (!login) {
+        toast.error(i18n.t('无法获取当前用户信息，请先登录'));
+        return;
+      }
+      try {
+        // fresh: true 强制跳过缓存，确保真实查询
+        await getRepo(login, newRepoName.trim(), { fresh: true });
+        toast.error(
+          i18n.t('仓库') + ` ${login}/${newRepoName.trim()} ` + i18n.t('已存在，请换一个名称')
+        );
+        return;
+      } catch (err) {
+        const status = (err as { status?: number })?.status;
+        if (status === 404) {
+          // 404 = 不存在，继续创建
+        } else {
+          // 非 404（网络错误、403、401 等）：阻止创建，明确提示
+          const msg = err instanceof Error ? err.message : '未知错误';
+          toast.error(i18n.t('检测目标仓库失败：') + msg);
           return;
-        } catch {
-          // 404 = 不存在，继续；其他错误也继续（让 GitHub 处理）
         }
       }
     }
@@ -902,12 +925,25 @@ export default function ReposPage() {
         const srcInfo = await getRepo(srcOwner, srcRepo).catch(() => null);
         const srcDefault = srcInfo?.default_branch || 'main';
 
-        const created = await createRepo({
-          name: newRepoName.trim(),
-          description: srcInfo?.description || newRepoDesc.trim() || undefined,
-          private: newRepoPrivate,
-          auto_init: false,
-        });
+        let created;
+        try {
+          created = await createRepo({
+            name: newRepoName.trim(),
+            description: srcInfo?.description || newRepoDesc.trim() || undefined,
+            private: newRepoPrivate,
+            auto_init: false,
+          });
+        } catch (err) {
+          const status = (err as { status?: number })?.status;
+          if (status === 422) {
+            toast.error(
+              i18n.t('目标仓库已存在，请换一个名称。如需覆盖，请先删除该仓库'),
+            );
+            setCreating(false);
+            return;
+          }
+          throw err;  // 其他错误继续往上抛
+        }
         const [login, repoNameNew] = created.full_name.split('/');
 
         // ── 立即关闭弹窗，后台执行镜像任务 ──
