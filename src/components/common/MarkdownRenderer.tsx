@@ -1,8 +1,10 @@
 
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
+import ImageLightbox from './ImageLightbox';
 
 interface MarkdownRendererProps {
   content: string;
@@ -10,6 +12,8 @@ interface MarkdownRendererProps {
 }
 
 export default function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
   return (
     <div className={`markdown-body ${className || ''}`}>
       <ReactMarkdown
@@ -27,7 +31,14 @@ export default function MarkdownRenderer({ content, className }: MarkdownRendere
               alt={alt || ''}
               {...props}
               loading="lazy"
-              className="max-w-full rounded"
+              className="max-w-full rounded cursor-zoom-in"
+              onClick={(e) => {
+                if (typeof src === 'string' && src) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPreviewSrc(src);
+                }
+              }}
             />
           ),
           a: ({ href, children, ...props }) => (
@@ -44,6 +55,9 @@ export default function MarkdownRenderer({ content, className }: MarkdownRendere
       >
         {content}
       </ReactMarkdown>
+      {previewSrc && (
+        <ImageLightbox src={previewSrc} alt="" onClose={() => setPreviewSrc(null)} />
+      )}
     </div>
   );
 }
