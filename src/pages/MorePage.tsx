@@ -1,5 +1,6 @@
 
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { AI_ENABLED } from "@/config/features";
 import {
   Home,
@@ -45,7 +46,6 @@ interface RepoFeature {
 }
 
 const globalFeatures: GlobalFeature[] = [
-  { label: '后台任务', desc: '查看进行中的镜像/复制等任务', path: '/tasks', icon: ListTodo },
   { label: '首页', desc: '仪表盘总览', path: '/', icon: Home },
   { label: '仓库列表', desc: '创建/删除/编辑仓库', path: '/repos', icon: BookOpen },
   { label: '通知', desc: '未读通知与批量已读', path: '/notifications', icon: Bell },
@@ -58,6 +58,7 @@ const globalFeatures: GlobalFeature[] = [
   { label: '数据导出', desc: '导出仓库/Issue 数据', path: '/export', icon: Download },
   { label: 'GraphQL Playground', desc: 'GraphQL 调试台', path: '/graphql-playground', icon: Braces },
   ...(AI_ENABLED ? [{ label: 'AI 助手', desc: 'AI 任务规划与执行', path: '/ai-assistant', icon: Sparkles }] : []),
+  { label: '后台任务', desc: '查看进行中的镜像/复制等任务', path: '/tasks', icon: ListTodo },
   { label: '设置', desc: AI_ENABLED ? '外观/账号/AI 配置' : '外观/账号', path: '/settings', icon: Settings },
 ];
 
@@ -148,15 +149,20 @@ export default function MorePage() {
           {repoFeatures.map((f) => {
             const Icon = repoIcons[f.label] ?? FileCode2;
             return (
-              <span
-                key={f.label}
-                className="inline-flex items-center gap-1.5 bg-secondary/60 border border-border
-                           rounded-full px-3 py-1.5 text-xs text-foreground/80"
-              >
-                <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-                {f.label}
-                <span className="text-muted-foreground/70 font-mono">{f.sub}</span>
-              </span>
+              <button
+                        type="button"
+                        key={f.label}
+                        onClick={() => {
+                          toast.info(`请先进入任意仓库详情页，再访问「${f.label}」功能`, { duration: 3000 });
+                        }}
+                        className="inline-flex items-center gap-1.5 bg-secondary/60 border border-border
+                          rounded-full px-3 py-1.5 text-xs text-foreground/80 hover:bg-secondary active:scale-95 transition-all cursor-pointer"
+                      >
+                        <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                        {f.label}
+                        <span className="text-muted-foreground/70 font-mono">{f.sub}</span>
+                      </button>
+              
             );
           })}
         </div>

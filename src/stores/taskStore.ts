@@ -10,7 +10,7 @@ export interface BackgroundTask {
   description?: string;
   status: TaskStatus;
   error?: string;
-  link?: string;         // 比如 Actions 页面或目标仓库链接
+  link?: string;         
   createdAt: number;
   updatedAt: number;
 }
