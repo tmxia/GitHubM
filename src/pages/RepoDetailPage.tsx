@@ -68,6 +68,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
+import { setCurrentRepo } from '@/lib/repo-tracker';
 import { pageCache } from '@/lib/page-cache';
 import i18n from "@/i18n";
 
@@ -80,6 +81,12 @@ function encodeBase64Utf8(str: string): string {
 
 export default function RepoDetailPage() {
   const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
+  
+  useEffect(() => {
+    if (owner && repoName) {
+      setCurrentRepo(`${owner}/${repoName}`);
+    }
+  }, [owner, repoName]);
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 

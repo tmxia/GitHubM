@@ -1,5 +1,6 @@
 
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { getCurrentRepo } from '@/lib/repo-tracker';
 import { toast } from 'sonner';
 import { AI_ENABLED } from "@/config/features";
 import {
@@ -103,6 +104,7 @@ const repoIcons: Record<string, LucideIcon> = {
 };
 
 export default function MorePage() {
+  const navigate = useNavigate();
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6">
       <div>
@@ -153,7 +155,15 @@ export default function MorePage() {
                         type="button"
                         key={f.label}
                         onClick={() => {
-                          toast.info(`请先进入任意仓库详情页，再访问「${f.label}」功能`, { duration: 3000 });
+                          const currentRepo = getCurrentRepo();
+                          if (currentRepo) {
+                            // 比如 currentRepo = "tmxia/GitHubM"，f.sub = "/issues"
+                            // PR Diff 这种带参数的先去列表页
+                            const path = `/repos/${currentRepo}${f.sub.split('/{n}')[0]}`;
+                            navigate(path);
+                          } else {
+                            toast.info(`请先进入任意仓库详情页，再访问「${f.label}」功能`, { duration: 3000 });
+                          }
                         }}
                         className="inline-flex items-center gap-1.5 bg-secondary/60 border border-border
                           rounded-full px-3 py-1.5 text-xs text-foreground/80 hover:bg-secondary active:scale-95 transition-all cursor-pointer"
