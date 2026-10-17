@@ -45,6 +45,7 @@ interface RepoFeature {
 }
 
 const globalFeatures: GlobalFeature[] = [
+  { label: '后台任务', desc: '查看进行中的镜像/复制等任务', path: '/tasks', icon: ListTodo },
   { label: '首页', desc: '仪表盘总览', path: '/', icon: Home },
   { label: '仓库列表', desc: '创建/删除/编辑仓库', path: '/repos', icon: BookOpen },
   { label: '通知', desc: '未读通知与批量已读', path: '/notifications', icon: Bell },

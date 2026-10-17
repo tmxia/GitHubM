@@ -40,6 +40,7 @@ const StargazersPage = lazy(() => import('./pages/StargazersPage'));
 const PrDiffPage = lazy(() => import('./pages/PrDiffPage'));
 const AiAssistantPage = lazy(() => import('@/pages/AiAssistantPage'));
 const MorePage = lazy(() => import('./pages/MorePage'));
+const TasksPage = lazy(() => import('./pages/TasksPage'));
 import i18n from "@/i18n";
 import { AI_ENABLED } from "@/config/features";
 
@@ -94,5 +95,6 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('设置'), path: '/settings', element: <SettingsPage /> },
   { name: 'GraphQL Playground', path: '/graphql-playground', element: <GraphQLPlaygroundPage /> },
   ...(AI_ENABLED && AiAssistantPage ? [{ name: i18n.t('AI 助手'), path: '/ai-assistant', element: <AiAssistantPage /> }] : []),
+  { name: i18n.t('后台任务'), path: '/tasks', element: <TasksPage /> },
   { name: '全部功能', path: '/more', element: <MorePage /> },
 ];
