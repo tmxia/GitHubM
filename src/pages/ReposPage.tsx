@@ -560,6 +560,139 @@ jobs:
 ${restoreStep}`;
 }
 
+
+
+// ══════════════════════════════════════════════
+// 后台执行镜像任务：不阻塞 UI，完成后 Toast 提示
+// 一次性任务（clone）完成后自动删除 workflow
+// ══════════════════════════════════════════════
+interface BackgroundMirrorParams {
+  login: string;
+  repoNameNew: string;
+  srcDefault: string;
+  srcOwner: string;
+  srcRepo: string;
+  srcInfo: GitHubRepo | null;
+  mirrorMode: boolean;
+  mirrorFreq: '6h' | '12h' | '1d';
+  src: string;
+  mirrorToken: string;
+  pushToken: string;
+}
+
+async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<void> {
+  const {
+    login, repoNameNew, srcDefault, srcOwner, srcRepo, srcInfo,
+    mirrorMode, mirrorFreq, src, mirrorToken, pushToken,
+  } = params;
+
+  try {
+    // 1) 更新仓库信息
+    if (srcInfo) {
+      await updateRepo(login, repoNameNew, {
+        description: srcInfo.description || '',
+        homepage: srcInfo.homepage || '',
+      }).catch(() => {});
+      if (srcInfo.topics && srcInfo.topics.length > 0) {
+        await updateRepoTopics(login, repoNameNew, srcInfo.topics).catch(() => {});
+      }
+    }
+
+    // 2) 写 workflow
+    const yaml = makeMirrorYaml(mirrorFreq, mirrorMode, src);
+    await ensureFreshWorkflow(login, repoNameNew, srcDefault, yaml);
+
+    // 3) 写 secrets
+    const pub = await getRepoSecretPublicKey(login, repoNameNew);
+    const tok = mirrorToken.trim();
+    const srcUrl = tok
+      ? `https://x-access-token:${tok}@github.com/${src}.git`
+      : `https://github.com/${src}.git`;
+    const encSrc = encryptSecretValue(srcUrl, pub.key);
+    await putRepoSecret(login, repoNameNew, 'MIRROR_SOURCE_URL', encSrc, pub.key_id);
+
+    const pushTok = pushToken.trim() || (localStorage.getItem('github_manager_token') || '');
+    if (!pushTok) {
+      toast.error(i18n.t('缺少推送 Token，无法触发同步'));
+      return;
+    }
+    const encPush = encryptSecretValue(pushTok, pub.key);
+    await putRepoSecret(login, repoNameNew, 'MIRROR_PUSH_TOKEN', encPush, pub.key_id);
+
+    const encWf = encryptSecretValue(b64EncodeUtf8(yaml), pub.key);
+    await putRepoSecret(login, repoNameNew, 'MIRROR_WORKFLOW_B64', encWf, pub.key_id);
+
+    // 4) Dispatch workflow
+    const dispatchResult = await dispatchWithAutoFix(login, repoNameNew, srcDefault, yaml);
+    if (!dispatchResult.ok) {
+      toast.warning(i18n.t('触发同步失败：') + dispatchResult.lastError);
+      return;
+    }
+
+    // 5) Pages 配置（可选，失败忽略）
+    try {
+      const srcPages = await getPages(srcOwner, srcRepo).catch(() => null);
+      if (srcPages) {
+        const enabled = (srcPages as { html_url?: string }).html_url;
+        if (enabled) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const buildType = (srcPages as { build_type?: 'legacy' | 'workflow' }).build_type || 'legacy';
+          if (buildType === 'workflow') {
+            await enablePages(login, repoNameNew, { build_type: 'workflow' });
+          } else {
+            const srcSrc = (srcPages as { source?: { branch: string; path?: '/' | '/docs' } }).source;
+            if (srcSrc?.branch) {
+              await enablePages(login, repoNameNew, {
+                branch: srcSrc.branch,
+                path: (srcSrc.path === '/docs' ? '/docs' : '/'),
+              });
+            }
+          }
+          toast.success(i18n.t('已自动配置 GitHub Pages'));
+        }
+      }
+    } catch { /* 忽略 Pages 失败 */ }
+
+    // 6) 轮询 workflow 完成（最多 2 分钟）
+    let lastRun: { conclusion: string | null; status: string; html_url: string } | null = null;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      lastRun = await getWorkflowRunStatus(login, repoNameNew, 'sync.yml').catch(() => null);
+      if (lastRun?.status === 'completed') break;
+    }
+
+    if (lastRun?.status === 'completed') {
+      if (lastRun.conclusion === 'success') {
+        toast.success(mirrorMode ? i18n.t('镜像同步完成') : i18n.t('复制完成'));
+
+        // 一次性任务：完成后删除 workflow
+        if (!mirrorMode) {
+          try {
+            const wfPath = '.github/workflows/sync.yml';
+            const existing = await getFileContent(login, repoNameNew, wfPath, srcDefault).catch(() => null);
+            const sha = (existing as { sha?: string } | null)?.sha;
+            if (sha) {
+              await deleteFileContent(login, repoNameNew, wfPath, {
+                message: 'chore: cleanup mirror workflow after one-time clone',
+                sha,
+                branch: srcDefault,
+              });
+              toast.success(i18n.t('已自动清理临时工作流'));
+            }
+          } catch { /* 忽略删除失败 */ }
+        }
+      } else {
+        toast.error(i18n.t('同步失败，请去 Actions 页面查看'));
+      }
+    } else {
+      toast.warning(i18n.t('同步超时，请去 Actions 页面查看'));
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '未知错误';
+    toast.error(i18n.t('镜像任务出错：') + msg);
+  }
+}
+
 export default function ReposPage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -777,104 +910,40 @@ export default function ReposPage() {
         });
         const [login, repoNameNew] = created.full_name.split('/');
 
-        
-        if (srcInfo) {
-          await updateRepo(login, repoNameNew, {
-            description: srcInfo.description || '',
-            homepage: srcInfo.homepage || '',
-          }).catch(() => {});
-          if (srcInfo.topics && srcInfo.topics.length > 0) {
-            await updateRepoTopics(login, repoNameNew, srcInfo.topics).catch(() => {});
-          }
-        }
-
-        await new Promise((r) => setTimeout(r, 5000));
-
-        const yaml = makeMirrorYaml(mirrorFreq, mirrorMode, src);
-        
-        await ensureFreshWorkflow(login, repoNameNew, srcDefault, yaml);
-
-        const pub = await getRepoSecretPublicKey(login, repoNameNew);
-        const tok = mirrorToken.trim();
-        const srcUrl = tok
-          ? `https://x-access-token:${tok}@github.com/${src}.git`
-          : `https://github.com/${src}.git`;
-        const encSrc = encryptSecretValue(srcUrl, pub.key);
-        await putRepoSecret(login, repoNameNew, 'MIRROR_SOURCE_URL', encSrc, pub.key_id);
-
-        const pushTok = pushToken.trim() || (localStorage.getItem('github_manager_token') || '');
-        if (!pushTok) throw new Error(i18n.t('请填写推送 Token（需要有 workflow 权限）'));
-        const encPush = encryptSecretValue(pushTok, pub.key);
-        await putRepoSecret(login, repoNameNew, 'MIRROR_PUSH_TOKEN', encPush, pub.key_id);
-
-        const encWf = encryptSecretValue(b64EncodeUtf8(yaml), pub.key);
-        await putRepoSecret(login, repoNameNew, 'MIRROR_WORKFLOW_B64', encWf, pub.key_id);
-
-        
-        const dispatchRef = srcDefault;
-        const dispatchResult = await dispatchWithAutoFix(login, repoNameNew, dispatchRef, yaml);
-        if (!dispatchResult.ok) {
-          toast.warning(i18n.t('触发同步失败：') + dispatchResult.lastError);
-        }
-
-        
-        try {
-          const srcPages = await getPages(srcOwner, srcRepo).catch(() => null);
-          if (srcPages) {
-            const enabled = (srcPages as { html_url?: string }).html_url;
-            if (enabled) {
-              await new Promise((r) => setTimeout(r, 2000));
-              const buildType = (srcPages as { build_type?: 'legacy' | 'workflow' }).build_type || 'legacy';
-              if (buildType === 'workflow') {
-                await enablePages(login, repoNameNew, { build_type: 'workflow' });
-              } else {
-                const src = (srcPages as { source?: { branch: string; path?: '/' | '/docs' } }).source;
-                if (src?.branch) {
-                  await enablePages(login, repoNameNew, {
-                    branch: src.branch,
-                    path: (src.path === '/docs' ? '/docs' : '/'),
-                  });
-                }
-              }
-              toast.success(i18n.t('已自动配置 GitHub Pages'));
-            }
-          }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : '未知错误';
-          toast.warning(i18n.t('Pages 配置同步失败：') + msg);
-        }
-
-        
-        
-        let lastRun: { conclusion: string | null; status: string; html_url: string } | null = null;
-        for (let i = 0; i < 8; i++) {
-          await new Promise((r) => setTimeout(r, 3000));
-          lastRun = await getWorkflowRunStatus(login, repoNameNew, 'sync.yml');
-          if (lastRun?.status === 'completed') break;
-        }
-
-        if (lastRun?.status === 'completed') {
-          if (lastRun.conclusion === 'success') {
-            toast.success(mirrorMode ? i18n.t('镜像复制完成') : i18n.t('复制完成'));
-          } else {
-            toast.error(i18n.t('同步失败，请去 Actions 页面查看'));
-          }
-        }
-        
-
+        // ── 立即关闭弹窗，后台执行镜像任务 ──
         setCreateDialogOpen(false);
         resetCreateForm();
         pageCache.invalidate('repos:');
         loadRepos(1, false, true);
+        setCreating(false);
+
+        toast.success(
+          mirrorMode
+            ? i18n.t('仓库已创建，镜像任务在后台进行中，完成后会提示')
+            : i18n.t('仓库已创建，复制任务在后台进行中，完成后会提示'),
+        );
+
+        // 后台异步（不 await）
+        void runMirrorInBackground({
+          login,
+          repoNameNew,
+          srcDefault,
+          srcOwner,
+          srcRepo,
+          srcInfo,
+          mirrorMode,
+          mirrorFreq,
+          src,
+          mirrorToken,
+          pushToken,
+        });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : i18n.t('创建失败'));
-      } finally {
         setCreating(false);
       }
       return;
     }
 
-    
     if (!newRepoName.trim()) { toast.error(i18n.t('请输入仓库名称')); return; }
     setCreating(true);
     try {
