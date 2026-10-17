@@ -96,6 +96,7 @@ import {
   updateRepo,
   updateRepoTopics,
   getWorkflowRunStatus,
+  deleteWorkflowRun,
   getPages,
   enablePages,
   deleteFileContent,
@@ -467,6 +468,30 @@ function makeMirrorYaml(freq: '6h' | '12h' | '1d', scheduled = true, sourceRepo 
   const cron = freq === '6h' ? '0 */6 * * *' : freq === '12h' ? '0 */12 * * *' : '0 3 * * *';
   const trigger = scheduled ? `\n  schedule:\n    - cron: '${cron}'` : '';
   const srcComment = sourceRepo ? `# mirror-source: ${sourceRepo}\n# mirror-frequency: ${freq}\n` : '';
+  
+  const cleanupStep = !scheduled ? `
+      - name: Cleanup temporary workflow
+        if: success()
+        env:
+          GH_TOKEN: \${{ secrets.MIRROR_PUSH_TOKEN }}
+          REPO: \${{ github.repository }}
+          RUN_ID: \${{ github.run_id }}
+        run: |
+          echo "🧹 清理临时工作流..."
+          # 1. 删除 sync.yml 文件
+          SHA=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/$REPO/contents/.github/workflows/sync.yml" | grep -o '"sha": "[^"]*' | head -1 | cut -d'"' -f4)
+          if [ -n "$SHA" ]; then
+            curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+              -d "{\"message\":\"chore: cleanup temporary workflow\",\"sha\":\"$SHA\"}" \
+              "https://api.github.com/repos/$REPO/contents/.github/workflows/sync.yml" > /dev/null
+            echo "✅ 已删除 sync.yml 文件"
+          fi
+          # 2. 删除当前 Run 记录
+          curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID" > /dev/null
+          echo "✅ 已请求删除 Run 记录"
+` : '';
+
 
   const restoreStep = scheduled ? `
       - name: Restore mirror workflow
@@ -566,15 +591,10 @@ jobs:
               -d "{\\"default_branch\\":\\"$SRC_DEFAULT\\"}" \\
               "https://api.github.com/repos/$REPO"
           fi
-${restoreStep}`;
+${cleanupStep}${restoreStep}`;
 }
 
 
-
-// ══════════════════════════════════════════════
-// 后台执行镜像任务：不阻塞 UI，完成后 Toast 提示
-// 一次性任务（clone）完成后自动删除 workflow
-// ══════════════════════════════════════════════
 interface BackgroundMirrorParams {
   login: string;
   repoNameNew: string;
@@ -596,7 +616,7 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
   } = params;
 
   try {
-    // 1) 更新仓库信息
+    
     if (srcInfo) {
       await updateRepo(login, repoNameNew, {
         description: srcInfo.description || '',
@@ -607,11 +627,11 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
       }
     }
 
-    // 2) 写 workflow
+    
     const yaml = makeMirrorYaml(mirrorFreq, mirrorMode, src);
     await ensureFreshWorkflow(login, repoNameNew, srcDefault, yaml);
 
-    // 3) 写 secrets
+    
     const pub = await getRepoSecretPublicKey(login, repoNameNew);
     const tok = mirrorToken.trim();
     const srcUrl = tok
@@ -631,14 +651,14 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
     const encWf = encryptSecretValue(b64EncodeUtf8(yaml), pub.key);
     await putRepoSecret(login, repoNameNew, 'MIRROR_WORKFLOW_B64', encWf, pub.key_id);
 
-    // 4) Dispatch workflow
+    
     const dispatchResult = await dispatchWithAutoFix(login, repoNameNew, srcDefault, yaml);
     if (!dispatchResult.ok) {
       toast.warning(i18n.t('触发同步失败：') + dispatchResult.lastError);
       return;
     }
 
-    // 5) Pages 配置（可选，失败忽略）
+    
     try {
       const srcPages = await getPages(srcOwner, srcRepo).catch(() => null);
       if (srcPages) {
@@ -657,13 +677,13 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
               });
             }
           }
-          toast.success(i18n.t('已自动配置 GitHub Pages'));
+          console.info('[mirror] Pages 配置完成');
         }
       }
     } catch { /* 忽略 Pages 失败 */ }
 
-    // 6) 快速检查 30 秒；大仓库通常 5-10 分钟，直接返回，不阻塞用户
-    let lastRun: { conclusion: string | null; status: string; html_url: string } | null = null;
+    
+    let lastRun: { id: number; conclusion: string | null; status: string; html_url: string } | null = null;
     for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       lastRun = await getWorkflowRunStatus(login, repoNameNew, 'sync.yml').catch(() => null);
@@ -674,8 +694,9 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
       if (lastRun.conclusion === 'success') {
         toast.success(mirrorMode ? i18n.t('镜像同步完成') : i18n.t('复制完成'));
 
-        // 一次性任务：完成后删除 workflow
+        
         if (!mirrorMode) {
+          
           try {
             const wfPath = '.github/workflows/sync.yml';
             const existing = await getFileContent(login, repoNameNew, wfPath, srcDefault).catch(() => null);
@@ -686,8 +707,14 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
                 sha,
                 branch: srcDefault,
               });
-              toast.success(i18n.t('已自动清理临时工作流'));
+              console.info('[mirror] workflow 已清理');
             }
+          } catch { /* 忽略删除失败 */ }
+
+          
+          try {
+            await new Promise((r) => setTimeout(r, 2000));
+            await deleteWorkflowRun(login, repoNameNew, lastRun.id);
           } catch { /* 忽略删除失败 */ }
         }
       } else {
@@ -872,7 +899,7 @@ export default function ReposPage() {
         return;
       }
       try {
-        // fresh: true 强制跳过缓存，确保真实查询
+        
         await getRepo(login, newRepoName.trim(), { fresh: true });
         toast.error(
           i18n.t('仓库') + ` ${login}/${newRepoName.trim()} ` + i18n.t('已存在，请换一个名称')
@@ -883,7 +910,7 @@ export default function ReposPage() {
         if (status === 404) {
           // 404 = 不存在，继续创建
         } else {
-          // 非 404（网络错误、403、401 等）：阻止创建，明确提示
+          
           const msg = err instanceof Error ? err.message : '未知错误';
           toast.error(i18n.t('检测目标仓库失败：') + msg);
           return;
@@ -942,11 +969,11 @@ export default function ReposPage() {
             setCreating(false);
             return;
           }
-          throw err;  // 其他错误继续往上抛
+          throw err;  
         }
         const [login, repoNameNew] = created.full_name.split('/');
 
-        // ── 立即关闭弹窗，后台执行镜像任务 ──
+        
         setCreateDialogOpen(false);
         resetCreateForm();
         pageCache.invalidate('repos:');
@@ -955,11 +982,11 @@ export default function ReposPage() {
 
         toast.success(
           mirrorMode
-            ? i18n.t('仓库已创建，镜像任务在后台进行中，完成后会提示')
-            : i18n.t('仓库已创建，复制任务在后台进行中，完成后会提示'),
+            ? i18n.t('镜像任务已开始，请稍后在此仓库确认')
+            : i18n.t('复制任务已开始，请稍后确认'),
         );
 
-        // 后台异步（不 await）
+        
         void runMirrorInBackground({
           login,
           repoNameNew,

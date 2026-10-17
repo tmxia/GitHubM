@@ -15,7 +15,7 @@ export default function ImageLightbox({ src, alt, onClose }: Props) {
   const panStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const pinchStartRef = useRef<{ dist: number; scale: number } | null>(null);
 
-  // ESC 关闭
+  
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();

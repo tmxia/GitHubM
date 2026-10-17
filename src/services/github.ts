@@ -2657,10 +2657,10 @@ export async function uploadReleaseAsset(
 
 export async function getWorkflowRunStatus(
   owner: string, repo: string, workflowId: string
-): Promise<{ conclusion: string | null; status: string; html_url: string } | null> {
+): Promise<{ id: number; conclusion: string | null; status: string; html_url: string } | null> {
   try {
     const data = await request<{
-      workflow_runs: Array<{ conclusion: string | null; status: string; html_url: string }>;
+      workflow_runs: Array<{ id: number; conclusion: string | null; status: string; html_url: string }>;
     }>(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowId)}/runs?per_page=1`);
     return data.workflow_runs?.[0] || null;
   } catch {
