@@ -205,6 +205,10 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
           <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
         </ContextMenuItem>
         <ContextMenuSeparator />
+        <ContextMenuItem onClick={async () => { try { await gqlPinRepository(repo.node_id); toast.success("已置顶"); clearApiCache(); } catch(e) { try { await gqlUnpinRepository(repo.node_id); toast.success("已取消置顶"); clearApiCache(); } catch(err:any) { toast.error("操作失败，可能已满6个"); } } }}>
+          <Pin className="w-4 h-4 mr-2" /> 置顶仓库
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</ContextMenuItem>
       <ContextMenuItem className="text-foreground cursor-pointer text-sm" asChild>
         <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
@@ -375,6 +379,10 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
           }
         }}>
           <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={async () => { try { await gqlPinRepository(repo.node_id); toast.success("已置顶"); clearApiCache(); } catch(e) { try { await gqlUnpinRepository(repo.node_id); toast.success("已取消置顶"); clearApiCache(); } catch(err:any) { toast.error("操作失败，可能已满6个"); } } }}>
+          <Pin className="w-4 h-4 mr-2" /> 置顶仓库
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</DropdownMenuItem>
