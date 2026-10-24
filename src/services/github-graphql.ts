@@ -1,4 +1,3 @@
-
 import { getToken } from './github';
 import type {
   GQL_Discussion,
@@ -667,26 +666,4 @@ export async function gqlGetDashboardFeed(): Promise<{ releases: any[], prs: any
   } catch (e) {
     return { releases: [], prs: [] };
   }
-}
-
-export async function gqlPinRepository(repositoryId: string) {
-  const mutation = `
-    mutation AddPinnedItem($itemId: ID!) {
-      addPinnedItem(input: {itemId: $itemId}) {
-        clientMutationId
-      }
-    }
-  `;
-  return gql(mutation, { itemId: repositoryId });
-}
-
-export async function gqlUnpinRepository(repositoryId: string) {
-  const mutation = `
-    mutation RemovePinnedItem($itemId: ID!) {
-      removePinnedItem(input: {itemId: $itemId}) {
-        clientMutationId
-      }
-    }
-  `;
-  return gql(mutation, { itemId: repositoryId });
 }

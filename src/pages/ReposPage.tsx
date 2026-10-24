@@ -176,23 +176,12 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
           <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </ContextMenuItem>
-        <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={async (e) => {
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => {
           e.stopPropagation();
-          try {
-            await gqlPinRepository(repo.node_id);
-            toast.success("已成功置顶到主页");
-            clearApiCache();
-          } catch(err: any) {
-            try {
-              await gqlUnpinRepository(repo.node_id);
-              toast.success("已取消置顶");
-              clearApiCache();
-            } catch(err2: any) {
-              toast.error("操作失败: " + (err2.message || "请重试"));
-            }
-          }
+          toast.info("正在前往 GitHub 个人主页，请手动置顶");
+          setTimeout(() => { window.location.href = `https://github.com/${repo.owner.login}`; }, 500);
         }}>
-          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('去 GitHub 置顶')}
         </ContextMenuItem>
         <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
@@ -335,23 +324,12 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
           <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={async (e) => {
+        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => {
           e.stopPropagation();
-          try {
-            await gqlPinRepository(repo.node_id);
-            toast.success("已成功置顶到主页");
-            clearApiCache();
-          } catch(err: any) {
-            try {
-              await gqlUnpinRepository(repo.node_id);
-              toast.success("已取消置顶");
-              clearApiCache();
-            } catch(err2: any) {
-              toast.error("操作失败: " + (err2.message || "请重试"));
-            }
-          }
+          toast.info("正在前往 GitHub 个人主页，请手动置顶");
+          setTimeout(() => { window.location.href = `https://github.com/${repo.owner.login}`; }, 500);
         }}>
-          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('去 GitHub 置顶')}
         </DropdownMenuItem>
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
