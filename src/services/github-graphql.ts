@@ -668,3 +668,25 @@ export async function gqlGetDashboardFeed(): Promise<{ releases: any[], prs: any
     return { releases: [], prs: [] };
   }
 }
+
+export async function gqlPinRepository(repositoryId: string) {
+  const mutation = `
+    mutation PinRepo($id: ID!) {
+      pinRepository(input: {repositoryId: $id}) {
+        clientMutationId
+      }
+    }
+  `;
+  return gql(mutation, { id: repositoryId });
+}
+
+export async function gqlUnpinRepository(repositoryId: string) {
+  const mutation = `
+    mutation UnpinRepo($id: ID!) {
+      unpinRepository(input: {repositoryId: $id}) {
+        clientMutationId
+      }
+    }
+  `;
+  return gql(mutation, { id: repositoryId });
+}

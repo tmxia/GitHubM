@@ -1,11 +1,11 @@
+import { gqlPinRepository, gqlUnpinRepository } from '@/services/github-graphql';
 
 import {
    useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTaskStore } from '@/stores/taskStore';
-import {
-  Search,
+import {Search,
   Plus,
   Star,
   GitFork,
@@ -27,8 +27,7 @@ import {
   AlertCircle,
   MoreHorizontal,
   Loader2,
-  Check,
-} from 'lucide-react';
+  Check, Pin, PinOff} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -179,6 +178,33 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         <GitFork className="w-3.5 h-3.5 mr-2" />{i18n.t('Fork 仓库')}</ContextMenuItem>
       <ContextMenuSeparator className="bg-border" />
       <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
+                <ContextMenuItem onClick={async () => {
+          try {
+            if (repo.node_id) {
+              await gqlPinRepository(repo.node_id);
+              toast.success("已置顶到主页");
+              if (typeof clearApiCache === 'function') clearApiCache();
+            }
+          } catch (e: any) {
+            toast.error(e.message || "置顶失败，可能已满 6 个");
+          }
+        }}>
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库') || '置顶仓库'}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={async () => {
+          try {
+            if (repo.node_id) {
+              await gqlUnpinRepository(repo.node_id);
+              toast.success("已取消置顶");
+              if (typeof clearApiCache === 'function') clearApiCache();
+            }
+          } catch (e: any) {
+            toast.error(e.message || "取消置顶失败");
+          }
+        }}>
+          <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</ContextMenuItem>
       <ContextMenuItem className="text-foreground cursor-pointer text-sm" asChild>
         <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
@@ -324,7 +350,34 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
           <GitFork className="w-3.5 h-3.5 mr-2" />{i18n.t('Fork 仓库')}</DropdownMenuItem>
         <DropdownMenuSeparator className="bg-border" />
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
-          <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={async () => {
+          try {
+            if (repo.node_id) {
+              await gqlPinRepository(repo.node_id);
+              toast.success("已置顶到主页");
+              if (typeof clearApiCache === 'function') clearApiCache();
+            }
+          } catch (e: any) {
+            toast.error(e.message || "置顶失败，可能已满 6 个");
+          }
+        }}>
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库') || '置顶仓库'}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={async () => {
+          try {
+            if (repo.node_id) {
+              await gqlUnpinRepository(repo.node_id);
+              toast.success("已取消置顶");
+              if (typeof clearApiCache === 'function') clearApiCache();
+            }
+          } catch (e: any) {
+            toast.error(e.message || "取消置顶失败");
+          }
+        }}>
+          <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</DropdownMenuItem>
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" asChild>
           <a href={repo.html_url} target="_blank" rel="noopener noreferrer"
              onClick={(e) => e.stopPropagation()}>
