@@ -187,7 +187,7 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
               toast.success("已取消置顶");
               clearApiCache();
             } catch(err2: any) {
-              toast.error("操作失败，可能已满6个");
+              toast.error("置顶失败: " + (err2?.message || "未知错误"));
             }
           }
         }}>
@@ -345,7 +345,7 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
               toast.success("已取消置顶");
               clearApiCache();
             } catch(err2: any) {
-              toast.error("操作失败，可能已满6个");
+              toast.error("置顶失败: " + (err2?.message || "未知错误"));
             }
           }
         }}>
