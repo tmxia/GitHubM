@@ -179,15 +179,15 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
           e.stopPropagation();
           try {
             await gqlPinRepository(repo.node_id);
-            toast.success("已置顶");
+            toast.success("已成功置顶到主页");
             clearApiCache();
-          } catch(err) {
+          } catch(err: any) {
             try {
               await gqlUnpinRepository(repo.node_id);
               toast.success("已取消置顶");
               clearApiCache();
             } catch(err2: any) {
-              toast.error("置顶失败: " + (err2?.message || "未知错误"));
+              toast.error("操作失败: " + (err2.message || "请重试"));
             }
           }
         }}>
@@ -337,15 +337,15 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
           e.stopPropagation();
           try {
             await gqlPinRepository(repo.node_id);
-            toast.success("已置顶");
+            toast.success("已成功置顶到主页");
             clearApiCache();
-          } catch(err) {
+          } catch(err: any) {
             try {
               await gqlUnpinRepository(repo.node_id);
               toast.success("已取消置顶");
               clearApiCache();
             } catch(err2: any) {
-              toast.error("置顶失败: " + (err2?.message || "未知错误"));
+              toast.error("操作失败: " + (err2.message || "请重试"));
             }
           }
         }}>
