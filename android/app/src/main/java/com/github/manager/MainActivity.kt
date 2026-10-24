@@ -1185,28 +1185,46 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             
             // 拦截外部链接，强制丢给 Android 系统
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                if (url == null) return false
-                // 如果不是本地服务器地址，就拦截
-                if (!url.startsWith("http://localhost") && !url.startsWith("file://") && !url.contains("appassets.androidplatform.net")) {
-                    try {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        // 优先尝试打开 GitHub App
-                        if (url.contains("github.com")) {
-                            intent.setPackage("com.github.android")
-                        }
-                        startActivity(intent)
-                        return true
-                    } catch (e: Exception) {
-                        // 如果没装 GitHub App，或者出错，用系统浏览器打开
-                        try {
-                            val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                            fallbackIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(fallbackIntent)
-                        } catch (e2: Exception) { }
-                        return true
-                    }
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url?.toString() ?: return false
+                if (request.method != "GET") return false
+                
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    
+                            val isGithub = url.contains("github.com")
+                            if (isGithub) {
+                                // 策略1：强行转换为 github:// Scheme
+                                try {
+                                    val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(intent)
+                                    android.util.Log.d("WebViewJump", "唤起成功: github:// scheme")
+                                    return true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WebViewJump", "github:// 唤起失败", e)
+                                }
+                                // 策略2：强行用 https + 包名唤起
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    intent.setPackage("com.github.android")
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(intent)
+                                    android.util.Log.d("WebViewJump", "唤起成功: https + setPackage")
+                                    return true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WebViewJump", "setPackage 唤起失败", e)
+                                }
+                            }
+                            
+                            // 策略3：普通链接或 GitHub 唤起失败，走浏览器
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                            } catch (e: Exception) {}
+                            return true
+
                 }
                 return false
             }
@@ -1704,38 +1722,47 @@ class MainActivity : AppCompatActivity() {
              * 统一交给系统浏览器处理，与 shouldOverrideUrlLoading 的策略一致，
              * 避免外部页面破坏 React 应用的历史栈。
              */
-            override fun onCreateWindow(
-                view: WebView?,
-                isDialog: Boolean,
-                isUserGesture: Boolean,
-                resultMsg: android.os.Message?,
-            ): Boolean {
+            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                 val transport = resultMsg?.obj as? WebView.WebViewTransport
                 val url = view?.hitTestResult?.extra
+                
                 if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
-                    runCatching {
-                        val intent = if (url.contains("github.com")) {
-                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { setPackage("com.github.android") }
-                        } else {
-                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        }
-                        runCatching { startActivity(intent) }.onFailure {
-                            if (url.contains("github.com")) {
-                                runCatching { val intent = if (url.contains("github.com")) {
-                                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { setPackage("com.github.android") }
-                                        } else {
-                                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                        }
-                                        runCatching { startActivity(intent) }.onFailure {
-                                            if (url.contains("github.com")) {
-                                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                                            }
-                                        } }
+                    
+                            val isGithub = url.contains("github.com")
+                            if (isGithub) {
+                                // 策略1：强行转换为 github:// Scheme
+                                try {
+                                    val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(intent)
+                                    android.util.Log.d("WebViewJump", "唤起成功: github:// scheme")
+                                    return true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WebViewJump", "github:// 唤起失败", e)
+                                }
+                                // 策略2：强行用 https + 包名唤起
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    intent.setPackage("com.github.android")
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(intent)
+                                    android.util.Log.d("WebViewJump", "唤起成功: https + setPackage")
+                                    return true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WebViewJump", "setPackage 唤起失败", e)
+                                }
                             }
-                        }
-                    }
+                            
+                            // 策略3：普通链接或 GitHub 唤起失败，走浏览器
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                            } catch (e: Exception) {}
+                            return true
+
                 }
-                // 不创建新的 WebView 实例，直接结束消息循环
                 transport?.webView = null
                 resultMsg?.sendToTarget()
                 return true
