@@ -171,8 +171,9 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
       <ContextMenuItem className="text-foreground cursor-pointer text-sm"
         onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo.full_name}/pulls`); }}>
         <GitPullRequest className="w-3.5 h-3.5 mr-2" />{i18n.t('查看 Pull Requests')}</ContextMenuItem>
-      <ContextMenuSeparator className="bg-border" />
-      <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
+      <ContextMenuSeparator />
+      <ContextMenuSeparator />
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
           <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </ContextMenuItem>
         <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={async (e) => {
@@ -195,10 +196,11 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         </ContextMenuItem>
         <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
-          window.open(repo.html_url, '_blank', 'noopener,noreferrer'); 
+          window.location.href = repo.html_url.replace('https://', 'github://'); setTimeout(() => { window.location.href = repo.html_url; }, 500); 
         }}>
           <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
         </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
           <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
         </ContextMenuItem>
@@ -329,7 +331,7 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm"
           onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo.full_name}/pulls`); }}>
           <GitPullRequest className="w-3.5 h-3.5 mr-2" />{i18n.t('查看 Pull Requests')}</DropdownMenuItem>
-        <DropdownMenuSeparator className="bg-border" />
+        <DropdownMenuSeparator />
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
           <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </DropdownMenuItem>
@@ -353,10 +355,11 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
         </DropdownMenuItem>
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
-          window.open(repo.html_url, '_blank', 'noopener,noreferrer'); 
+          window.location.href = repo.html_url.replace('https://', 'github://'); setTimeout(() => { window.location.href = repo.html_url; }, 500); 
         }}>
           <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
           <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
         </DropdownMenuItem>
