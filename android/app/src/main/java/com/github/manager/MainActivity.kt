@@ -1686,7 +1686,25 @@ class MainActivity : AppCompatActivity() {
                 val url = view?.hitTestResult?.extra
                 if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
                     runCatching {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        val intent = if (url.contains("github.com")) {
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { setPackage("com.github.android") }
+                        } else {
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        }
+                        runCatching { startActivity(intent) }.onFailure {
+                            if (url.contains("github.com")) {
+                                runCatching { val intent = if (url.contains("github.com")) {
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { setPackage("com.github.android") }
+                                        } else {
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        }
+                                        runCatching { startActivity(intent) }.onFailure {
+                                            if (url.contains("github.com")) {
+                                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                            }
+                                        } }
+                            }
+                        }
                     }
                 }
                 // 不创建新的 WebView 实例，直接结束消息循环
