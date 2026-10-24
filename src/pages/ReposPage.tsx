@@ -196,7 +196,7 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         </ContextMenuItem>
         <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
-          window.location.href = repo.html_url.replace('https://', 'github://'); setTimeout(() => { window.location.href = repo.html_url; }, 500); 
+          window.location.href = repo.html_url; 
         }}>
           <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
         </ContextMenuItem>
@@ -355,7 +355,7 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
         </DropdownMenuItem>
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
           e.stopPropagation(); 
-          window.location.href = repo.html_url.replace('https://', 'github://'); setTimeout(() => { window.location.href = repo.html_url; }, 500); 
+          window.location.href = repo.html_url; 
         }}>
           <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
         </DropdownMenuItem>

@@ -1183,6 +1183,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupWebViewClient() {
         webView.webViewClient = object : WebViewClient() {
+            
+            // 拦截外部链接，强制丢给 Android 系统
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                if (url == null) return false
+                // 如果不是本地服务器地址，就拦截
+                if (!url.startsWith("http://localhost") && !url.startsWith("file://") && !url.contains("appassets.androidplatform.net")) {
+                    try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        // 优先尝试打开 GitHub App
+                        if (url.contains("github.com")) {
+                            intent.setPackage("com.github.android")
+                        }
+                        startActivity(intent)
+                        return true
+                    } catch (e: Exception) {
+                        // 如果没装 GitHub App，或者出错，用系统浏览器打开
+                        try {
+                            val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            fallbackIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(fallbackIntent)
+                        } catch (e2: Exception) { }
+                        return true
+                    }
+                }
+                return false
+            }
+
 
             override fun shouldInterceptRequest(
                 view: WebView?,
