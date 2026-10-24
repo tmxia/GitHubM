@@ -193,12 +193,12 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         }}>
           <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
         </ContextMenuItem>
-        <ContextMenuSeparator className="bg-border" />
-        <a href={repo.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-          <ContextMenuItem className="text-foreground cursor-pointer text-sm">
-            <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
-          </ContextMenuItem>
-        </a>
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
+          e.stopPropagation(); 
+          window.open(repo.html_url, '_blank', 'noopener,noreferrer'); 
+        }}>
+          <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
+        </ContextMenuItem>
         <ContextMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
           <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
         </ContextMenuItem>
@@ -351,12 +351,12 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
         }}>
           <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
         </DropdownMenuItem>
-        <DropdownMenuSeparator className="bg-border" />
-        <a href={repo.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem className="text-foreground cursor-pointer text-sm">
-            <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
-          </DropdownMenuItem>
-        </a>
+        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { 
+          e.stopPropagation(); 
+          window.open(repo.html_url, '_blank', 'noopener,noreferrer'); 
+        }}>
+          <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
+        </DropdownMenuItem>
         <DropdownMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
           <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
         </DropdownMenuItem>
