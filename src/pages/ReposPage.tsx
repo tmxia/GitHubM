@@ -172,55 +172,37 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
         onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo.full_name}/pulls`); }}>
         <GitPullRequest className="w-3.5 h-3.5 mr-2" />{i18n.t('查看 Pull Requests')}</ContextMenuItem>
       <ContextMenuSeparator className="bg-border" />
-      <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleToggleStar(); }}>
-        <Star className="w-3.5 h-3.5 mr-2" />{i18n.t('Star / 取消 Star')}</ContextMenuItem>
-      <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleFork(); }}>
-        <GitFork className="w-3.5 h-3.5 mr-2" />{i18n.t('Fork 仓库')}</ContextMenuItem>
-      <ContextMenuSeparator className="bg-border" />
       <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
-                <ContextMenuItem onClick={async () => {
-          try {
-            if (repo.node_id) {
-              await gqlPinRepository(repo.node_id);
-              toast.success("已置顶到主页");
-              if (typeof clearApiCache === 'function') clearApiCache();
-            }
-          } catch (e: any) {
-            toast.error(e.message || "置顶失败，可能已满 6 个");
-          }
-        }}>
-          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库') || '置顶仓库'}
+          <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={async () => {
+        <ContextMenuItem className="text-foreground cursor-pointer text-sm" onClick={async (e) => {
+          e.stopPropagation();
           try {
-            if (repo.node_id) {
+            await gqlPinRepository(repo.node_id);
+            toast.success("已置顶");
+            clearApiCache();
+          } catch(err) {
+            try {
               await gqlUnpinRepository(repo.node_id);
               toast.success("已取消置顶");
-              if (typeof clearApiCache === 'function') clearApiCache();
+              clearApiCache();
+            } catch(err2: any) {
+              toast.error("操作失败，可能已满6个");
             }
-          } catch (e: any) {
-            toast.error(e.message || "取消置顶失败");
           }
         }}>
-          <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
         </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={async () => { try { await gqlPinRepository(repo.node_id); toast.success("已置顶"); clearApiCache(); } catch(e) { try { await gqlUnpinRepository(repo.node_id); toast.success("已取消置顶"); clearApiCache(); } catch(err:any) { toast.error("操作失败，可能已满6个"); } } }}>
-          <Pin className="w-4 h-4 mr-2" /> 置顶仓库
+        <ContextMenuSeparator className="bg-border" />
+        <a href={repo.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+          <ContextMenuItem className="text-foreground cursor-pointer text-sm">
+            <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
+          </ContextMenuItem>
+        </a>
+        <ContextMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
+          <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
         </ContextMenuItem>
-        <ContextMenuSeparator />
-        <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</ContextMenuItem>
-      <ContextMenuItem className="text-foreground cursor-pointer text-sm" asChild>
-        <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
-          <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}</a>
-      </ContextMenuItem>
-      <ContextMenuSeparator className="bg-border" />
-      <ContextMenuItem
-        className="text-destructive cursor-pointer text-sm focus:text-destructive"
-        onClick={onDeleteRequest}
-      >
-        <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}</ContextMenuItem>
-    </ContextMenuContent>
+        </ContextMenuContent>
   );
 }
 
@@ -348,56 +330,37 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
           onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo.full_name}/pulls`); }}>
           <GitPullRequest className="w-3.5 h-3.5 mr-2" />{i18n.t('查看 Pull Requests')}</DropdownMenuItem>
         <DropdownMenuSeparator className="bg-border" />
-        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleToggleStar(); }}>
-          <Star className="w-3.5 h-3.5 mr-2" />{i18n.t('Star / 取消 Star')}</DropdownMenuItem>
-        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleFork(); }}>
-          <GitFork className="w-3.5 h-3.5 mr-2" />{i18n.t('Fork 仓库')}</DropdownMenuItem>
-        <DropdownMenuSeparator className="bg-border" />
         <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); handleCopyUrl(); }}>
-                  <DropdownMenuItem onClick={async () => {
-          try {
-            if (repo.node_id) {
-              await gqlPinRepository(repo.node_id);
-              toast.success("已置顶到主页");
-              if (typeof clearApiCache === 'function') clearApiCache();
-            }
-          } catch (e: any) {
-            toast.error(e.message || "置顶失败，可能已满 6 个");
-          }
-        }}>
-          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库') || '置顶仓库'}
+          <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={async () => {
+        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" onClick={async (e) => {
+          e.stopPropagation();
           try {
-            if (repo.node_id) {
+            await gqlPinRepository(repo.node_id);
+            toast.success("已置顶");
+            clearApiCache();
+          } catch(err) {
+            try {
               await gqlUnpinRepository(repo.node_id);
               toast.success("已取消置顶");
-              if (typeof clearApiCache === 'function') clearApiCache();
+              clearApiCache();
+            } catch(err2: any) {
+              toast.error("操作失败，可能已满6个");
             }
-          } catch (e: any) {
-            toast.error(e.message || "取消置顶失败");
           }
         }}>
-          <PinOff className="w-3.5 h-3.5 mr-2" />{i18n.t('取消置顶') || '取消置顶'}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={async () => { try { await gqlPinRepository(repo.node_id); toast.success("已置顶"); clearApiCache(); } catch(e) { try { await gqlUnpinRepository(repo.node_id); toast.success("已取消置顶"); clearApiCache(); } catch(err:any) { toast.error("操作失败，可能已满6个"); } } }}>
-          <Pin className="w-4 h-4 mr-2" /> 置顶仓库
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制仓库地址')}</DropdownMenuItem>
-        <DropdownMenuItem className="text-foreground cursor-pointer text-sm" asChild>
-          <a href={repo.html_url} target="_blank" rel="noopener noreferrer"
-             onClick={(e) => e.stopPropagation()}>
-            <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}</a>
+          <Pin className="w-3.5 h-3.5 mr-2" />{i18n.t('置顶仓库')}
         </DropdownMenuItem>
         <DropdownMenuSeparator className="bg-border" />
-        <DropdownMenuItem
-          className="text-destructive cursor-pointer text-sm focus:text-destructive"
-          onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}
-        >
-          <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}</DropdownMenuItem>
-      </DropdownMenuContent>
+        <a href={repo.html_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem className="text-foreground cursor-pointer text-sm">
+            <ExternalLink className="w-3.5 h-3.5 mr-2" />{i18n.t('在 GitHub 中打开')}
+          </DropdownMenuItem>
+        </a>
+        <DropdownMenuItem className="text-destructive focus:text-destructive cursor-pointer text-sm" onClick={(e) => { e.stopPropagation(); onDeleteRequest(); }}>
+          <Trash2 className="w-3.5 h-3.5 mr-2" />{i18n.t('删除仓库')}
+        </DropdownMenuItem>
+        </DropdownMenuContent>
     </DropdownMenu>
   );
 }
