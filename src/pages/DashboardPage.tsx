@@ -22,11 +22,10 @@ import {BookOpen,
   Flame,
   Loader2,
   CheckCircle2,
-  XCircle,
-  Download
+  XCircle
 ,
   Ban,
-  MinusCircle, Workflow} from 'lucide-react';
+  MinusCircle, Workflow, Package} from 'lucide-react';
 import StarredFeedCard from '@/components/home/StarredFeedCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -1038,7 +1037,7 @@ export default function DashboardPage() {
                                     title="编译成功，点击下载产物"
                                     onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo?.full_name}/artifacts`); }}
                                   >
-                                    <Download className="w-4 h-4 text-success" />
+                                    <Package className="w-4 h-4 text-success" />
                                   </button>
                                 ) : isFailed ? (
                                   <XCircle className="w-4 h-4 text-destructive" />

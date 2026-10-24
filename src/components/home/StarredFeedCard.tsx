@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { gqlGetDashboardFeed } from '@/services/github-graphql';
 import { getDashboardFeedLimit } from '@/lib/preferences';
-import { Tag, Download, Clock } from 'lucide-react';
+import {Tag, Clock, Package} from 'lucide-react';
 import { formatRelativeTime } from '@/services/github';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -82,7 +82,7 @@ export default function StarredFeedCard({ refreshTrigger }: { refreshTrigger?: n
                 navigate(`/repos/${item.repoName}/artifacts`);
               }}
             >
-              <Download className="w-4 h-4" />
+              <Package className="w-4 h-4" />
             </button>
           </div>
 
