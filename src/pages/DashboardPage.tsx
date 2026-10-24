@@ -1064,10 +1064,14 @@ export default function DashboardPage() {
                                 <span className="truncate">{run?.name}</span>
                               </div>
                               {durationStr && (
-                                <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded shrink-0 tabular-nums">
-                                  {durationStr}
-                                </span>
-                              )}
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 tabular-nums transition-colors ${
+                                    isRunning 
+                                      ? 'text-warning bg-warning/10 font-medium' 
+                                      : 'text-muted-foreground bg-secondary'
+                                  }`}>
+                                    {durationStr}
+                                  </span>
+                                )}
                             </div>
                           </div>
                         );
