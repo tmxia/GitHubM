@@ -31,6 +31,18 @@
 
     <!-- ── 查询其他 App（文件选择器 / 打开下载文件） ─────────────── -->
     <queries>
+
+        <!-- 声明需要查询和交互的 GitHub 官方 App -->
+        <package android:name="com.github.android" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="github" />
+        </intent>
+
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="content" />
