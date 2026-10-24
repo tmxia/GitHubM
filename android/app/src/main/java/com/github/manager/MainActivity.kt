@@ -1183,6 +1183,42 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupWebViewClient() {
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url?.toString() ?: return false
+                
+                // 如果非本地资源，直接交给系统
+                if (!url.startsWith("http://localhost") && !url.contains("appassets.androidplatform.net")) {
+                    
+                    // 特殊处理：如果是 GitHub 链接，转换为 github:// 协议
+                    if (url.contains("github.com")) {
+                        try {
+                            // 大部分情况下 github:// 能直接唤醒 App
+                            val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                            return true
+                        } catch (e: Exception) {
+                            // 如果 scheme 失败，回退到普通的 https 链接（让系统自己选）
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                            } catch (e2: Exception) {}
+                            return true
+                        }
+                    } else {
+                        // 其他外链
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        } catch (e: Exception) {}
+                        return true
+                    }
+                }
+                return false
+            }
             
             // 拦截外部链接，强制丢给 Android 系统
             
@@ -1224,47 +1260,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                request: WebResourceRequest?,
-            ): Boolean {
-                val url = request?.url?.toString() ?: return false
-
-                // 本地资源：让 WebView 自己处理
-                if (url.startsWith("file://")) return false
-
-                // 外部链接（http/https）：一律用系统浏览器打开，避免破坏 React 应用历史栈。
-                // 若允许 WebView 加载外部页面，React Router 的 history.state.idx
-                // 会丢失，返回键无法回到应用内部路由。
-                if (url.startsWith("https://") || url.startsWith("http://")) {
-                    // 拦截明显的下载链接，使用应用内下载器（不跳转外部浏览器）
-                    val lowerUrl = url.lowercase()
-                    val isDownload = lowerUrl.matches(Regex(".*\\.(apk|zip|tar\\.gz|rar|7z|exe|dmg|iso|bin|msi|deb|pdf|doc|docx|xls|xlsx|ppt|pptx)(?:\\?.*)?$"))
-                            || url.contains("/releases/download/")
-                            || url.contains("/archive/refs/tags/")
-                            || url.contains("/releases/latest/download/")
-
-                    if (isDownload) {
-                        val fileName = URLUtil.guessFileName(url, null, null)
-                        view?.evaluateJavascript(
-                            "(function(){ try { return localStorage.getItem('github_manager_token') || '' } catch(e){ return '' } })()"
-                        ) { result ->
-                            val token = result?.removeSurrounding("\"")?.trim() ?: ""
-                            checkStoragePermissionAndDownload(url, fileName, token)
-                        }
-                        return true
-                    }
-
-                    runCatching {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        startActivity(intent)
-                    }
-                    return true // 阻止 WebView 自行加载
-                }
-
-                // 其他协议（tel:、mailto: 等）：交系统处理
-                return true
-            }
+            
 
             /**
              * 每次页面导航完成后，从 URL fragment（HashRouter）中解析当前路径，
