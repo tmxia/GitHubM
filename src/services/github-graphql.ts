@@ -682,8 +682,8 @@ export async function gqlPinRepository(repositoryId: string) {
 
 export async function gqlUnpinRepository(repositoryId: string) {
   const mutation = `
-    mutation UnpinItem($itemId: ID!) {
-      unpinItem(input: {itemId: $itemId}) {
+    mutation RemovePinnedItem($itemId: ID!) {
+      removePinnedItem(input: {itemId: $itemId}) {
         clientMutationId
       }
     }
