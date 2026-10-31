@@ -28,6 +28,7 @@ export default function RepoActionsSettingsPage() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -77,6 +78,12 @@ export default function RepoActionsSettingsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
+
   const handleSave = async () => {
     if (!owner || !repoName) return;
     if (retentionDays < 1 || retentionDays > 400) {
@@ -108,6 +115,7 @@ export default function RepoActionsSettingsPage() {
       }
       await updateArtifactLogRetention(owner, repoName, retentionDays);
       toast.success(i18n.t('Actions 设置已保存'));
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
@@ -130,7 +138,7 @@ export default function RepoActionsSettingsPage() {
       <div className="p-4 md:p-6 max-w-3xl mx-auto text-center py-12 text-destructive">
         <AlertCircle className="w-10 h-10 mx-auto mb-3" />
         <p>{error}</p>
-        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load}>{i18n.t('重试')}</Button>
+        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh}>{i18n.t('重试')}</Button>
       </div>
     );
   }
@@ -151,7 +159,7 @@ export default function RepoActionsSettingsPage() {
             {i18n.t('Actions 设置')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={saving}>
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh} disabled={saving}>
           <RefreshCw className="w-3.5 h-3.5 mr-1" />
           {i18n.t('刷新')}
           </Button>

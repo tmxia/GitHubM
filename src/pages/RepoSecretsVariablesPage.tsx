@@ -37,7 +37,7 @@ function encryptSecretValue(value: string, publicKeyB64: string): string {
   return btoa(binary);
 }
 
-function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope: SecretScope }) {
+function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; repo: string; scope: SecretScope; refreshTrigger?: number }) {
   const [secrets, setSecrets] = useState<GitHubSecret[]>([]);
   const [variables, setVariables] = useState<GitHubVariable[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +58,7 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'secret' | 'variable'; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deletedNames, setDeletedNames] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,8 +68,8 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
         getRepoSecrets(owner, repo, scope).catch(() => []),
         getRepoVariables(owner, repo, scope).catch(() => []),
       ]);
-      setSecrets(s);
-      setVariables(v);
+      setSecrets(s.filter((item: any) => !deletedNames.has(item.name)));
+      setVariables(v.filter((item: any) => !deletedNames.has(item.name)));
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
@@ -77,6 +78,11 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
   }, [owner, repo, scope]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) {
+      load();
+    }
+  }, [refreshTrigger, load]);
 
   const openAddSecret = () => {
     setSecretName('');
@@ -148,6 +154,12 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
         await deleteRepoVariable(owner, repo, deleteTarget.name, scope);
       }
       toast.success(i18n.t('已删除'));
+      setDeletedNames((prev) => new Set(prev).add(deleteTarget.name));
+      if (deleteTarget.kind === 'secret') {
+        setSecrets((prev) => prev.filter((s) => s.name !== deleteTarget.name));
+      } else {
+        setVariables((prev) => prev.filter((v) => v.name !== deleteTarget.name));
+      }
       setDeleteTarget(null);
       await load();
     } catch (e) {
@@ -369,10 +381,11 @@ function ScopePanel({ owner, repo, scope }: { owner: string; repo: string; scope
 }
 
 export default function RepoSecretsVariablesPage() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [outerRefreshing, setOuterRefreshing] = useState(false);
   const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
   const navigate = useNavigate();
   const [scope, setScope] = useState<SecretScope>('actions');
-  const [refreshKey, setRefreshKey] = useState(0);
 
   if (!owner || !repoName) return null;
 
@@ -392,8 +405,12 @@ export default function RepoSecretsVariablesPage() {
             {i18n.t('机密和变量')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setRefreshKey((k) => k + 1)}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1" />
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => {
+            setOuterRefreshing(true);
+            setRefreshKey((k) => k + 1);
+            setTimeout(() => setOuterRefreshing(false), 800);
+          }} disabled={outerRefreshing}>
+          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${outerRefreshing ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
         </div>

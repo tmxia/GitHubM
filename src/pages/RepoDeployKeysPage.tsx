@@ -30,6 +30,7 @@ export default function RepoDeployKeysPage() {
   const navigate = useNavigate();
   const [keys, setKeys] = useState<GitHubDeployKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -54,6 +55,12 @@ export default function RepoDeployKeysPage() {
   }, [owner, repoName]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
 
   const handleAdd = async () => {
     if (!owner || !repoName) return;
@@ -107,8 +114,8 @@ export default function RepoDeployKeysPage() {
             {i18n.t('部署密钥')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={load} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh} disabled={refreshing || loading}>
+          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing || loading ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setAddOpen(true)}>
