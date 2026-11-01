@@ -1,3 +1,4 @@
+import PullToRefresh from '@/components/common/PullToRefresh';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronRight, Settings, Save, Loader2, Globe, Lock, Package, GitMerge, Trash2, Archive, AlertTriangle, ArrowRightLeft, Tag, X } from 'lucide-react';
@@ -19,6 +20,7 @@ export default function RepoSettingsPage() {
   const navigate = useNavigate();
 
   const [repo, setRepo] = useState<GitHubRepo | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -101,7 +103,7 @@ export default function RepoSettingsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [owner, repoName]);
+  }, [owner, repoName, reloadKey]);
 
   const handleSave = async () => {
     if (!owner || !repoName) return;
@@ -208,7 +210,8 @@ export default function RepoSettingsPage() {
   if (!repo) return <div className="p-8 text-center text-destructive">{i18n.t('仓库不存在')}</div>;
 
   return (
-    <>
+    <PullToRefresh onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+<>
       <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
         <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
           <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -521,5 +524,6 @@ export default function RepoSettingsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </>
+    </PullToRefresh>
   );
 }

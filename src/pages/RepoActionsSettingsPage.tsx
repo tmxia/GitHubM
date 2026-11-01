@@ -1,3 +1,4 @@
+import PullToRefresh from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -28,6 +29,7 @@ export default function RepoActionsSettingsPage() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -74,9 +76,9 @@ export default function RepoActionsSettingsPage() {
     } finally {
       if (!isSilent) setLoading(false);
     }
-  }, [owner, repoName]);
+  }, [owner, repoName, reloadKey]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, reloadKey]);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -145,7 +147,8 @@ export default function RepoActionsSettingsPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
+    <PullToRefresh onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+<div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
         <ChevronRight className="w-3 h-3" />
@@ -312,5 +315,6 @@ export default function RepoActionsSettingsPage() {
         </div>
       </div>
     </div>
+    </PullToRefresh>
   );
 }
