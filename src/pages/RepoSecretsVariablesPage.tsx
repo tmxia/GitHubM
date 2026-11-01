@@ -58,7 +58,16 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'secret' | 'variable'; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const deletedNamesRef = useRef<Set<string>>(new Set());
+  // 使用 sessionStorage 持久化黑名单，防止组件被意外重建导致状态丢失
+  const deletedNamesRef = useRef<Set<string>>(
+    new Set(JSON.parse(sessionStorage.getItem(`del_secrets_${owner}_${repo}_${scope}`) || '[]'))
+  );
+
+  // 每次修改黑名单时，同步更新到 sessionStorage
+  const addDeletedName = (name: string) => {
+    deletedNamesRef.current.add(name);
+    sessionStorage.setItem(`del_secrets_${owner}_${repo}_${scope}`, JSON.stringify(Array.from(deletedNamesRef.current)));
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,7 +89,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      deletedNamesRef.current.clear(); // 刷新时清空黑名单，强制获取真实 API 数据
+      // 不再清空黑名单，依靠真实的 API 反馈。如果 API 真的删了，它就不会返回。
       load();
     }
   }, [refreshTrigger, load]);
@@ -102,7 +111,6 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       await putRepoSecret(owner, repo, secretName.trim(), encrypted, pk.key_id, scope);
       toast.success(i18n.t('机密已保存'));
       setSecretOpen(false);
-      deletedNamesRef.current.clear(); // 新建后清空黑名单
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
@@ -138,7 +146,6 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       }
       toast.success(i18n.t('变量已保存'));
       setVarOpen(false);
-      deletedNamesRef.current.clear(); // 新建后清空黑名单
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
@@ -157,7 +164,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
         await deleteRepoVariable(owner, repo, deleteTarget.name, scope);
       }
       toast.success(i18n.t('已删除'));
-      deletedNamesRef.current.add(deleteTarget.name);
+      addDeletedName(deleteTarget.name);
       if (deleteTarget.kind === 'secret') {
         setSecrets((prev) => prev.filter((s) => s.name !== deleteTarget.name));
       } else {
