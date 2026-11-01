@@ -1,5 +1,5 @@
-import PullToRefresh from '@/components/common/PullToRefresh';
-import { useState, useEffect } from 'react';
+import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronRight, Settings, Save, Loader2, Globe, Lock, Package, GitMerge, Trash2, Archive, AlertTriangle, ArrowRightLeft, Tag, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,6 +20,7 @@ export default function RepoSettingsPage() {
   const navigate = useNavigate();
 
   const [repo, setRepo] = useState<GitHubRepo | null>(null);
+  const refreshRef = useRef<PullToRefreshRef>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -166,7 +167,7 @@ export default function RepoSettingsPage() {
     setTransferring(true);
     try {
       await transferRepo(owner, repoName, transferTarget.trim());
-      toast.success('仓库转移成功，即将跳转...');
+      
       navigate('/repos');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '转移失败，请检查用户名是否正确');
@@ -210,7 +211,7 @@ export default function RepoSettingsPage() {
   if (!repo) return <div className="p-8 text-center text-destructive">{i18n.t('仓库不存在')}</div>;
 
   return (
-    <PullToRefresh onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+    <PullToRefresh ref={refreshRef} onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
 <>
       <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
         <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
@@ -227,14 +228,14 @@ export default function RepoSettingsPage() {
             {i18n.t('仓库设置')}
           </h1>
           <Button
-            variant="ghost"
-            size="sm"
-            className="border border-border text-muted-foreground hover:bg-secondary h-9"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : <><Save className="w-3.5 h-3.5 mr-1" />{i18n.t('保存更改')}</>}
-          </Button>
+          variant="ghost"
+          size="sm"
+          className="border border-border text-muted-foreground hover:bg-secondary h-9"
+          onClick={() => refreshRef.current?.trigger(handleSave)}
+          disabled={saving}
+        >
+          {i18n.t('保存更改')}
+        </Button>
         </div>
 
         <div className="bg-card border border-border rounded-lg overflow-hidden">

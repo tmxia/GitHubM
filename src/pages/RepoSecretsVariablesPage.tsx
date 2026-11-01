@@ -1,4 +1,4 @@
-import PullToRefresh from '@/components/common/PullToRefresh';
+import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -46,6 +46,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   const [error, setError] = useState('');
 
   const [secretOpen, setSecretOpen] = useState(false);
+  const refreshRef = useRef<PullToRefreshRef>(null);
   const [secretName, setSecretName] = useState('');
   const [secretValue, setSecretValue] = useState('');
   const [showSecretValue, setShowSecretValue] = useState(false);
@@ -323,8 +324,8 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
           </div>
           <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
             <Button variant="ghost" className="min-w-[80px] px-4 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setSecretOpen(false)} disabled={savingSecret}>{i18n.t('取消')}</Button>
-            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSaveSecret} disabled={savingSecret}>
-              {savingSecret ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
+            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => refreshRef.current?.trigger(handleSaveSecret)} disabled={savingSecret}>
+              {i18n.t('保存')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -361,8 +362,8 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
           </div>
           <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
             <Button variant="ghost" className="min-w-[80px] px-4 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setVarOpen(false)} disabled={savingVar}>{i18n.t('取消')}</Button>
-            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSaveVariable} disabled={savingVar}>
-              {savingVar ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存')}
+            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => refreshRef.current?.trigger(handleSaveVariable)} disabled={savingVar}>
+              {i18n.t('保存')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -393,15 +394,14 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 
 export default function RepoSecretsVariablesPage() {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [outerRefreshing, setOuterRefreshing] = useState(false);
-  const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
+    const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
   const navigate = useNavigate();
   const [scope, setScope] = useState<SecretScope>('actions');
 
   if (!owner || !repoName) return null;
 
   return (
-    <PullToRefresh onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+    <PullToRefresh ref={refreshRef} onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
 <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -417,14 +417,7 @@ export default function RepoSecretsVariablesPage() {
             {i18n.t('机密和变量')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => {
-            setOuterRefreshing(true);
-            setRefreshKey((k) => k + 1);
-            setTimeout(() => setOuterRefreshing(false), 800);
-          }} disabled={outerRefreshing}>
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${outerRefreshing ? 'animate-spin' : ''}`} />
-          {i18n.t('刷新')}
-          </Button>
+          
         </div>
       </div>
 

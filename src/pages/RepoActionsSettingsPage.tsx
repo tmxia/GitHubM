@@ -1,6 +1,6 @@
-import PullToRefresh from '@/components/common/PullToRefresh';
+import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Zap, ChevronRight, RefreshCw, AlertCircle, Loader2, Package, GitBranch,
@@ -29,9 +29,9 @@ export default function RepoActionsSettingsPage() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
+  const refreshRef = useRef<PullToRefreshRef>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [saving, setSaving] = useState(false);
+    const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const [enabled, setEnabled] = useState(true);
@@ -80,13 +80,7 @@ export default function RepoActionsSettingsPage() {
 
   useEffect(() => { load(); }, [load, reloadKey]);
 
-  const handleRefresh = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    await load(true);
-    setRefreshing(false);
-  };
-
+  
   const handleSave = async () => {
     if (!owner || !repoName) return;
     if (retentionDays < 1 || retentionDays > 400) {
@@ -141,13 +135,13 @@ export default function RepoActionsSettingsPage() {
       <div className="p-4 md:p-6 max-w-3xl mx-auto text-center py-12 text-destructive">
         <AlertCircle className="w-10 h-10 mx-auto mb-3" />
         <p>{error}</p>
-        <Button variant="ghost" size="sm" className="mt-3 border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh}>{i18n.t('重试')}</Button>
+        
       </div>
     );
   }
 
   return (
-    <PullToRefresh onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+    <PullToRefresh ref={refreshRef} onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
 <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -163,13 +157,16 @@ export default function RepoActionsSettingsPage() {
             {i18n.t('Actions 设置')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh} disabled={refreshing || saving}>
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
-          {i18n.t('刷新')}
-          </Button>
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleSave} disabled={saving || refreshing}>
-          {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
-          </Button>
+          
+          <Button
+          variant="ghost"
+          size="sm"
+          className="border border-border text-muted-foreground hover:bg-secondary h-9"
+          onClick={() => refreshRef.current?.trigger(handleSave)}
+          disabled={saving}
+        >
+          {i18n.t('保存更改')}
+        </Button>
         </div>
       </div>
 

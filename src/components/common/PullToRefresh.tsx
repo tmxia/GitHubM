@@ -9,7 +9,7 @@ interface PullToRefreshProps {
 }
 
 export interface PullToRefreshRef {
-  trigger: () => Promise<void>;
+  trigger: (customAction?: () => Promise<void>) => Promise<void>;
 }
 
 const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
@@ -27,11 +27,14 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
   const distRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
-    trigger: async () => {
+    trigger: async (customAction?: () => Promise<void>) => {
       if (refreshing || disabled) return;
       setRefreshing(true);
       setPullProgress(1);
       try {
+        if (customAction) {
+          await customAction();
+        }
         await onRefresh();
       } catch {} finally {
         setTimeout(() => {
