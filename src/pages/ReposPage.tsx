@@ -733,6 +733,12 @@ async function runMirrorInBackground(params: BackgroundMirrorParams): Promise<vo
             await new Promise((r) => setTimeout(r, 2000));
             await deleteWorkflowRun(login, repoNameNew, lastRun.id);
           } catch { /* 忽略删除失败 */ }
+          try {
+            await deleteRepoSecret(login, repoNameNew, 'MIRROR_SOURCE_URL');
+            await deleteRepoSecret(login, repoNameNew, 'MIRROR_PUSH_TOKEN');
+            await deleteRepoSecret(login, repoNameNew, 'MIRROR_WORKFLOW_B64');
+            console.info('[mirror] 一次性复制完成，敏感 Token 已彻底销毁');
+          } catch { /* 忽略删除失败 */ }
         }
       } else {
         toast.error(i18n.t('同步失败，请去 Actions 页面查看'));
