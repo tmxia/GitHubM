@@ -80,6 +80,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
+      deletedNamesRef.current.clear(); // 刷新时清空黑名单，强制获取真实 API 数据
       load();
     }
   }, [refreshTrigger, load]);
@@ -101,6 +102,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       await putRepoSecret(owner, repo, secretName.trim(), encrypted, pk.key_id, scope);
       toast.success(i18n.t('机密已保存'));
       setSecretOpen(false);
+      deletedNamesRef.current.clear(); // 新建后清空黑名单
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
@@ -136,6 +138,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       }
       toast.success(i18n.t('变量已保存'));
       setVarOpen(false);
+      deletedNamesRef.current.clear(); // 新建后清空黑名单
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
