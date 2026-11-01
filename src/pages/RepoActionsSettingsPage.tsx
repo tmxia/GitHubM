@@ -44,9 +44,9 @@ export default function RepoActionsSettingsPage() {
 
   const [retentionDays, setRetentionDays] = useState(90);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isSilent = false) => {
     if (!owner || !repoName) return;
-    setLoading(true);
+    if (!isSilent) setLoading(true);
     setError('');
     try {
       const [perm, wf, sel, ret] = await Promise.all([
@@ -72,15 +72,16 @@ export default function RepoActionsSettingsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, [owner, repoName]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleRefresh = async () => {
+    if (refreshing) return;
     setRefreshing(true);
-    await load();
+    await load(true); // true 表示静默刷新，不触发全局 loading 骨架屏
     setRefreshing(false);
   };
 
@@ -159,11 +160,11 @@ export default function RepoActionsSettingsPage() {
             {i18n.t('Actions 设置')}
           </h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh} disabled={saving}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1" />
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleRefresh} disabled={refreshing || saving}>
+          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
           {i18n.t('刷新')}
           </Button>
-          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleSave} disabled={saving}>
+          <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={handleSave} disabled={saving || refreshing}>
           {saving ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{i18n.t('保存中...')}</> : i18n.t('保存更改')}
           </Button>
         </div>
