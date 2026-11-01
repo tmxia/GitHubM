@@ -393,6 +393,8 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 }
 
 export default function RepoSecretsVariablesPage() {
+  const refreshRef = useRef<PullToRefreshRef>(null);
+
   const [refreshKey, setRefreshKey] = useState(0);
     const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
   const navigate = useNavigate();
