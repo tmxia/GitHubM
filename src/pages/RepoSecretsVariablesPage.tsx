@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import sealedbox from 'tweetnacl-sealedbox-js';
 import {
@@ -58,7 +58,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'secret' | 'variable'; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deletedNames, setDeletedNames] = useState<Set<string>>(new Set());
+  const deletedNamesRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,8 +68,8 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
         getRepoSecrets(owner, repo, scope).catch(() => []),
         getRepoVariables(owner, repo, scope).catch(() => []),
       ]);
-      setSecrets(s.filter((item: any) => !deletedNames.has(item.name)));
-      setVariables(v.filter((item: any) => !deletedNames.has(item.name)));
+      setSecrets(s.filter((item: any) => !deletedNamesRef.current.has(item.name)));
+      setVariables(v.filter((item: any) => !deletedNamesRef.current.has(item.name)));
     } catch (e) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
@@ -154,14 +154,14 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
         await deleteRepoVariable(owner, repo, deleteTarget.name, scope);
       }
       toast.success(i18n.t('已删除'));
-      setDeletedNames((prev) => new Set(prev).add(deleteTarget.name));
+      deletedNamesRef.current.add(deleteTarget.name);
       if (deleteTarget.kind === 'secret') {
         setSecrets((prev) => prev.filter((s) => s.name !== deleteTarget.name));
       } else {
         setVariables((prev) => prev.filter((v) => v.name !== deleteTarget.name));
       }
       setDeleteTarget(null);
-      await load();
+      // 移除 await load()，直接依赖本地过滤状态
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
     } finally {
