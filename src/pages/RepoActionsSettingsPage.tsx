@@ -81,7 +81,7 @@ export default function RepoActionsSettingsPage() {
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
-    await load(true); // true 表示静默刷新，不触发全局 loading 骨架屏
+    await load(true);
     setRefreshing(false);
   };
 
@@ -214,7 +214,7 @@ export default function RepoActionsSettingsPage() {
             <p className="text-xs text-muted-foreground">支持通配符 *，例如 actions/* 或 *。</p>
           </div>
         )}
-        
+
             </div>
           )}
         </div>

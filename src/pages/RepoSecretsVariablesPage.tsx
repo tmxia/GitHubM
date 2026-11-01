@@ -58,12 +58,11 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'secret' | 'variable'; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  // 使用 sessionStorage 持久化黑名单，防止组件被意外重建导致状态丢失
+
   const deletedNamesRef = useRef<Set<string>>(
     new Set(JSON.parse(sessionStorage.getItem(`del_secrets_${owner}_${repo}_${scope}`) || '[]'))
   );
 
-  // 每次修改黑名单时，同步更新到 sessionStorage
   const addDeletedName = (name: string) => {
     deletedNamesRef.current.add(name);
     sessionStorage.setItem(`del_secrets_${owner}_${repo}_${scope}`, JSON.stringify(Array.from(deletedNamesRef.current)));
@@ -89,7 +88,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      // 不再清空黑名单，依靠真实的 API 反馈。如果 API 真的删了，它就不会返回。
+
       load();
     }
   }, [refreshTrigger, load]);
