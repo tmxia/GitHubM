@@ -32,18 +32,15 @@ import { ThemeProvider } from "./contexts/ThemeContext.tsx";
     bridge?.setDownloadNotify?.(enabled);
   } catch {}
 
-  
-// 全局静默成功提示
-toast.success = () => {};
+toast.success = (() => 'silent') as any;
 
-// 全局劫持 fetch 拦截写入操作，触发悬浮圈
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
   const method = (args[1]?.method || 'GET').toUpperCase();
   const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
-  
+
   if (isWrite) useGlobalLoadingStore.getState().start();
-  
+
   try {
     return await originalFetch(...args);
   } finally {

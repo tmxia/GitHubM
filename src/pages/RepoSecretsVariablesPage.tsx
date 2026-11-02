@@ -404,7 +404,7 @@ export default function RepoSecretsVariablesPage() {
   if (!owner || !repoName) return null;
 
   return (
-    <PullToRefresh ref={refreshRef} onRefresh={async () => { setReloadKey(k => k + 1); await new Promise(r => setTimeout(r, 500)); }}>
+    <PullToRefresh ref={refreshRef} onRefresh={async () => { await new Promise(r => setTimeout(r, 500)); }}>
 <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>

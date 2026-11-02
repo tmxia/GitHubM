@@ -6,7 +6,6 @@ export function TopLoadingIndicator() {
   const count = useGlobalLoadingStore((state) => state.count);
   const progress = useGlobalLoadingStore((state) => state.progress);
 
-  // 只要满足：有请求在进行 (count > 0) 或者 下拉进度达标 (progress >= 1) 就显示
   const isRefreshing = count > 0 || progress >= 1;
   const opacity = isRefreshing ? 1 : progress;
   const translateY = isRefreshing ? 16 : Math.max(16, progress * 56 + 16);

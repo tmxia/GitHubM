@@ -103,6 +103,7 @@ import {
   getFileContent,
   invalidateCache,
   clearApiCache,
+  deleteRepoSecret,
 } from '@/services/github';
 import type { GitHubRepo, RepoSortField, SortDirection } from '@/types/types';
 import { toast } from 'sonner';

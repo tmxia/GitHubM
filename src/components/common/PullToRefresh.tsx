@@ -23,17 +23,16 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
   const pullingRef = useRef(false);
   const distRef = useRef(0);
 
-  // 从全局 Store 获取状态
   const isRefreshing = useGlobalLoadingStore((state) => state.count > 0);
   const pullProgress = useGlobalLoadingStore((state) => state.progress);
 
   useImperativeHandle(ref, () => ({
     trigger: async (customAction?: () => Promise<void>) => {
       if (isRefreshing || disabled) return;
-      
+
       useGlobalLoadingStore.getState().start();
       useGlobalLoadingStore.getState().setProgress(1);
-      
+
       try {
         if (customAction) {
           await customAction();

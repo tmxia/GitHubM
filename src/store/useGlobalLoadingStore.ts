@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 interface GlobalLoadingState {
   count: number;
-  progress: number; // 0 到 1，用于下拉手势
+  progress: number;
   start: () => void;
   stop: () => void;
   setProgress: (val: number) => void;
