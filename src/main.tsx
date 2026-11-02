@@ -1,3 +1,6 @@
+import { toast } from 'sonner';
+import { useGlobalLoadingStore } from '@/store/useGlobalLoadingStore';
+import { GlobalTopLoading } from '@/components/common/GlobalTopLoading';
 if (typeof (Object as any).hasOwn !== "function") {
   (Object as any).hasOwn = (obj: object, prop: PropertyKey) =>
     Object.prototype.hasOwnProperty.call(obj, prop);
@@ -29,10 +32,32 @@ import { ThemeProvider } from "./contexts/ThemeContext.tsx";
     bridge?.setDownloadNotify?.(enabled);
   } catch {}
 
-  createRoot(document.getElementById("root")!).render(
+  
+// 全局静默成功提示
+toast.success = () => {};
+
+// 全局劫持 fetch 拦截写入操作，触发悬浮圈
+const originalFetch = window.fetch;
+window.fetch = async (...args) => {
+  const method = (args[1]?.method || 'GET').toUpperCase();
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  
+  if (isWrite) useGlobalLoadingStore.getState().start();
+  
+  try {
+    return await originalFetch(...args);
+  } finally {
+    if (isWrite) useGlobalLoadingStore.getState().stop();
+  }
+};
+
+createRoot(document.getElementById("root")!).render(
     <AppWrapper>
       <ThemeProvider>
-        <App />
+        <>
+      <GlobalTopLoading />
+      <App />
+    </>
       </ThemeProvider>
     </AppWrapper>
   );
