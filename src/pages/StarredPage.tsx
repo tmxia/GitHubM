@@ -43,6 +43,7 @@ import { prefetchRepoDetail } from '@/lib/repoPrefetch';
 import { saveListScroll, clearListScroll, readListScroll } from '@/lib/scrollRestore';
 import i18n from "@/i18n";
 import PullToRefresh from '@/components/common/PullToRefresh';
+import { withLoading } from '@/lib/loading';
 
 type SortKey = 'updated' | 'created' | 'stars' | 'name';
 
@@ -105,7 +106,7 @@ export default function StarredPage() {
 
     try {
       const apiSort = (sort === 'updated' ? 'updated' : 'created') as 'created' | 'updated';
-      const data = await getStarredRepos({ per_page: 100, page: p, sort: apiSort }, { fresh: force });
+      const data = await withLoading(() => getStarredRepos({ per_page: 100, page: p, sort: apiSort }, { fresh: force }));
       const merged = append ? [...repos, ...data] : data;
       setRepos(merged);
       setHasMore(data.length === 100);
