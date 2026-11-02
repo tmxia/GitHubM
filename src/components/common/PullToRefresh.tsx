@@ -1,3 +1,4 @@
+import { withLoading } from '@/lib/loading';
 import { useGlobalLoadingStore } from '@/store/useGlobalLoadingStore';
 import { useRef, useEffect, type ReactNode, forwardRef, useImperativeHandle } from 'react';
 
@@ -30,20 +31,18 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
     trigger: async (customAction?: () => Promise<void>) => {
       if (isRefreshing || disabled) return;
 
-      useGlobalLoadingStore.getState().start();
       useGlobalLoadingStore.getState().setProgress(1);
 
-      try {
+      await withLoading(async () => {
         if (customAction) {
           await customAction();
         }
         await onRefresh();
-      } catch {} finally {
-        setTimeout(() => {
-          useGlobalLoadingStore.getState().stop();
-          useGlobalLoadingStore.getState().setProgress(0);
-        }, 300);
-      }
+      });
+
+      setTimeout(() => {
+        useGlobalLoadingStore.getState().setProgress(0);
+      }, 300);
     }
   }));
 
