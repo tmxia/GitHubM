@@ -101,23 +101,18 @@ function AppContent() {
       <Toaster
         position="top-center"
         expand={false}
-        offset={16}
+        offset={18}
         toastOptions={{
           style: {
             width: 'fit-content',
             maxWidth: '90vw',
             margin: '0 auto',
             borderRadius: '24px',
-
-            background: 'rgba(255, 255, 255, 0.65)',
-
-            border: '1px solid rgba(255, 255, 255, 0.4)',
-
+            background: 'rgba(255, 255, 255, 0.75)',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
             backdropFilter: 'blur(16px) saturate(180%)',
             WebkitBackdropFilter: 'blur(16px) saturate(180%)',
-
-            boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.08)',
-
+            boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.1)',
             color: '#1e293b',
             padding: '12px 24px',
             fontSize: '15px',

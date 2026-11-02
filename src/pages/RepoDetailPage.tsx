@@ -440,7 +440,7 @@ export default function RepoDetailPage() {
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={() => { copyToClipboard(repo.html_url); toast.success(i18n.t('已复制仓库地址')); }}
+                  onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.html_url); toast.success(i18n.t('已复制仓库地址')); }}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
@@ -949,13 +949,13 @@ export default function RepoDetailPage() {
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wider">{i18n.t('克隆地址')}</span>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.clone_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={() => { copyToClipboard(repo.clone_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.clone_url); toast.success(i18n.t('已复制')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.ssh_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={() => { copyToClipboard(repo.ssh_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.ssh_url); toast.success(i18n.t('已复制')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
