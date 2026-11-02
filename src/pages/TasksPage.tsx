@@ -24,16 +24,16 @@ export default function TasksPage() {
     const running = state.tasks.filter(
       (t) => t.status === 'running' && t.owner && t.repo
     );
-    
+
     for (const task of running) {
       try {
         let run: any = null;
-        
+
         if (task.runId) {
-          
+
           run = await getWorkflowRunById(task.owner!, task.repo!, task.runId);
         } else {
-          
+
           run = await getWorkflowRunStatus(task.owner!, task.repo!, 'sync.yml');
         }
 
@@ -41,15 +41,15 @@ export default function TasksPage() {
           if (run.conclusion === 'success') {
             state.updateTask(task.id, { status: 'success', error: undefined });
           } else {
-            state.updateTask(task.id, { 
-              status: 'failed', 
+            state.updateTask(task.id, {
+              status: 'failed',
               error: `运行结果: ${run.conclusion || '未知'}`,
               link: `https://github.com/${task.owner}/${task.repo}/actions`
             });
           }
         }
       } catch (e: any) {
-                // 查询失败，如果是因为工作流被删除（404），则直接标记为成功
+
                 const msg = e?.message || String(e) || '';
                 if (msg.includes('404') || msg.includes('Not Found') || e?.status === 404) {
                   state.updateTask(task.id, { status: 'success', error: undefined });
@@ -136,7 +136,7 @@ export default function TasksPage() {
           <div className="flex-1">
             <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
               {i18n.t('后台任务')}
-              
+
             </h1>
             <p className="text-sm text-muted-foreground">{i18n.t('实时同步云端准确状态，也可下拉刷新')}</p>
           </div>
