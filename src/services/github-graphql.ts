@@ -70,7 +70,7 @@ export async function gqlGetDiscussions(
         id
         discussions(
           first: $first,
-          orderBy: { field: PUSHED_AT, direction: DESC }
+          orderBy: { field: UPDATED_AT, direction: DESC }
           categoryId: $categoryId
         ) {
           nodes {
