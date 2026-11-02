@@ -748,9 +748,8 @@ function RunDetail({ owner, repo, run, workflowPath, onClose, onDeleted, onRunUp
           title={downloadingLogs ? i18n.t('正在下载编译日志...') : i18n.t('下载编译日志')}
         >
           <div className="relative flex items-center justify-center w-4 h-4">
-            <Download className={`w-4 h-4 absolute transition-opacity duration-200 ${downloadingLogs ? 'opacity-0' : 'opacity-100'}`} />
-            <Loader2 className={`w-4 h-4 text-primary absolute animate-spin transition-opacity duration-200 ${downloadingLogs ? 'opacity-100' : 'opacity-0'}`} />
-          </div>
+          <Download className="w-4 h-4 transition-opacity duration-200" />
+        </div>
         </button>
         <RunStatusBadge status={run.status} conclusion={run.conclusion} />
 
