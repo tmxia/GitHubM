@@ -32,7 +32,7 @@ import { ThemeProvider } from "./contexts/ThemeContext.tsx";
     bridge?.setDownloadNotify?.(enabled);
   } catch {}
 
-toast.success = (() => 'silent') as any;
+
 
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
