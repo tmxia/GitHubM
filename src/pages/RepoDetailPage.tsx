@@ -65,7 +65,7 @@ import {
 import type { GitHubRepo, GitHubCommit } from '@/types/types';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import { toast } from 'sonner';
-import { decodeBase64Content, copyToClipboard } from '@/lib/utils';
+import { decodeBase64Content } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -73,6 +73,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { setCurrentRepo } from '@/lib/repo-tracker';
 import { pageCache } from '@/lib/page-cache';
 import i18n from "@/i18n";
+
 import PullToRefresh from '@/components/common/PullToRefresh';
 
 function encodeBase64Utf8(str: string): string {
@@ -440,7 +441,7 @@ export default function RepoDetailPage() {
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.html_url); toast.success(i18n.t('已复制仓库地址')); }}
+                  onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.html_url); toast.success(i18n.t('已复制仓库地址')); }}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
@@ -949,13 +950,13 @@ export default function RepoDetailPage() {
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wider">{i18n.t('克隆地址')}</span>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.clone_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.clone_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.clone_url); toast.success(i18n.t('已复制')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.ssh_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); copyToClipboard(repo.ssh_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.ssh_url); toast.success(i18n.t('已复制')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -1024,3 +1025,31 @@ export default function RepoDetailPage() {
 
   );
 }
+
+
+// 绝对安全复制：优先使用原生 API，兜底用纯虚拟 DOM，彻底告别键盘弹起
+const safeCopy = async (text: string) => {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.opacity = "0"; // 透明隐藏，不脱离文档流，也不会引发滚动
+    document.body.appendChild(textArea);
+    
+    textArea.focus();
+    textArea.select();
+    document.execCommand("copy");
+    
+    document.body.removeChild(textArea);
+    window.getSelection()?.removeAllRanges();
+  } catch (err) {
+    console.error("复制失败", err);
+  }
+};
