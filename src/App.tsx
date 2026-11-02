@@ -98,7 +98,29 @@ function AppContent() {
       </Routes>
       </Suspense>
       <NetworkStatusBanner />
-      <Toaster richColors position="top-right" />
+      <Toaster
+        richColors
+        position="top-center"
+        expand={false}
+        offset={64}
+        toastOptions={{
+          style: {
+            width: 'fit-content',
+            maxWidth: '85vw',
+            margin: '0 auto',
+            borderRadius: '16px',
+            border: '1px solid rgba(0,0,0,0.05)',
+            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.15), 0 4px 6px -4px rgba(0,0,0,0.1)',
+            padding: '12px 24px',
+            fontSize: '15px',
+            fontWeight: 500,
+            backdropFilter: 'blur(8px)',
+          },
+          classNames: {
+            toast: 'items-center justify-center',
+          }
+        }}
+      />
     </>
   );
 }
