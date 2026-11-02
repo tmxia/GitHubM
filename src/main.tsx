@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 import { useGlobalLoadingStore } from '@/store/useGlobalLoadingStore';
-import { GlobalTopLoading } from '@/components/common/GlobalTopLoading';
+import { TopLoadingIndicator } from '@/components/common/TopLoadingIndicator';
 if (typeof (Object as any).hasOwn !== "function") {
   (Object as any).hasOwn = (obj: object, prop: PropertyKey) =>
     Object.prototype.hasOwnProperty.call(obj, prop);
@@ -55,7 +55,7 @@ createRoot(document.getElementById("root")!).render(
     <AppWrapper>
       <ThemeProvider>
         <>
-      <GlobalTopLoading />
+      <TopLoadingIndicator />
       <App />
     </>
       </ThemeProvider>

@@ -1,3 +1,4 @@
+import { useGlobalLoadingStore } from '@/store/useGlobalLoadingStore';
 import { useRef, useState, useEffect, type ReactNode, forwardRef, useImperativeHandle } from 'react';
 import { Loader2 } from 'lucide-react';
 
@@ -19,8 +20,8 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
   disabled = false,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [pullProgress, setPullProgress] = useState(0); 
+  
+   
   
   const startYRef = useRef(0);
   const pullingRef = useRef(false);
@@ -29,8 +30,8 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
   useImperativeHandle(ref, () => ({
     trigger: async (customAction?: () => Promise<void>) => {
       if (refreshing || disabled) return;
-      setRefreshing(true);
-      setPullProgress(1);
+      useGlobalLoadingStore.getState().start();
+      useGlobalLoadingStore.getState().setProgress(1);
       try {
         if (customAction) {
           await customAction();
@@ -38,8 +39,8 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
         await onRefresh();
       } catch {} finally {
         setTimeout(() => {
-          setRefreshing(false);
-          setPullProgress(0);
+          useGlobalLoadingStore.getState().stop();
+          useGlobalLoadingStore.getState().setProgress(0);
         }, 300);
       }
     }
@@ -72,7 +73,7 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
       if (dy <= 0) {
         if (distRef.current > 0) {
           distRef.current = 0;
-          setPullProgress(0);
+          useGlobalLoadingStore.getState().setProgress(0);
         }
         return;
       }
@@ -84,9 +85,7 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
       
       distRef.current = dist;
       const progress = Math.min(dist / threshold, 1);
-      if (Math.abs(progress - pullProgress) > 0.02) {
-        setPullProgress(progress);
-      }
+      useGlobalLoadingStore.getState().setProgress(progress);
     };
 
     const handleTouchEnd = async () => {
@@ -95,20 +94,20 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
 
       const cur = distRef.current;
       if (cur >= threshold * 0.8) {
-        setRefreshing(true);
-        setPullProgress(1);
+        useGlobalLoadingStore.getState().start();
+        useGlobalLoadingStore.getState().setProgress(1);
         try {
           await onRefresh();
         } catch {}
         finally {
           setTimeout(() => {
-            setRefreshing(false);
-            setPullProgress(0);
+            useGlobalLoadingStore.getState().stop();
+            useGlobalLoadingStore.getState().setProgress(0);
             distRef.current = 0;
           }, 300);
         }
       } else {
-        setPullProgress(0);
+        useGlobalLoadingStore.getState().setProgress(0);
         distRef.current = 0;
       }
     };
@@ -132,35 +131,7 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
 
   return (
     <div ref={containerRef} className="relative w-full min-h-screen bg-background">
-      <div
-        className="fixed left-1/2 z-50 flex items-center justify-center rounded-full bg-background border border-border shadow-md transition-all duration-300 pointer-events-none"
-        style={{
-          top: 0,
-          width: '36px',
-          height: '36px',
-          opacity: indicatorOpacity,
-          transform: `translate(-50%, ${translateY}px) scale(${refreshing ? 1 : 0.8 + pullProgress * 0.2})`,
-          visibility: indicatorOpacity > 0.05 ? 'visible' : 'hidden',
-        }}
-      >
-        {refreshing ? (
-          <Loader2 className="w-5 h-5 text-primary animate-spin" />
-        ) : (
-          <svg
-            className="w-5 h-5 text-primary transition-transform"
-            style={{ transform: `rotate(${pullProgress * 360}deg)` }}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
-        )}
-      </div>
+      
 
       <div className="relative z-10 w-full min-h-screen bg-background">
         {children}
