@@ -212,6 +212,15 @@ class MainActivity : AppCompatActivity() {
          * file:// 页面常被拒，用原生兜底。
          */
         @JavascriptInterface
+        fun writeClipboard(text: String) {
+            runOnUiThread {
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("GitHubM", text)
+                clipboard.setPrimaryClip(clip)
+            }
+        }
+
+        @JavascriptInterface
         fun readClipboard(): String {
             return try {
                 val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE)

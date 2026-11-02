@@ -441,7 +441,7 @@ export default function RepoDetailPage() {
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.html_url); toast.success(i18n.t('已复制仓库地址')); }}
+                  onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.html_url); if (ok) toast.success(i18n.t('已复制仓库地址')); else toast.error(i18n.t('复制失败')); }}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
@@ -652,9 +652,10 @@ export default function RepoDetailPage() {
             <CardContent className="p-6">
               {readme && (
                 <div className="flex justify-end -mt-4 -mr-4 mb-1 gap-1">
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={() => {
-                    navigator.clipboard.writeText(readme);
-                    toast.success(i18n.t('README 源码已复制'));
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={async () => {
+                    const ok = await safeCopy(readme);
+                    if (ok) toast.success(i18n.t('README 源码已复制'));
+                    else toast.error(i18n.t('复制失败'));
                   }}>
                     <Copy className="w-2 h-2" style={{ width: 10, height: 10 }} />{i18n.t('复制')}
                   </Button>
@@ -950,13 +951,13 @@ export default function RepoDetailPage() {
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wider">{i18n.t('克隆地址')}</span>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.clone_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.clone_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.clone_url); if (ok) toast.success(i18n.t('已复制')); else toast.error(i18n.t('复制失败')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.ssh_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); safeCopy(repo.ssh_url); toast.success(i18n.t('已复制')); }}>
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.ssh_url); if (ok) toast.success(i18n.t('已复制')); else toast.error(i18n.t('复制失败')); }}>
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -1026,28 +1027,38 @@ export default function RepoDetailPage() {
   );
 }
 
-const safeCopy = async (text: string) => {
+const safeCopy = async (text: string): Promise<boolean> => {
+
+  const bridge = (window as any).AndroidBridge;
+  if (bridge && typeof bridge.writeClipboard === "function") {
+    try {
+      bridge.writeClipboard(text);
+      return true;
+    } catch (e) {
+      console.error("原生复制失败", e);
+    }
+  }
+
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
-      return;
+      return true;
     }
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.setAttribute("readonly", "");
-    textArea.style.position = "fixed";
-    textArea.style.top = "0";
-    textArea.style.left = "0";
-    textArea.style.opacity = "0";
-    document.body.appendChild(textArea);
+  } catch (e) {}
 
-    textArea.focus();
-    textArea.select();
-    document.execCommand("copy");
-
-    document.body.removeChild(textArea);
+  try {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.setAttribute("readonly", "");
+    el.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(el);
+    el.select();
+    el.setSelectionRange(0, 99999);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
     window.getSelection()?.removeAllRanges();
-  } catch (err) {
-    console.error("复制失败", err);
+    return ok;
+  } catch (e) {
+    return false;
   }
 };
