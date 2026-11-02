@@ -1,4 +1,5 @@
-import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import PullToRefresh from '@/components/common/PullToRefresh';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronRight, Settings, Save, Loader2, Globe, Lock, Package, GitMerge, Trash2, Archive, AlertTriangle, ArrowRightLeft, Tag, X } from 'lucide-react';
@@ -20,7 +21,7 @@ export default function RepoSettingsPage() {
   const navigate = useNavigate();
 
   const [repo, setRepo] = useState<GitHubRepo | null>(null);
-  const refreshRef = useRef<PullToRefreshRef>(null);
+  const { ref: refreshRef, trigger } = usePullToRefresh();
   const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -231,7 +232,7 @@ export default function RepoSettingsPage() {
           variant="ghost"
           size="sm"
           className="border border-border text-muted-foreground hover:bg-secondary h-9"
-          onClick={() => refreshRef.current?.trigger(handleSave)}
+          onClick={() => trigger(handleSave)}
           disabled={saving}
         >
           {i18n.t('保存更改')}

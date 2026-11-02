@@ -1,4 +1,5 @@
-import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import PullToRefresh from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -29,7 +30,7 @@ export default function RepoActionsSettingsPage() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const refreshRef = useRef<PullToRefreshRef>(null);
+  const { ref: refreshRef, trigger } = usePullToRefresh();
   const [reloadKey, setReloadKey] = useState(0);
     const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -162,7 +163,7 @@ export default function RepoActionsSettingsPage() {
           variant="ghost"
           size="sm"
           className="border border-border text-muted-foreground hover:bg-secondary h-9"
-          onClick={() => refreshRef.current?.trigger(handleSave)}
+          onClick={() => trigger(handleSave)}
           disabled={saving}
         >
           {i18n.t('保存更改')}

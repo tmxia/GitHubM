@@ -1,3 +1,4 @@
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import PullToRefresh from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useCallback } from 'react';

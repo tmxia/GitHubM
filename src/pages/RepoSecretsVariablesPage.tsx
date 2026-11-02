@@ -1,4 +1,5 @@
-import PullToRefresh, { PullToRefreshRef } from '@/components/common/PullToRefresh';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import PullToRefresh from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -46,7 +47,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   const [error, setError] = useState('');
 
   const [secretOpen, setSecretOpen] = useState(false);
-  const refreshRef = useRef<PullToRefreshRef>(null);
+  const { ref: refreshRef, trigger } = usePullToRefresh();
   const [secretName, setSecretName] = useState('');
   const [secretValue, setSecretValue] = useState('');
   const [showSecretValue, setShowSecretValue] = useState(false);
@@ -324,7 +325,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
           </div>
           <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
             <Button variant="ghost" className="min-w-[80px] px-4 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setSecretOpen(false)} disabled={savingSecret}>{i18n.t('取消')}</Button>
-            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => refreshRef.current?.trigger(handleSaveSecret)} disabled={savingSecret}>
+            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => trigger(handleSaveSecret)} disabled={savingSecret}>
               {i18n.t('保存')}
             </Button>
           </DialogFooter>
@@ -362,7 +363,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
           </div>
           <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
             <Button variant="ghost" className="min-w-[80px] px-4 border border-border text-muted-foreground hover:bg-secondary" onClick={() => setVarOpen(false)} disabled={savingVar}>{i18n.t('取消')}</Button>
-            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => refreshRef.current?.trigger(handleSaveVariable)} disabled={savingVar}>
+            <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => trigger(handleSaveVariable)} disabled={savingVar}>
               {i18n.t('保存')}
             </Button>
           </DialogFooter>
@@ -393,7 +394,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 }
 
 export default function RepoSecretsVariablesPage() {
-  const refreshRef = useRef<PullToRefreshRef>(null);
+  const { ref: refreshRef, trigger } = usePullToRefresh();
 
   const [refreshKey, setRefreshKey] = useState(0);
     const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
