@@ -1,3 +1,4 @@
+import { withLoading } from '@/lib/loading';
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from 'react-router-dom';
@@ -547,7 +548,7 @@ function RunDetail({ owner, repo, run, workflowPath, onClose, onDeleted, onRunUp
     return () => clearInterval(timer);
   }, [isRunning, owner, repo, run.id, onRunUpdate]);
 
-    const handleDownloadLogs = async () => {
+    const handleDownloadLogs = async () => withLoading(async () => {
     if (!run.id) return;
     if (downloadingRef.current) return;
     downloadingRef.current = true;
@@ -659,7 +660,7 @@ function RunDetail({ owner, repo, run, workflowPath, onClose, onDeleted, onRunUp
       setDownloadingLogs(false);
       downloadingRef.current = false;
     }
-  };;;;
+  });;;;;
 ;
 
   const handleCancel = async () => {
