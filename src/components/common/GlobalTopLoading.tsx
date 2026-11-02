@@ -7,7 +7,16 @@ export function GlobalTopLoading() {
   if (count === 0) return null;
 
   return createPortal(
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center justify-center w-10 h-10 rounded-full bg-background border border-border shadow-md pointer-events-none animate-in fade-in slide-in-from-top-4">
+    <div
+      className="fixed left-1/2 z-[9999] flex items-center justify-center rounded-full bg-background border border-border shadow-md pointer-events-none transition-all duration-300"
+      style={{
+        top: 0,
+        width: '36px',
+        height: '36px',
+        transform: 'translate(-50%, 16px)', // 与下拉刷新一模一样的固定位置偏移
+        opacity: 1,
+      }}
+    >
       <Loader2 className="w-5 h-5 text-primary animate-spin" />
     </div>,
     document.body
