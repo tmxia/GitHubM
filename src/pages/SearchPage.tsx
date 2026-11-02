@@ -417,7 +417,13 @@ export default function SearchPage() {
           <Input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setQuery(val);
+              if (val.length === 0) {
+                setShowHistory(true);
+              }
+            }}
             onKeyDown={handleKeyDown}
             onFocus={() => setShowHistory(true)}
             placeholder={i18n.t('搜索 GitHub…')}
