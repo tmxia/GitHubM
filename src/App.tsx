@@ -99,26 +99,30 @@ function AppContent() {
       </Suspense>
       <NetworkStatusBanner />
       <Toaster
-        richColors
         position="top-center"
         expand={false}
-        offset={64}
+        offset={16}
         toastOptions={{
           style: {
             width: 'fit-content',
-            maxWidth: '85vw',
+            maxWidth: '90vw',
             margin: '0 auto',
-            borderRadius: '16px',
-            border: '1px solid rgba(0,0,0,0.05)',
-            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.15), 0 4px 6px -4px rgba(0,0,0,0.1)',
+            borderRadius: '24px',
+
+            background: 'rgba(255, 255, 255, 0.65)',
+
+            border: '1px solid rgba(255, 255, 255, 0.4)',
+
+            backdropFilter: 'blur(16px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+
+            boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.08)',
+
+            color: '#1e293b',
             padding: '12px 24px',
             fontSize: '15px',
-            fontWeight: 500,
-            backdropFilter: 'blur(8px)',
+            fontWeight: 600,
           },
-          classNames: {
-            toast: 'items-center justify-center',
-          }
         }}
       />
     </>
