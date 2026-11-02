@@ -48,6 +48,23 @@ window.fetch = async (...args) => {
   }
 };
 
+
+// 全局控制 App 内 Toast 提示
+const originalToastSuccess = toast.success;
+const originalToastError = toast.error;
+const originalToastInfo = toast.info;
+const originalToastWarning = toast.warning;
+
+const checkToastEnabled = () => {
+  try { return localStorage.getItem('app_toast_enabled') !== 'false'; } catch { return true; }
+};
+
+toast.success = (...args: any[]) => { if (checkToastEnabled()) originalToastSuccess(...args as [any]); };
+toast.error = (...args: any[]) => { if (checkToastEnabled()) originalToastError(...args as [any]); };
+toast.info = (...args: any[]) => { if (checkToastEnabled()) originalToastInfo(...args as [any]); };
+toast.warning = (...args: any[]) => { if (checkToastEnabled()) originalToastWarning(...args as [any]); };
+
+
 createRoot(document.getElementById("root")!).render(
     <AppWrapper>
       <ThemeProvider>

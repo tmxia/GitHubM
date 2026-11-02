@@ -526,7 +526,11 @@ export default function SettingsPage() {
     try { return localStorage.getItem('notify_compile_done') !== 'false'; } catch { return true; }
   });
   const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
-  const [notifyDownload, setNotifyDownload] = useState(() => {
+  
+  const [toastEnabled, setToastEnabled] = useState(() => {
+    try { return localStorage.getItem('app_toast_enabled') !== 'false'; } catch { return true; }
+  });
+const [notifyDownload, setNotifyDownload] = useState(() => {
     try { return localStorage.getItem('notify_artifact_download') !== 'false'; } catch { return true; }
   });
   const [newToken, setNewToken] = useState('');
@@ -989,6 +993,31 @@ export default function SettingsPage() {
                 onClick={(e) => e.stopPropagation()}
               />
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !toastEnabled;
+                setToastEnabled(next);
+                try { localStorage.setItem('app_toast_enabled', next ? 'true' : 'false'); } catch {}
+              }}
+              className="w-full flex items-center justify-between gap-3 p-3 mt-3 rounded-lg border border-border hover:bg-secondary/50 transition-colors text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">{t('应用内提示')}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {t('开启后操作成功或失败时弹出文字提示')}
+                </p>
+              </div>
+              <Switch
+                checked={toastEnabled}
+                onCheckedChange={(v) => {
+                  setToastEnabled(v);
+                  try { localStorage.setItem('app_toast_enabled', v ? 'true' : 'false'); } catch {}
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </button>
+
           </div>
         </div>
 
