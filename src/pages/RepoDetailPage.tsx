@@ -1026,8 +1026,6 @@ export default function RepoDetailPage() {
   );
 }
 
-
-// 绝对安全复制：优先使用原生 API，兜底用纯虚拟 DOM，彻底告别键盘弹起
 const safeCopy = async (text: string) => {
   try {
     if (navigator.clipboard && window.isSecureContext) {
@@ -1040,13 +1038,13 @@ const safeCopy = async (text: string) => {
     textArea.style.position = "fixed";
     textArea.style.top = "0";
     textArea.style.left = "0";
-    textArea.style.opacity = "0"; // 透明隐藏，不脱离文档流，也不会引发滚动
+    textArea.style.opacity = "0";
     document.body.appendChild(textArea);
-    
+
     textArea.focus();
     textArea.select();
     document.execCommand("copy");
-    
+
     document.body.removeChild(textArea);
     window.getSelection()?.removeAllRanges();
   } catch (err) {

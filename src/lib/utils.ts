@@ -56,22 +56,23 @@ export function formatDate(
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
+  if (navigator.clipboard && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {
-    }
+    } catch {}
   }
   try {
     const el = document.createElement("textarea");
     el.value = text;
-    el.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+    el.setAttribute("readonly", "");
+    el.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
     document.body.appendChild(el);
-    el.focus();
     el.select();
+    el.setSelectionRange(0, 99999);
     const ok = document.execCommand("copy");
     document.body.removeChild(el);
+    window.getSelection()?.removeAllRanges();
     return ok;
   } catch {
     return false;
