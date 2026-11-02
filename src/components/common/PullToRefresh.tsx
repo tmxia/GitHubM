@@ -1,6 +1,5 @@
 import { useGlobalLoadingStore } from '@/store/useGlobalLoadingStore';
-import { useRef, useState, useEffect, type ReactNode, forwardRef, useImperativeHandle } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useRef, useEffect, type ReactNode, forwardRef, useImperativeHandle } from 'react';
 
 interface PullToRefreshProps {
   onRefresh: () => Promise<void>;
@@ -20,18 +19,21 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
   disabled = false,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  
-   
-  
   const startYRef = useRef(0);
   const pullingRef = useRef(false);
   const distRef = useRef(0);
 
+  // 从全局 Store 获取状态
+  const isRefreshing = useGlobalLoadingStore((state) => state.count > 0);
+  const pullProgress = useGlobalLoadingStore((state) => state.progress);
+
   useImperativeHandle(ref, () => ({
     trigger: async (customAction?: () => Promise<void>) => {
-      if (refreshing || disabled) return;
+      if (isRefreshing || disabled) return;
+      
       useGlobalLoadingStore.getState().start();
       useGlobalLoadingStore.getState().setProgress(1);
+      
       try {
         if (customAction) {
           await customAction();
@@ -60,14 +62,15 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
     };
 
     const handleTouchStart = (e: TouchEvent) => {
-      if (disabled || refreshing) return;
+      if (disabled || isRefreshing) return;
       if (!isAtTop()) return;
       startYRef.current = e.touches[0].clientY;
       pullingRef.current = true;
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (!pullingRef.current || disabled || refreshing) return;
+      if (!pullingRef.current || disabled || isRefreshing) return;
+
       const dy = e.touches[0].clientY - startYRef.current;
 
       if (dy <= 0) {
@@ -80,9 +83,9 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
 
       const dist = Math.min(dy * 0.3, threshold * 1.2);
       if (dist > 5) {
-        if (e.cancelable) e.preventDefault(); 
+        if (e.cancelable) e.preventDefault();
       }
-      
+
       distRef.current = dist;
       const progress = Math.min(dist / threshold, 1);
       useGlobalLoadingStore.getState().setProgress(progress);
@@ -124,15 +127,10 @@ const PullToRefresh = forwardRef<PullToRefreshRef, PullToRefreshProps>(({
       document.removeEventListener('touchend', handleTouchEnd);
       document.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [disabled, refreshing, threshold, onRefresh, pullProgress]);
-
-  const indicatorOpacity = refreshing ? 1 : pullProgress;
-  const translateY = refreshing ? 16 : Math.max(16, pullProgress * threshold * 0.8 + 16);
+  }, [disabled, isRefreshing, threshold, onRefresh, pullProgress]);
 
   return (
     <div ref={containerRef} className="relative w-full min-h-screen bg-background">
-      
-
       <div className="relative z-10 w-full min-h-screen bg-background">
         {children}
       </div>
