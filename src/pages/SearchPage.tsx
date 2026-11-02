@@ -52,6 +52,7 @@ import {
 import { cn, copyToClipboard } from '@/lib/utils';
 import i18n from "@/i18n";
 import { saveListScroll, clearListScroll, readListScroll } from '@/lib/scrollRestore';
+import { withLoading } from '@/lib/loading';
 
 const PER_PAGE = 100;
 const MAX_RESULTS = 1000;
@@ -204,23 +205,23 @@ export default function SearchPage() {
       const orderParam = sortCfg?.apiOrder as 'asc' | 'desc' | undefined;
 
       if (type === 'repositories') {
-        const result = await searchRepositories(searchQuery, {
+        const result = await withLoading(() => searchRepositories(searchQuery, {
           per_page: PER_PAGE,
           page,
           ...(sortParam ? { sort: sortParam, order: orderParam } : {}),
-        });
+        }));
         setRepos(result.items);
         setTotalCount(result.total_count);
         setIssues([]);
         setUsers([]);
       } else if (type === 'issues') {
-        const result = await searchIssues(searchQuery, { per_page: PER_PAGE, page });
+        const result = await withLoading(() => searchIssues(searchQuery, { per_page: PER_PAGE, page }));
         setIssues(result.items);
         setTotalCount(result.total_count);
         setRepos([]);
         setUsers([]);
       } else {
-        const result = await searchUsers(searchQuery, { per_page: PER_PAGE, page });
+        const result = await withLoading(() => searchUsers(searchQuery, { per_page: PER_PAGE, page }));
         setUsers(result.items);
         setTotalCount(result.total_count);
         setRepos([]);
