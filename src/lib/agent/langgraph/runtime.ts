@@ -1,9 +1,4 @@
-// LangGraph.js Agent 运行时
-//
-// 迁移目标：把「计划 → 模型 → 工具 → 验证 → checkpoint」交给 LangGraph，
-// 不再在 aiAgentCore 里手写 for 循环和字符串协议。
-//
-// 模型与工具通过 adapter 注入，当前模块不直接依赖 aiAgentCore。
+
 
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 
@@ -12,9 +7,9 @@ export type GraphRole = 'system' | 'user' | 'assistant' | 'tool';
 export interface GraphMessage {
   role: GraphRole;
   content: string;
-  /** tool 消息对应的调用 id */
+
   toolCallId?: string;
-  /** assistant 消息上的工具调用 */
+
   toolCall?: GraphToolCall;
 }
 
@@ -80,13 +75,11 @@ export type GraphToolExecutor = (
   signal?: AbortSignal
 ) => Promise<string | GraphToolResult>;
 
-/** 可选的计划器；不传则跳过 plan 节点 */
 export type GraphPlanner = (
   messages: GraphMessage[],
   signal?: AbortSignal
 ) => Promise<GraphPlanStep[]>;
 
-/** 可选的验证器；写操作后调用 */
 export type GraphVerifier = (
   messages: GraphMessage[],
   signal?: AbortSignal
@@ -99,13 +92,13 @@ export interface RunLangGraphOptions {
   signal?: AbortSignal;
   maxSteps?: number;
   maxVerifyAttempts?: number;
-  /** START → plan → model */
+
   planner?: GraphPlanner;
-  /** 写操作后的验证节点 */
+
   verifier?: GraphVerifier;
-  /** 工具风险分类；默认按工具名推断 */
+
   classifyTool?: (name: string) => GraphToolRisk;
-  /** 每次工具执行 / 验证后调用，用于持久化 checkpoint */
+
   onCheckpoint?: (snapshot: {
     messages: GraphMessage[];
     plan: GraphPlanStep[];
@@ -163,13 +156,6 @@ const AgentStateAnnotation = Annotation.Root({
   }),
 });
 
-/**
- * 状态图：
- *
- *   START → plan → model ──(toolCall)──→ tools → checkpoint → model
- *                    ├──(需要验证)──────→ verify → model
- *                    └──(完成)──────────→ END
- */
 export function createAgentGraph(options: {
   model: GraphModel;
   executeTool: GraphToolExecutor;
@@ -361,7 +347,6 @@ export interface LangGraphRunResult {
   error: string;
 }
 
-/** 执行一次图，返回完整状态与最终回答 */
 export async function runLangGraphAgent(
   options: RunLangGraphOptions
 ): Promise<LangGraphRunResult> {

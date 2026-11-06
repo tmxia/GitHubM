@@ -1,14 +1,4 @@
-// Agent 消息完整性工具
-//
-// 背景：OpenAI / DeepSeek 等 function-calling 接口要求
-//   assistant(tool_calls) 后面必须紧跟对应的 tool(result) 消息。
-// 上下文滑动窗口、历史摘要、断点快照截断都可能把这一对拆开，
-// 触发 HTTP 400（insufficient tool messages following tool_calls）。
-//
-// 这里提供纯函数：
-//   - validateToolCallPairs：只诊断，不改数据
-//   - repairToolCallPairs：重建合法消息链（删除不完整调用 / 孤立 tool）
-//   - compressMessages：按窗口压缩，但保证 tool 调用对不被拆散
+
 
 export interface ToolCallLike {
   id: string;
@@ -28,13 +18,13 @@ export interface MessageLike {
 }
 
 export interface CompressionOptions {
-  /** 超过该消息数才压缩 */
+
   maxMessages?: number;
-  /** system 后保留的头部消息数 */
+
   headCount?: number;
-  /** 末尾保留的消息数 */
+
   tailCount?: number;
-  /** 自定义摘要文案；不传则生成默认文案 */
+
   summaryText?: string;
 }
 
@@ -48,10 +38,6 @@ function toolCallIds(msg: MessageLike): string[] {
   return (msg.tool_calls ?? []).map((tc) => tc.id).filter(Boolean);
 }
 
-/**
- * 校验消息链中的 tool_calls 配对，返回人类可读的问题列表。
- * 空数组表示合法。
- */
 export function validateToolCallPairs(messages: MessageLike[]): string[] {
   const problems: string[] = [];
   const seenCallIds = new Set<string>();
@@ -85,7 +71,7 @@ export function validateToolCallPairs(messages: MessageLike[]): string[] {
         problems.push(`tool 消息 #${i} 缺少 tool_call_id`);
         continue;
       }
-      // 向前回溯连续的 tool 消息，找到对应的 assistant
+
       let j = i - 1;
       while (j >= 0 && messages[j].role === 'tool') j--;
       const owner = j >= 0 ? messages[j] : undefined;
@@ -100,12 +86,6 @@ export function validateToolCallPairs(messages: MessageLike[]): string[] {
   return problems;
 }
 
-/**
- * 重建合法消息链：
- * - 删除 tool_calls 未被完整回复的 assistant 消息
- * - 删除没有对应 assistant 的孤立 tool 消息
- * - 保留原始顺序与其它字段
- */
 export function repairToolCallPairs<T extends MessageLike>(messages: T[]): T[] {
   const result: T[] = [];
 
@@ -138,13 +118,13 @@ export function repairToolCallPairs<T extends MessageLike>(messages: T[]): T[] {
         result.push(msg);
         result.push(...matched);
       }
-      // 无论是否完整，都跳过后续连续的 tool 消息；孤立项不会被重复加入
+
       i = cursor - 1;
       continue;
     }
 
     if (msg.role === 'tool') {
-      // 没有在 assistant 分支被消费的 tool 一律视为孤立消息
+
       continue;
     }
 
@@ -154,22 +134,17 @@ export function repairToolCallPairs<T extends MessageLike>(messages: T[]): T[] {
   return result;
 }
 
-/** 从给定位置向前回溯，避免 tail 以 tool 消息开头把调用对拆开 */
 function safeTailStart(messages: MessageLike[], requestedStart: number, minStart: number): number {
   let start = Math.max(requestedStart, minStart);
   while (start > minStart && messages[start]?.role === 'tool') start--;
-  // 如果回溯到 assistant(tool_calls)，需要把它一起纳入 tail
+
   if (start > minStart && messages[start]?.role === 'assistant' && messages[start]?.tool_calls?.length) {
-    // start 已经是 assistant，保留即可
+
     return start;
   }
   return start;
 }
 
-/**
- * 压缩消息历史：保留 system、头部任务背景、尾部最近进展，
- * 中间插入一条摘要消息。压缩后会自动修复 tool 调用对。
- */
 export function compressMessages<T extends MessageLike>(
   messages: T[],
   options: CompressionOptions = {}

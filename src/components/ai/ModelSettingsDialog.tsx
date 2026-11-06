@@ -177,6 +177,19 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm font-normal">{i18n.t('代理地址 (可选)')}</Label>
+            <Input
+              className="px-3"
+              placeholder="https://your-worker.workers.dev"
+              value={draft.proxy_url || ''}
+              onChange={e => setDraft(prev => ({ ...prev, proxy_url: e.target.value }))}
+            />
+            <p className="text-xs text-muted-foreground">
+              {i18n.t('用于解决 API 网络直连超时/拦截问题 (如 Cloudflare Worker)')}
+            </p>
+          </div>
+
           {def.needKey && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">

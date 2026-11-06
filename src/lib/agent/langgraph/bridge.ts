@@ -25,7 +25,7 @@ export async function runLangGraphBridge(params: {
     }));
     const res = await callLLM(params.modelConfig, formattedMsgs as any);
     return {
-      content: res.content,
+      content: res.text,
       toolCall: res.toolCall ? {
         id: res.toolCall.id,
         name: res.toolCall.name,

@@ -35,6 +35,7 @@ function applyMcpTools(tools: McpToolSchema[]) {
 }
 
 interface ModelConfig {
+  proxy_url?: string;
   type: string;
   api_key?: string;
   endpoint?: string;
@@ -700,6 +701,46 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
  ];
 
 function buildLLMRequest(cfg: ModelConfig): {
+  url: string;
+  headers: Record<string, string>;
+  bodyExtra: Record<string, unknown>;
+} {
+  const req = buildLLMRequestRaw(cfg);
+
+  if (cfg.proxy_url) {
+    const baseProxy = cfg.proxy_url.replace(/\/$/, '');
+    req.url = `${baseProxy}/v1/chat/completions`;
+    req.headers['x-llm-provider'] = cfg.type;
+    if (cfg.type === 'custom') {
+      req.headers['x-llm-upstream'] = buildLLMRequestRaw(cfg).url;
+    }
+  }
+  return req;
+}
+
+function buildLLMRequestRaw(cfg: ModelConfig): {
+  url: string;
+  headers: Record<string, string>;
+  bodyExtra: Record<string, unknown>;
+} {
+
+  const req = buildLLMRequestCore(cfg);
+
+  if (cfg.proxy_url) {
+    const baseProxy = cfg.proxy_url.replace(/\/$/, '');
+
+    req.url = `${baseProxy}/v1/chat/completions`;
+    req.headers['x-llm-provider'] = cfg.type;
+
+    if (cfg.type === 'custom') {
+      req.headers['x-llm-upstream'] = buildLLMRequestCore(cfg).url;
+    }
+  }
+
+  return req;
+}
+
+function buildLLMRequestCore(cfg: ModelConfig): {
   url: string;
   headers: Record<string, string>;
   bodyExtra: Record<string, unknown>;
@@ -4177,16 +4218,16 @@ export async function callLLM(
   console.log(`[callLLM] debug-messages-structure: ${JSON.stringify(dbgMsgs)}`);
 
   const llmAbort = new AbortController();
-  // 动态读取超时配置，默认 90 秒，最小 10 秒
+
   const requestTimeoutMs = Math.max(10_000, Number(cfg.timeoutMs) || 90_000);
   const llmTimer = setTimeout(() => llmAbort.abort("llm-timeout"), requestTimeoutMs);
 
   let res: Response;
   try {
-    // 合并高级推理参数
+
     const finalBodyExtra = { ...bodyExtra };
     if (cfg.reasoning_effort && cfg.reasoning_effort !== 'off') {
-      // 针对 DeepSeek 或特定模型的特殊 thinking 参数
+
       if (/deepseek/i.test(cfg.model || "") || /deepseek/i.test(cfg.type || "")) {
         finalBodyExtra.thinking = { type: "enabled" };
         finalBodyExtra.reasoning_effort = cfg.reasoning_effort;
@@ -5404,61 +5445,7 @@ export type AgentMetrics = Partial<StreamMetrics>;
 
 export async function runAiAgent(options: RunAgentOptions): Promise<void> {
   const { requestBody, signal, onData, onComplete, onError, onMetrics } = options;
-  
-  // ==========================================
-  // 🚀 LangGraph 多智能体旁路开关
-  // ==========================================
-  if (modelConfig.agent_engine === 'langgraph' || requestBody.use_langgraph) {
-    try {
-      const { runLangGraphBridge } = await import('./agent/langgraph/bridge');
-      
-      // 包装你现有的工具执行逻辑 (这里先用占位符，下一步我们再接入你的 MCP)
-      const executeToolWrapper = async (toolCall: any) => {
-         // 1. 构造你原本需要的 GithubContext (根据你的代码推断)
-         const ctx = {
-            token: String(requestBody.github_token ?? ""),
-            owner: String(requestBody.owner ?? ""),
-            repo: String(requestBody.repo ?? ""),
-            // 如果 GithubContext 还需要其他字段，请在这里补充
-         } as any;
 
-         // 2. 将 LangGraph 的 { name, arguments } 转换为原生的 { tool, ...arguments }
-         const convertedCall = {
-            tool: toolCall.name,
-            ...toolCall.arguments
-         };
-
-         // 3. 直接调用原版真实的 executeTool 函数
-         return await executeTool(ctx, convertedCall, targetBranch);
-      };
-
-      await runLangGraphBridge({
-        messages: requestBody.messages as any[],
-        modelConfig: requestBody.model_config,
-        signal,
-        onEvent: (event) => {
-          if (event.type === 'model_end' && event.content) {
-            onData(event.content);
-          } else if (event.type === 'tool_start') {
-            onData(`\n[执行工具: ${event.tool}]\n`);
-          } else if (event.type === 'final') {
-            onComplete();
-          }
-        },
-        executeTool: executeToolWrapper
-      });
-      
-      return; // 执行完毕直接返回
-    } catch (e) {
-      onError(e as Error);
-      return;
-    }
-  }
-  // ==========================================
-  // 👇 下面是你的原版执行逻辑
-  // ==========================================
-
-  // 已由 LangGraph 注入模块处理
   const startedAt = Date.now();
   let firstTokenAt: number | undefined;
   let totalChars = 0;
@@ -5481,6 +5468,42 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
     repo = String(body.repo ?? "");
     targetBranch = body.target_branch ? String(body.target_branch) : undefined;
     if (body.model_config) modelConfig = body.model_config as ModelConfig;
+
+    if (modelConfig.agent_engine === 'langgraph' || requestBody.use_langgraph) {
+      try {
+        const { runLangGraphBridge } = await import('./agent/langgraph/bridge');
+        const executeToolWrapper = async (toolCall: any) => {
+           const ctx = {
+              token: String(requestBody.github_token ?? ""),
+              owner: String(requestBody.owner ?? ""),
+              repo: String(requestBody.repo ?? ""),
+           } as any;
+           const convertedCall = { tool: toolCall.name, ...toolCall.arguments };
+           return await executeTool(ctx, convertedCall, targetBranch);
+        };
+
+        await runLangGraphBridge({
+          messages: requestBody.messages as any[],
+          modelConfig: modelConfig,
+          signal: signal,
+          onEvent: (event) => {
+            if (event.type === 'model_end' && event.content) {
+              onData(event.content);
+            } else if (event.type === 'tool_start') {
+              onData(`\n[执行工具: ${event.tool}]\n`);
+            } else if (event.type === 'final') {
+              onComplete();
+            }
+          },
+          executeTool: executeToolWrapper
+        });
+        return;
+      } catch (e) {
+        onError(e as Error);
+        return;
+      }
+    }
+
     if (body.user_id) userId = String(body.user_id);
     if (body.resume_workflow_id) resumeWorkflowId = String(body.resume_workflow_id);
     if (body.idempotency_key) idempotencyKey = String(body.idempotency_key);
