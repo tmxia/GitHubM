@@ -40,6 +40,9 @@ interface ModelConfig {
   endpoint?: string;
   model?: string;
   temperature?: number;
+  timeoutMs?: number;
+  reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+  agent_engine?: 'classic' | 'langgraph';
 }
 
 function isDeepSeekThinkingModel(model?: string): boolean {
@@ -5405,7 +5408,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
   // ==========================================
   // 🚀 LangGraph 多智能体旁路开关
   // ==========================================
-  if (requestBody.use_langgraph) {
+  if (modelConfig.agent_engine === 'langgraph' || requestBody.use_langgraph) {
     try {
       const { runLangGraphBridge } = await import('./agent/langgraph/bridge');
       
