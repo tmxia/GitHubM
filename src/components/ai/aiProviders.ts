@@ -1,3 +1,5 @@
+
+
 import type { ModelType } from './aiTypes';
 import i18n from "@/i18n";
 
@@ -8,7 +10,7 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
     case 'qwen':     return 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
     case 'openai':   return 'https://api.openai.com/v1/chat/completions';
     case 'custom':   return endpoint || '';
-    case 'wenxin':
+    case 'wenxin':   // 平台内置免费通道已随后端移除，不再支持
       return '';
   }
 }
@@ -57,7 +59,7 @@ export async function fetchModelsFromAPI(
       const j = await res.json() as { error?: { message?: string } | string };
       const e = j?.error;
       msg = typeof e === 'string' ? e : e?.message ?? '';
-    } catch {}
+    } catch { /* ignore */ }
     if (res.status === 401 || res.status === 403) throw new Error(i18n.t('API Key 无效或无权访问（401/403）'));
     if (res.status === 404) throw new Error(i18n.t('接口地址不正确（404），请检查平台与地址'));
     throw new Error(`HTTP ${res.status}${msg ? `: ${msg.slice(0, 200)}` : ''}`);
@@ -79,16 +81,25 @@ export async function testProviderConnection(
   apiKey: string,
   endpoint?: string,
   model?: string,
+  proxyUrl?: string,
 ): Promise<TestConnectionResult> {
   if (type === 'wenxin') return { success: false, error: i18n.t('该平台已不再支持') };
-  const url = getProviderChatUrl(type, endpoint);
+  const proxyBase = proxyUrl?.trim().replace(/\/+$/, '') ||
+    (type !== 'custom' ? 'https://llm.callact.xyz' : '');
+  const url = proxyBase
+    ? `${proxyBase}/v1/chat/completions`
+    : getProviderChatUrl(type, endpoint);
   if (!url) return { success: false, error: i18n.t('接口地址为空，请先填写') };
-
+  const headers: Record<string, string> = {
+    ...authHeaders(apiKey),
+    ...(proxyBase ? { 'x-llm-provider': type } : {}),
+    ...(proxyBase && type === 'custom' && endpoint ? { 'x-llm-upstream': endpoint } : {}),
+  };
   const startedAt = Date.now();
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: authHeaders(apiKey),
+      headers,
       body: JSON.stringify({
         model: model || 'default',
         messages: [{ role: 'user', content: 'ping' }],
@@ -105,7 +116,7 @@ export async function testProviderConnection(
       const j = await res.json() as { error?: { message?: string } | string };
       const e = j?.error;
       detail = typeof e === 'string' ? e : e?.message ?? '';
-    } catch {}
+    } catch { /* ignore */ }
 
     if (res.status === 401 || res.status === 403) {
       return { success: false, elapsedMs, error: i18n.t('API Key 无效或无权访问（401/403）') };

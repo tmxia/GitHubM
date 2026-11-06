@@ -1,4 +1,4 @@
-// Agent 运行诊断面板：展示最近 AI 助手运行轨迹，便于定位卡住/重复调用/工具失败。
+
 import { useState } from 'react';
 import { Activity, ClipboardCopy, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';

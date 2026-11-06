@@ -4159,11 +4159,10 @@ async function callLLM(
           : m
       )
     : messages;
-    
-  // === 自动注入: 修复工具对并压缩上下文 ===
-  safeMessages = repairToolCallPairs(safeMessages);
-  const compressedRes = compressMessages(safeMessages, { maxTokens: 128000 });
-  const finalMessages = compressedRes.messages;
+
+  safeMessages = repairToolCallPairs(safeMessages as any) as Message[];
+  const compressedRes = compressMessages(safeMessages as any);
+  const finalMessages = compressedRes.messages as Message[];
   if (needFix) {
     const fixed = safeMessages.filter(m => m.role === "assistant" && m.reasoning_content === "").length;
     if (fixed > 0) {
@@ -4686,7 +4685,7 @@ function executeTool(
     case "npm_search":             return searchNpmPackages(p("query"), p("size") ? parseInt(p("size"), 10) : 5);
     default: {
       if (mcpReady && mcpClient && mcpToolNames.has(String(call.tool))) {
-        // === 自动注入: 高危工具风险拦截 ===
+
         const toolName = String(call.tool);
         const risk = getToolRisk(toolName);
         if (risk === 'dangerous') {
@@ -4760,13 +4759,13 @@ function readJson<T>(key: string, fallback: T): T {
 }
 
 function writeJson(key: string, value: unknown) {
-  try { 
-    // === 自动注入: 在存入本地前，压缩过长的消息内容 ===
+  try {
+
     let storageValue = value;
     if (Array.isArray(value) && key.includes("messages")) {
        storageValue = value.map((m: any) => compactMessageForStorage(m));
     }
-    localStorage.setItem(key, JSON.stringify(storageValue)); 
+    localStorage.setItem(key, JSON.stringify(storageValue));
   } catch (e) {
     console.error("保存历史记录失败", e);
   }
@@ -5268,14 +5267,14 @@ const globalCircuitBreaker = new ToolCircuitBreaker();
 class ConcurrencySemaphore {
   private active = 0;
   constructor(private maxConcurrent: number) {}
-  
+
   async acquire(): Promise<void> {
     while (this.active >= this.maxConcurrent) {
       await new Promise(r => setTimeout(r, 100));
     }
     this.active++;
   }
-  
+
   release(): void {
     this.active = Math.max(0, this.active - 1);
   }
@@ -5317,13 +5316,13 @@ const writeTaskQueue = new WriteTaskQueue();
 
 class SecurityPolicyEngine {
   private static protectedFiles = new Set(["package.json", "tsconfig.json", "supabase/functions/ai-assistant/index.ts"]);
-  
+
   private static protectedBranches = new Set(["main", "master", "production"]);
 
   static validate(toolName: string, callParams: Record<string, unknown>, targetBranch?: string): void {
     const p = (k: string) => String(callParams[k] || "");
     const opBranch = p("branch") || targetBranch || "";
-    
+
     if (toolName === "delete_file" && this.protectedFiles.has(p("path"))) {
       throw new Error(`【安全风控】禁止直接删除核心配置文件：${p("path")}`);
     }
@@ -5536,7 +5535,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
     );
     console.log(`[main] model=${modelConfig.type} hasApiKey=${!!modelConfig.api_key} owner=${owner} repo=${repo} resume=${isResuming} autoMode=${isAutoMode}`);
     const historyHasReasoning = messages.some(m => m.role === "assistant" && m.reasoning_content);
-    
+
     const heartbeat = () => sendTyped({ type: "heartbeat" });
     const heartbeatTimer = setInterval(heartbeat, 15000);
 
@@ -5787,7 +5786,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
                         : toolCall.tool === "batch_read"
                           ? toolCall.paths
                           : toolCall.path || toolCall.query || toolCall.title || toolCall.branch || "";
-      
+
       const toolCallId = `tool-${Date.now()}-${totalRound}`;
 
       if (abortSig.aborted) { batchDone = true; break; }
@@ -5888,7 +5887,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
       let isCached = false;
       const toolName = String(toolCall.tool);
       const cacheKey = `${toolName}:${JSON.stringify(toolCall)}`;
-      
+
       const readOnlyTools = new Set([
         "list_files", "read_file", "get_file_info", "search_code",
         "grep_in_repo", "file_tree", "grep_in_file", "batch_read",
@@ -5900,7 +5899,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
         "list_actions_variables", "get_run_artifacts", "list_releases",
         "get_latest_release", "get_merged_prs_since", "request_file"
       ]);
-      
+
       const writeOpTools = new Set([
         "patch_file", "write_file", "delete_file", "batch_patch",
         "create_branch", "create_pr", "resolve_git_conflict", "merge_pull_request", "add_comment",
@@ -5908,21 +5907,21 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
       ]);
       const isWriteOp = writeOpTools.has(toolName);
 
-      await sendTyped({ 
-        type: isWriteOp ? "tool_queued" : "tool_start", 
-        id: toolCallId, 
-        tool: toolCall.tool, 
-        label, 
-        hint 
+      await sendTyped({
+        type: isWriteOp ? "tool_queued" : "tool_start",
+        id: toolCallId,
+        tool: toolCall.tool,
+        label,
+        hint
       });
 
-      try { 
+      try {
         await heartbeat();
 
         if (globalCircuitBreaker.isOpen(toolName)) {
           throw new Error(`【熔断拦截】工具 "${toolName}" 近期连续失败过多，为防止风险已自动熔断冷却。请暂缓或尝试其他方案。`);
         }
-        
+
         SecurityPolicyEngine.validate(toolName, toolCall, targetBranch);
 
         if (readOnlyTools.has(toolName) && requestCache.has(cacheKey)) {
@@ -5951,7 +5950,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
         }
       }
       catch (e) { toolResult = `工具执行出错：${(e as Error).message}`; }
-      
+
       const elapsedMs = Date.now() - startTime;
       const businessResultTools = new Set([
         "trigger_and_monitor_build",
@@ -5980,15 +5979,15 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
       });
 
       const toolProtocolOutput = normalizeResultProtocol(toolResult, toolFailed);
-      
-      await sendTyped({ 
-        type: "tool_end", 
-        id: toolCallId, 
-        status: toolStatus, 
+
+      await sendTyped({
+        type: "tool_end",
+        id: toolCallId,
+        status: toolStatus,
         result: toolProtocolOutput.slice(0, 2000),
-        elapsedMs 
+        elapsedMs
       });
-      
+
       toolResult = toolProtocolOutput;
 
       if (toolFailed && currentStepId) {
@@ -6070,7 +6069,7 @@ export async function runAiAgent(options: RunAgentOptions): Promise<void> {
       const truncatedRaw = toolResult.length > resultLimit
         ? toolResult.slice(0, resultLimit) + `\n…（内容已截断，原始长度 ${toolResult.length} 字符，如需完整内容请重新调用工具并缩小查询范围）`
         : toolResult;
-        
+
       const normalizedResult = JSON.stringify({
         status: toolStatus,
         cost: { latency_ms: elapsedMs, cached: isCached },

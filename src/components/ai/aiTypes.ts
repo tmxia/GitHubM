@@ -1,4 +1,5 @@
 
+
 export type ModelType = 'wenxin' | 'deepseek' | 'gemini' | 'qwen' | 'openai' | 'custom';
 
 export interface ChatSession {
@@ -21,6 +22,7 @@ export interface ChatSessionMessage {
   created_at: string;
   message_type?: 'plain' | 'memory_summary';
   meta_json?: string | null;
+
   full_json?: string | null;
 }
 
@@ -45,8 +47,10 @@ export interface InlineStep {
 export interface Attachment {
   id: string;
   name: string;
+
   type: 'image' | 'text' | 'binary';
   mimeType: string;
+
   content: string;
   size: number;
 }
@@ -56,6 +60,7 @@ export interface FileRequest {
   filename: string;
   description: string;
   mime_types?: string;
+
   fulfilled?: boolean;
 }
 
@@ -64,23 +69,41 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
+
   messageType?: 'plain' | 'memory_summary';
+
   meta?: Record<string, unknown>;
+
   thinkingContent?: string;
+
   thinkingDone?: boolean;
+
   inlinePlan?: InlineStep[];
+
   inlineTools?: InlineTool[];
+
   attachments?: Attachment[];
+
   fileRequests?: FileRequest[];
+
   bubbleType?: 'step' | 'answer' | 'thinking' | 'tool';
+
   stepTitle?: string;
+
   stepId?: string;
+
   toolCallId?: string;
+
   toolName?: string;
+
   toolLabel?: string;
+
   toolHint?: string;
+
   toolStatus?: 'queued' | 'running' | 'success' | 'fail' | 'blocked';
+
   toolElapsedMs?: number;
+
   toolResult?: string;
 }
 
@@ -120,11 +143,13 @@ export type SSEChunk = SSEEnvelope & (
   | { type: 'step_start'; stepId: string }
   | { type: 'step_end'; stepId: string; status: 'done' | 'error' }
   | { type: 'step_retry'; stepId: string; retryCount: number }
+  | { type: 'workflow_created'; workflow_id: string }
   | { type: 'heartbeat' }
   | { type: 'status_info'; message: string }
   | { type: 'status_warning'; message: string }
   | { type: 'file_request'; id: string; filename: string; description: string; mime_types?: string }
   | { type: 'timeout'; workflow_id?: string }
+  | { type: 'task_interrupted'; reason: 'max_rounds' | 'timeout' | 'network'; workflow_id?: string }
   | { type: 'usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number; model: string; providerType: string }
   | { type: 'tool_issue_reported'; tool_name: string; severity: string; proposal_id: string | null }
   | { type: 'tool_fix_proposed'; tool_name: string; proposal_id: string | null }
@@ -136,17 +161,32 @@ export interface ModelConfig {
   type: ModelType;
   api_key?: string;
   endpoint?: string;
+
+  proxy_url?: string;
+
+  agent_engine?: 'classic' | 'langgraph';
+
+  reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
   model?: string;
+
   timeoutMs?: number;
 }
 
 export interface StreamMetrics {
+
   ttft?: number;
+
   throughput?: number;
+
   startedAt: number;
+
   firstTokenAt?: number;
+
   finishedAt?: number;
+
   interruptReason?: 'user_stop' | 'network_error' | 'idle_timeout' | 'server_error' | 'completed';
+
   totalSeq?: number;
+
   streamId?: string;
 }

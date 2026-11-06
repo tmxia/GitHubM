@@ -1,4 +1,23 @@
 
+async function fetchWithRetry(url: string | URL | Request, options?: RequestInit, retries = 3): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (response.status >= 500 && response.status !== 501) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+      return response;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      const delay = 1000 * Math.pow(2, i);
+      console.warn(`[fetchWithRetry] 请求失败，${delay}ms 后重试... (${i+1}/${retries})`);
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+  throw new Error("Unreachable");
+}
+
 import type {
   GitHubUser,
   GitHubRepo,
@@ -32,8 +51,7 @@ interface CacheEntry<T> {
   expireAt: number;
 }
 const apiCache = new Map<string, CacheEntry<unknown>>();
-const CACHE_TTL_MS = 30_000; 
-
+const CACHE_TTL_MS = 30_000;
 
 function getTTLForUrl(url: string): number {
   if (url.includes('/gitignore/templates') || url.endsWith('/licenses')) {
@@ -50,7 +68,6 @@ function getTTLForUrl(url: string): number {
   }
   return CACHE_TTL_MS;
 }
-
 
 function extractUrlFromCacheKey(key: string): string {
   const i = key.indexOf('|');
@@ -82,10 +99,7 @@ export function setCached<T>(key: string, data: T, ttl?: number): void {
 export function invalidateCache(urlPrefix: string): void {
   for (const key of apiCache.keys()) {
     const url = extractUrlFromCacheKey(key);
-    
-    
-    
-    
+
     if (
       url === urlPrefix ||
       url.startsWith(urlPrefix + '?') ||
@@ -224,7 +238,7 @@ async function request<T>(
 
     const fetchUrl = consumeCacheBust(url);
     return getOrCreateInFlight<T>(cacheKey, async () => {
-      const response = await fetch(fetchUrl, {
+      const response = await fetchWithRetry(fetchUrl, {
         ...options,
         headers: { ...buildHeaders(), ...options.headers },
       });
@@ -254,7 +268,7 @@ async function request<T>(
     });
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     ...options,
     headers: { ...buildHeaders(), ...options.headers },
   });
@@ -313,7 +327,7 @@ async function requestWithPagination<T>(
 
     const fetchUrl = consumeCacheBust(url);
     return getOrCreateInFlight<{ data: T[]; hasNextPage: boolean }>(cacheKey, async () => {
-      const response = await fetch(fetchUrl, {
+      const response = await fetchWithRetry(fetchUrl, {
         ...options,
         headers: { ...buildHeaders(), ...options.headers },
       });
@@ -336,7 +350,7 @@ async function requestWithPagination<T>(
     });
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     ...options,
     headers: { ...buildHeaders(), ...options.headers },
   });
@@ -360,7 +374,6 @@ async function requestWithPagination<T>(
 export async function getCurrentUser(): Promise<GitHubUser> {
   return request<GitHubUser>('/user');
 }
-
 
 export async function checkIsFollowing(login: string): Promise<boolean> {
   try {
@@ -475,7 +488,7 @@ export async function checkStarred(owner: string, repo: string): Promise<boolean
     const cacheKey = buildCacheKey(url);
     const cached = getCached<boolean>(cacheKey);
     if (cached !== null) return cached;
-    const response = await fetch(`${url}?_t=${Date.now()}`, { headers: buildHeaders() });
+    const response = await fetchWithRetry(`${url}?_t=${Date.now()}`, { headers: buildHeaders() });
     const result = response.status === 204;
     setCached(cacheKey, result);
     return result;
@@ -870,7 +883,7 @@ export async function createCommit(
   committer?: { name: string; email: string; date: string },
 ): Promise<string> {
   const body: Record<string, unknown> = { tree: treeSha, parents, message };
-  
+
   if (author) {
     body.author = { name: author.name, email: author.email, date: author.date };
   }
@@ -908,8 +921,7 @@ export async function pruneCommitHistory(
     const c = keep[i];
     const treeSha = await getCommitTreeSha(owner, repo, c.sha);
     const parents = parentSha ? [parentSha] : [];
-    
-    
+
     const newSha = await createCommit(
       owner, repo, treeSha, parents, c.commit.message,
       c.commit.author,
@@ -1192,7 +1204,7 @@ export async function getWorkflows(
   owner: string,
   repo: string
 ): Promise<{ total_count: number; workflows: import('@/types/types').GitHubWorkflow[] }> {
-  
+
   return request(`/repos/${owner}/${repo}/actions/workflows?_t=${Date.now()}`);
 }
 
@@ -1222,7 +1234,7 @@ export async function getWorkflowRuns(
     : `/repos/${owner}/${repo}/actions/runs`;
   const qs = new URLSearchParams({ per_page: String(per_page), page: String(page) });
   if (status) qs.set('status', status);
-  
+
   if (opts.fresh) qs.set('_t', String(Date.now()));
   return request(`${base}?${qs}`);
 }
@@ -1241,7 +1253,7 @@ export async function getWorkflowRunFresh(
   runId: number,
 ): Promise<import('@/types/types').GitHubWorkflowRun> {
   const url = `${BASE_URL}/repos/${owner}/${repo}/actions/runs/${runId}?_t=${Date.now()}`;
-  const res = await fetch(url, { headers: buildHeaders() });
+  const res = await fetchWithRetry(url, { headers: buildHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<import('@/types/types').GitHubWorkflowRun>;
 }
@@ -2096,7 +2108,7 @@ export async function getStarredRepos(
 
 export async function getStarredCount(): Promise<number> {
   const url = `${BASE_URL}/user/starred?per_page=1&_t=${Date.now()}`;
-  const response = await fetch(url, { headers: buildHeaders() });
+  const response = await fetchWithRetry(url, { headers: buildHeaders() });
   if (!response.ok) return 0;
   const linkHeader = response.headers.get('Link') || '';
   const match = linkHeader.match(/[?&]page=(\d+)>;\s*rel="last"/);
@@ -2172,7 +2184,7 @@ async function httpGetTextWithAuth(url: string): Promise<string> {
     return parsed.body || "";
   }
   const headers = buildHeaders() as Record<string, string>;
-  const res = await fetch(url, { headers, redirect: "follow" });
+  const res = await fetchWithRetry(url, { headers, redirect: "follow" });
   if (!res.ok) throw new Error(`获取日志失败: ${res.status}`);
   return res.text();
 }
@@ -2525,7 +2537,7 @@ export async function getFileRawText(
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const token = getToken();
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}${queryParams}`;
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
       Accept: 'application/vnd.github.v3.raw',
@@ -2559,7 +2571,7 @@ export async function getPackageVersionSize(
       const parsed = JSON.parse(raw);
       return { status: parsed.status, body: parsed.body || parsed.error || '' };
     }
-    const r = await fetch(url, { headers: authHeader ? { Authorization: authHeader, Accept: ACCEPT } : { Accept: ACCEPT } });
+    const r = await fetchWithRetry(url, { headers: authHeader ? { Authorization: authHeader, Accept: ACCEPT } : { Accept: ACCEPT } });
     return { status: r.status, body: await r.text() };
   };
 
@@ -2603,7 +2615,6 @@ export async function dispatchWorkflow(
   );
 }
 
-
 export async function transferRepo(owner: string, repo: string, newOwner: string): Promise<void> {
   await request<void>(`/repos/${owner}/${repo}/transfer`, {
     method: 'POST',
@@ -2620,7 +2631,6 @@ export async function updateRepoTopics(
     body: JSON.stringify({ names: topics }),
   });
 }
-
 
 export async function createRelease(
   owner: string,
@@ -2649,7 +2659,7 @@ export async function uploadReleaseAsset(
   onProgress?: (loaded: number, total: number) => void
 ): Promise<GitHubReleaseAsset> {
   const url = `https://uploads.github.com/repos/${owner}/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(file.name)}`;
-  
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
@@ -2687,7 +2697,7 @@ export async function getWorkflowRunStatus(
   owner: string, repo: string, workflowId: string
 ): Promise<{ id: number; conclusion: string | null; status: string; html_url: string } | null> {
   try {
-    
+
     const t = Date.now();
     const data = await request<{
       workflow_runs: Array<{ id: number; conclusion: string | null; status: string; html_url: string }>;
@@ -2697,7 +2707,6 @@ export async function getWorkflowRunStatus(
     return null;
   }
 }
-
 
 export async function getReceivedEvents(username: string, perPage = 30): Promise<any[]> {
   try {
