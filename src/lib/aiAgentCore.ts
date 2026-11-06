@@ -4174,14 +4174,28 @@ export async function callLLM(
   console.log(`[callLLM] debug-messages-structure: ${JSON.stringify(dbgMsgs)}`);
 
   const llmAbort = new AbortController();
-  const llmTimer = setTimeout(() => llmAbort.abort("llm-timeout"), 90_000);
+  // 动态读取超时配置，默认 90 秒，最小 10 秒
+  const requestTimeoutMs = Math.max(10_000, Number(cfg.timeoutMs) || 90_000);
+  const llmTimer = setTimeout(() => llmAbort.abort("llm-timeout"), requestTimeoutMs);
 
   let res: Response;
   try {
+    // 合并高级推理参数
+    const finalBodyExtra = { ...bodyExtra };
+    if (cfg.reasoning_effort && cfg.reasoning_effort !== 'off') {
+      // 针对 DeepSeek 或特定模型的特殊 thinking 参数
+      if (/deepseek/i.test(cfg.model || "") || /deepseek/i.test(cfg.type || "")) {
+        finalBodyExtra.thinking = { type: "enabled" };
+        finalBodyExtra.reasoning_effort = cfg.reasoning_effort;
+      } else if (/^(o1|o3|o4|gpt-5)/i.test(cfg.model || "")) {
+        finalBodyExtra.reasoning_effort = cfg.reasoning_effort;
+      }
+    }
+
     res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ messages: finalMessages, ...bodyExtra }),
+      body: JSON.stringify({ messages: finalMessages, ...finalBodyExtra }),
       signal: llmAbort.signal,
     });
   } catch (e) {
