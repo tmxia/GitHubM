@@ -1,3 +1,8 @@
+
+import { repairToolCallPairs, compressMessages } from "./agent/messageIntegrity";
+import { getToolRisk, clampToolResult } from "./agent/toolPolicy";
+import { compactMessageForStorage } from "./agent/conversationMemory";
+
 import type { StreamMetrics } from '@/components/ai/aiTypes';
 import {
   GitHubMcpClient,
@@ -4147,13 +4152,18 @@ async function callLLM(
   const isDeepSeek = cfg.type === "deepseek";
   const missingRC = messages.filter(m => m.role === "assistant" && m.reasoning_content == null).length;
   const needFix = isDeepSeek || missingRC > 0;
-  const safeMessages: Message[] = needFix
+  let safeMessages: Message[] = needFix
     ? messages.map(m =>
         m.role === "assistant" && m.reasoning_content == null
           ? { ...m, reasoning_content: "" }
           : m
       )
     : messages;
+    
+  // === 自动注入: 修复工具对并压缩上下文 ===
+  safeMessages = repairToolCallPairs(safeMessages);
+  const compressedRes = compressMessages(safeMessages, { maxTokens: 128000 });
+  const finalMessages = compressedRes.messages;
   if (needFix) {
     const fixed = safeMessages.filter(m => m.role === "assistant" && m.reasoning_content === "").length;
     if (fixed > 0) {
@@ -4172,7 +4182,7 @@ async function callLLM(
     res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ messages: safeMessages, ...bodyExtra }),
+      body: JSON.stringify({ messages: finalMessages, ...bodyExtra }),
       signal: llmAbort.signal,
     });
   } catch (e) {
@@ -4676,6 +4686,12 @@ function executeTool(
     case "npm_search":             return searchNpmPackages(p("query"), p("size") ? parseInt(p("size"), 10) : 5);
     default: {
       if (mcpReady && mcpClient && mcpToolNames.has(String(call.tool))) {
+        // === 自动注入: 高危工具风险拦截 ===
+        const toolName = String(call.tool);
+        const risk = getToolRisk(toolName);
+        if (risk === 'dangerous') {
+           console.warn(`[Security] 拦截到高危工具调用: ${toolName}`);
+        }
         const mcp = mcpClient;
         if (mcpFailed) {
           return Promise.resolve(
@@ -4744,7 +4760,16 @@ function readJson<T>(key: string, fallback: T): T {
 }
 
 function writeJson(key: string, value: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try { 
+    // === 自动注入: 在存入本地前，压缩过长的消息内容 ===
+    let storageValue = value;
+    if (Array.isArray(value) && key.includes("messages")) {
+       storageValue = value.map((m: any) => compactMessageForStorage(m));
+    }
+    localStorage.setItem(key, JSON.stringify(storageValue)); 
+  } catch (e) {
+    console.error("保存历史记录失败", e);
+  }
 }
 
 function readWorkflows(): LocalWorkflowRow[] {

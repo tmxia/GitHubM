@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getRepoBranches } from '@/services/github';
 import { runAiAgent } from '@/lib/aiAgentCore';
+import AgentDiagnosticsPanel from '@/components/ai/AgentDiagnosticsPanel';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -1345,6 +1346,8 @@ const currentModelDef = getModelDef(modelConfig.type);
   if (step === 'repo') {
     return (
       <div className="flex flex-col min-h-0 h-full overflow-y-auto">
+      <AgentDiagnosticsPanel />
+
         <div className="flex flex-col items-center gap-5 px-4 pt-6 pb-8 max-w-lg mx-auto w-full">
 
           <div className="flex flex-col items-center gap-2 text-center w-full">
