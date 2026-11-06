@@ -1,4 +1,7 @@
-
+// Agent 工具策略：风险分级、参数校验、结果裁剪
+//
+// 目标：把「工具能不能调、参数对不对、结果会不会撑爆上下文」
+// 从 Agent 主循环里抽出来，便于 UI 审批、测试和后续替换执行器。
 
 export type ToolRisk = 'read' | 'write' | 'dangerous';
 
@@ -66,6 +69,12 @@ export function getToolRisk(toolName: string): ToolRisk {
   return 'write';
 }
 
+/**
+ * 是否需要人工确认。
+ * - read 永不确认；
+ * - write 在自动模式下放行，否则确认；
+ * - dangerous 永远确认（自动模式也不放行）。
+ */
 export function shouldRequireApproval(toolName: string, autoMode: boolean): boolean {
   const risk = getToolRisk(toolName);
   if (risk === 'read') return false;
@@ -93,7 +102,7 @@ export function validateRequiredArguments(
 ): string[] {
   if (!schema || schema.type !== 'object') return [];
   const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
-
+  // path 允许空字符串：GitHubM 用 "" 表示仓库根目录（file_tree / list_files）。
   const allowEmpty = new Set(['path']);
   return required
     .filter((key) => {
@@ -104,6 +113,10 @@ export function validateRequiredArguments(
     .map((key) => `缺少必填参数：${key}`);
 }
 
+/**
+ * 轻量 JSON Schema 校验：required / type / enum / items.type。
+ * 不追求完整 JSON Schema 实现，只覆盖工具参数最常见的错误。
+ */
 export function validateToolArguments(
   schema: Record<string, unknown> | undefined,
   args: Record<string, unknown>
@@ -150,6 +163,7 @@ export interface ClampedResult {
   originalLength: number;
 }
 
+/** 工具结果裁剪：避免单个工具结果撑爆上下文窗口 */
 export function clampToolResult(text: string, maxChars = 4000): ClampedResult {
   if (text.length <= maxChars) {
     return { text, truncated: false, originalLength: text.length };

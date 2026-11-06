@@ -4139,7 +4139,7 @@ interface LLMUsage {
   type: string;
 }
 
-async function callLLM(
+export async function callLLM(
   cfg: ModelConfig,
   messages: Message[],
   onThinkingChunk?: (chunk: string) => Promise<void>,
@@ -5387,6 +5387,61 @@ export type AgentMetrics = Partial<StreamMetrics>;
 
 export async function runAiAgent(options: RunAgentOptions): Promise<void> {
   const { requestBody, signal, onData, onComplete, onError, onMetrics } = options;
+  
+  // ==========================================
+  // 🚀 LangGraph 多智能体旁路开关
+  // ==========================================
+  if (requestBody.use_langgraph) {
+    try {
+      const { runLangGraphBridge } = await import('./agent/langgraph/bridge');
+      
+      // 包装你现有的工具执行逻辑 (这里先用占位符，下一步我们再接入你的 MCP)
+      const executeToolWrapper = async (toolCall: any) => {
+         // 1. 构造你原本需要的 GithubContext (根据你的代码推断)
+         const ctx = {
+            token: String(requestBody.github_token ?? ""),
+            owner: String(requestBody.owner ?? ""),
+            repo: String(requestBody.repo ?? ""),
+            // 如果 GithubContext 还需要其他字段，请在这里补充
+         } as any;
+
+         // 2. 将 LangGraph 的 { name, arguments } 转换为原生的 { tool, ...arguments }
+         const convertedCall = {
+            tool: toolCall.name,
+            ...toolCall.arguments
+         };
+
+         // 3. 直接调用原版真实的 executeTool 函数
+         return await executeTool(ctx, convertedCall, targetBranch);
+      };
+
+      await runLangGraphBridge({
+        messages: requestBody.messages as any[],
+        modelConfig: requestBody.model_config,
+        signal,
+        onEvent: (event) => {
+          if (event.type === 'model_end' && event.content) {
+            onData(event.content);
+          } else if (event.type === 'tool_start') {
+            onData(`\n[执行工具: ${event.tool}]\n`);
+          } else if (event.type === 'final') {
+            onComplete();
+          }
+        },
+        executeTool: executeToolWrapper
+      });
+      
+      return; // 执行完毕直接返回
+    } catch (e) {
+      onError(e as Error);
+      return;
+    }
+  }
+  // ==========================================
+  // 👇 下面是你的原版执行逻辑
+  // ==========================================
+
+  // 已由 LangGraph 注入模块处理
   const startedAt = Date.now();
   let firstTokenAt: number | undefined;
   let totalChars = 0;

@@ -1,4 +1,9 @@
-
+// Agent 运行追踪（本地可观测性）
+//
+// 不依赖后端，记录最近 N 次 Agent 运行：
+//   - 模型调用、工具调用、上下文压缩、错误、结束状态
+// 用于定位「为什么这次任务失败/卡住/重复调用」，并为后续接入
+// Langfuse / OpenTelemetry 保留统一事件结构。
 
 export type AgentTraceEventType =
   | 'run_start'
@@ -13,7 +18,7 @@ export type AgentTraceEventType =
 export interface AgentTraceEvent {
   at: number;
   type: AgentTraceEventType;
-
+  /** 事件负载：工具名、耗时、token、错误摘要等，禁止写入完整 Token */
   data?: Record<string, unknown>;
 }
 
@@ -125,6 +130,7 @@ export function clearAgentTraces(): void {
   }
 }
 
+/** 生成一条便于复制到 GitHub Issue 的纯文本摘要 */
 export function formatAgentTrace(trace: AgentTrace): string {
   const lines = [
     `run=${trace.id} status=${trace.status} model=${trace.model ?? '-'} repo=${trace.repo ?? '-'}`,
