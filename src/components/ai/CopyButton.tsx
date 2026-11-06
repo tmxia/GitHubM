@@ -1,3 +1,4 @@
+// 复制按钮：memo 优化，防止父组件渲染时重复挂载
 import { memo, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/utils';

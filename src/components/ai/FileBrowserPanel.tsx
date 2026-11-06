@@ -1,18 +1,17 @@
-import {
-   memo, useState, useCallback } from 'react';
+// 文件浏览器插件面板 — 可在 AI 对话中快速浏览仓库文件并插入操作指令
+import { memo, useState, useCallback } from 'react';
 import {
   Folder, FolderOpen, FileCode2, FileText, File,
   ChevronRight, ChevronDown, Loader2, X, Eye, Pencil, Copy,
   FolderSearch, RefreshCw,
-  CheckSquare,
-  Square,
-  CheckCheck,
 } from 'lucide-react';
 import { cn, copyToClipboard } from '@/lib/utils';
 import { getRepoContents } from '@/services/github';
 import type { GitHubContent } from '@/types/types';
 import { toast } from 'sonner';
 import i18n from "@/i18n";
+
+// ── 类型 ──────────────────────────────────────────────────────────────────────
 
 interface TreeNode {
   item: GitHubContent;
@@ -26,9 +25,10 @@ interface FileBrowserPanelProps {
   repo: string;
   branch: string;
   onInsert: (text: string) => void;
-  onBatchInsert?: (items: GitHubContent[]) => void;
   onClose: () => void;
 }
+
+// ── 文件图标 ──────────────────────────────────────────────────────────────────
 
 function FileIcon({ name, type }: { name: string; type: string }) {
   if (type === 'dir') return <Folder className="w-3.5 h-3.5 text-amber-500 shrink-0" />;
@@ -39,6 +39,8 @@ function FileIcon({ name, type }: { name: string; type: string }) {
   if (docExts.includes(ext)) return <FileText className="w-3.5 h-3.5 text-green-500 shrink-0" />;
   return <File className="w-3.5 h-3.5 text-muted-foreground shrink-0" />;
 }
+
+// ── 单行树节点 ────────────────────────────────────────────────────────────────
 
 interface TreeRowProps {
   node: TreeNode;
@@ -67,6 +69,7 @@ const TreeRow = memo(function TreeRow({
         onMouseLeave={() => setHoveredPath(null)}
         onClick={() => isDir ? onToggle(node) : undefined}
       >
+        {/* 展开/收起图标 */}
         <span className="shrink-0 w-3.5">
           {isDir && (
             node.loading
@@ -77,16 +80,19 @@ const TreeRow = memo(function TreeRow({
           )}
         </span>
 
+        {/* 文件/目录图标 */}
         {isDir
           ? (node.expanded
               ? <FolderOpen className="w-3.5 h-3.5 text-amber-500 shrink-0" />
               : <Folder className="w-3.5 h-3.5 text-amber-500 shrink-0" />)
           : <FileIcon name={node.item.name} type={node.item.type} />}
 
+        {/* 名称 */}
         <span className="text-xs truncate flex-1 min-w-0 ml-1">
           {node.item.name}
         </span>
 
+        {/* 文件大小（目录不显示） */}
         {!isDir && node.item.size > 0 && (
           <span className="text-[10px] text-muted-foreground shrink-0 opacity-60 mr-1">
             {node.item.size > 1024
@@ -95,6 +101,7 @@ const TreeRow = memo(function TreeRow({
           </span>
         )}
 
+        {/* 操作按钮（hover 才显示） */}
         {!isDir && isHovered && (
           <div className="flex items-center gap-0.5 shrink-0">
             <button
@@ -133,6 +140,7 @@ const TreeRow = memo(function TreeRow({
         )}
       </div>
 
+      {/* 展开的子节点 */}
       {isDir && node.expanded && node.children && (
         <>
           {node.children.map(child => (
@@ -152,6 +160,8 @@ const TreeRow = memo(function TreeRow({
   );
 });
 
+// ── 主组件 ────────────────────────────────────────────────────────────────────
+
 const FileBrowserPanel = memo(function FileBrowserPanel({
   owner, repo, branch, onInsert, onClose,
 }: FileBrowserPanelProps) {
@@ -160,11 +170,13 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
   const [rootLoaded, setRootLoaded] = useState(false);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
 
+  // 加载根目录
   const loadRoot = useCallback(async () => {
     setRootLoading(true);
     try {
       const items = await getRepoContents(owner, repo, '', branch);
       const arr = Array.isArray(items) ? items : [items];
+      // 目录排前，文件排后，同类按字母排
       const sorted = arr.sort((a, b) => {
         if (a.type === 'dir' && b.type !== 'dir') return -1;
         if (a.type !== 'dir' && b.type === 'dir') return 1;
@@ -179,8 +191,10 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
     }
   }, [owner, repo, branch]);
 
+  // 展开/收起目录
   const handleToggle = useCallback(async (target: TreeNode) => {
     if (target.expanded) {
+      // 收起：只更新 expanded 标志，不清除 children（缓存）
       const collapse = (list: TreeNode[]): TreeNode[] =>
         list.map(n => n.item.path === target.item.path
           ? { ...n, expanded: false }
@@ -189,6 +203,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
       return;
     }
     if (target.children) {
+      // 已有缓存，直接展开
       const expand = (list: TreeNode[]): TreeNode[] =>
         list.map(n => n.item.path === target.item.path
           ? { ...n, expanded: true }
@@ -196,6 +211,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
       setNodes(prev => expand(prev));
       return;
     }
+    // 标记加载中
     const setLoading = (list: TreeNode[], loading: boolean): TreeNode[] =>
       list.map(n => n.item.path === target.item.path
         ? { ...n, loading }
@@ -221,6 +237,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
     }
   }, [owner, repo, branch]);
 
+  // 文件操作 → 插入文本到输入框
   const handleFileAction = useCallback((item: GitHubContent, action: 'read' | 'edit' | 'copy') => {
     if (action === 'copy') {
       copyToClipboard(item.path).then(() => toast.success(i18n.t('路径已复制')));
@@ -243,6 +260,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0 border-l border-border bg-card w-full">
+      {/* 面板标题栏 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
         <div className="flex items-center gap-1.5">
           <FolderSearch className="w-3.5 h-3.5 text-primary" />
@@ -269,6 +287,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
         </div>
       </div>
 
+      {/* 文件树内容 */}
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {!rootLoaded ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
@@ -307,6 +326,7 @@ const FileBrowserPanel = memo(function FileBrowserPanel({
         )}
       </div>
 
+      {/* 底部操作提示 */}
       <div className="px-3 py-1.5 border-t border-border shrink-0">
         <p className="text-[10px] text-muted-foreground leading-relaxed">
           <Eye className="w-2.5 h-2.5 inline mr-0.5" />{i18n.t('读取 &nbsp;')}<Pencil className="w-2.5 h-2.5 inline mr-0.5" />{i18n.t('编辑 &nbsp;')}<Copy className="w-2.5 h-2.5 inline mr-0.5" />{i18n.t('复制路径')}</p>

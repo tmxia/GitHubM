@@ -1,9 +1,10 @@
+// AI 助手共享工具函数 & 常量
 import React, { useState } from 'react';
 import type { ModelConfig, ModelType, SSEChunk } from './aiTypes';
 import DiffBlock from './DiffBlock';
-import { DeepSeekIcon, GeminiIcon, QwenIcon, OpenAIIcon, CustomIcon } from './ModelIcons';
+import { WenxinIcon, DeepSeekIcon, GeminiIcon, QwenIcon, OpenAIIcon, CustomIcon } from './ModelIcons';
 import {
-  FolderOpen, BookOpen, FileCode2, Pencil,
+  FolderOpen, BookOpen, Search, FileCode2, Pencil,
   GitBranch, GitCommit, GitMerge, CircleAlert,
   Play, ListChecks, BugPlay, LayoutDashboard,
   FolderSearch, ScanSearch, Files, GitPullRequest,
@@ -12,6 +13,7 @@ import {
 import { cn } from '@/lib/utils';
 import i18n from "@/i18n";
 
+// ── 模型类型（从 aiTypes 导入，在此仅重导出供外部使用）──────────────────────────────
 export type { ModelType };
 
 export interface ModelDef {
@@ -24,9 +26,13 @@ export interface ModelDef {
   needEndpoint: boolean;
   keyPlaceholder?: string;
   docsUrl?: string;
+  /** 头像显示文字（1-2字）*/
   avatarText: string;
+  /** 头像渐变起始色 */
   avatarFrom: string;
+  /** 头像渐变结束色 */
   avatarTo: string;
+  /** 品牌 SVG 图标组件（优先级高于渐变文字）*/
   Icon?: React.FC<{ className?: string; style?: React.CSSProperties }>;
 }
 
@@ -56,8 +62,10 @@ export const MODEL_DEFS: ModelDef[] = [
     desc: i18n.t('代码能力极强，中文理解出色，价格极低'),
     badge: i18n.t('低价'),
     models: [
+      // 新命名（2026-05，推荐使用）
       { value: 'deepseek-v4-flash', label: i18n.t('DeepSeek V4 Flash（快速 · 低价 · 推荐）') },
       { value: 'deepseek-v4-pro', label: i18n.t('DeepSeek V4 Pro（深度思考 · 当前 2.5 折）') },
+      // 旧名称兼容（2026/07/24 后弃用）
       { value: 'deepseek-chat', label: i18n.t('DeepSeek Chat（旧名，即将弃用）') },
       { value: 'deepseek-reasoner', label: i18n.t('DeepSeek Reasoner（旧名，即将弃用）') },
     ],
@@ -122,20 +130,26 @@ export const MODEL_DEFS: ModelDef[] = [
   },
 ];
 
+// ── 快捷指令 ────────────────────────────────────────────────────────────────────
+
 export const QUICK_PROMPTS = [
+  // 探索类
   { icon: FolderSearch,   label: i18n.t('文件树'),      text: i18n.t('请用 file_tree 工具获取完整项目文件树（深度3），分析项目结构和技术栈') },
   { icon: FolderOpen,     label: i18n.t('项目结构'),    text: i18n.t('帮我分析一下这个仓库的整体项目结构和技术栈，包括主要目录和核心文件') },
   { icon: BookOpen,       label: i18n.t('查看 README'), text: i18n.t('请读取并展示 README.md 的内容') },
   { icon: ScanSearch,     label: i18n.t('搜索 TODO'),   text: i18n.t('请用 search_code 工具搜索仓库中所有包含 TODO 注释的代码位置，列出需要完成的工作') },
   { icon: Files,          label: i18n.t('批量读取'),    text: '请列出根目录文件，然后用 batch_read 工具同时读取 README.md 和主要配置文件（如 package.json、build.gradle 等）' },
+  // 编辑类
   { icon: FileCode2,      label: i18n.t('代码审查'),    text: '请先用 file_tree 获取项目结构，然后挑选 3-5 个主要源码文件进行代码质量审查，给出改进建议' },
   { icon: Pencil,         label: i18n.t('优化 README'), text: i18n.t('请读取 README.md，帮我优化内容使其更专业完整，然后用 write_file 写入更新') },
   { icon: Wrench,         label: i18n.t('重构建议'),    text: i18n.t('请分析项目文件树，找出可以重构优化的模块，并给出具体建议') },
+  // Git 操作类
   { icon: GitBranch,      label: i18n.t('列出分支'),    text: i18n.t('请列出该仓库所有的分支') },
   { icon: GitCommit,      label: i18n.t('提交历史'),    text: i18n.t('请展示仓库最近 10 条提交记录，并总结最近的变更方向') },
   { icon: GitMerge,       label: i18n.t('查看 PR'),     text: i18n.t('请列出该仓库所有 open 状态的 Pull Request') },
   { icon: GitPullRequest, label: i18n.t('创建 PR'),     text: i18n.t('请帮我创建一个 Pull Request，从当前分支合并到默认分支，标题总结最近的修改内容') },
   { icon: CircleAlert,    label: i18n.t('查看 Issues'), text: i18n.t('请列出该仓库所有 open 状态的 Issues，并按优先级分类总结') },
+  // CI/CD 类
   { icon: Play,           label: i18n.t('工作流列表'),  text: i18n.t('请列出仓库所有 GitHub Actions 工作流文件及其状态') },
   { icon: ListChecks,     label: i18n.t('最近部署'),    text: i18n.t('请查看最近 5 次 GitHub Actions 运行记录，告诉我哪些成功、哪些失败') },
   { icon: BugPlay,        label: i18n.t('排查失败'),    text: '请找出最近一次失败的工作流运行，查看 Job 列表，下载失败 Job 的日志，分析报错原因并给出修复建议' },
@@ -143,8 +157,14 @@ export const QUICK_PROMPTS = [
   { icon: LayoutDashboard,label: i18n.t('查看 Secrets'),'text': i18n.t('请列出该仓库配置的 Actions Secrets 名称（不含值），检查是否有缺失的环境变量') },
 ];
 
+// ── 纯工具函数 ──────────────────────────────────────────────────────────────────
+
 const MODEL_CONFIG_KEY = 'ai_assistant_model_config';
 
+/**
+ * 将 API Key 部分掩码显示（隐藏状态）：保留前 4 位 + 后 4 位，中间用 * 替代。
+ * 避免使用 type="password" 触发 Android WebView 安全键盘。
+ */
 export function maskApiKey(key: string): string {
   if (!key) return '';
   if (key.length <= 8) return '*'.repeat(key.length);
@@ -160,48 +180,60 @@ export function loadModelConfig(): ModelConfig {
     const raw = localStorage.getItem(MODEL_CONFIG_KEY);
     if (raw) {
       const cfg = JSON.parse(raw) as ModelConfig;
+      // 旧版本「文心」平台内置免费通道已随后端移除：
+      // 自动迁移到 DeepSeek（需用户自填 API Key），兼容老用户配置
       if (cfg && cfg.type === 'wenxin') {
         return { type: 'deepseek' };
       }
       return cfg;
     }
-  } catch {}
+  } catch { /* ignore */ }
   return { type: 'deepseek' };
 }
 
 export function saveModelConfig(cfg: ModelConfig): void {
   localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(cfg));
+  // 同步更新独立 key 存储，保持两者一致
   if (cfg.api_key && cfg.type !== 'wenxin') {
     localStorage.setItem(`ai_api_key_${cfg.type}`, cfg.api_key);
   }
 }
 
+/** 加载指定平台独立存储的 API Key */
 export function loadProviderKey(type: ModelType): string {
   try {
     return localStorage.getItem(`ai_api_key_${type}`) ?? '';
   } catch { return ''; }
 }
 
+/** 保存指定平台独立存储的 API Key，并在该平台为当前活跃模型时同步更新 modelConfig */
 export function saveProviderKey(type: ModelType, key: string): void {
   if (key.trim()) {
     localStorage.setItem(`ai_api_key_${type}`, key.trim());
   } else {
     localStorage.removeItem(`ai_api_key_${type}`);
   }
+  // 若该平台正是当前活跃模型，同步更新 modelConfig 中的 api_key
   const current = loadModelConfig();
   if (current.type === type) {
     saveModelConfig({ ...current, api_key: key.trim() || undefined });
   }
 }
 
+/**
+ * 解析增强版 SSE Typed Chunk。
+ * 支持旧版 { choices: [{ delta: { content } }] } 和新版 { type: '...', ... }。
+ */
 export function parseTypedChunk(data: string): SSEChunk | null {
   if (data === '[DONE]') return null;
   try {
     const parsed = JSON.parse(data);
+    // 1. 处理新版 Typed Chunk
     if (parsed.type) return parsed as SSEChunk;
+    // 2. 处理旧版 OpenAI 格式
     const content = parsed.choices?.[0]?.delta?.content;
     if (typeof content === 'string') return { type: 'content', content };
-  } catch {}
+  } catch { /* ignore */ }
   return null;
 }
 
@@ -210,8 +242,14 @@ export function parseChunk(data: string): string {
   return typed?.type === 'content' ? typed.content : '';
 }
 
+// ── UI 组件 ────────────────────────────────────────────────────────────────────
+
+/**
+ * 思考过程显示组件。
+ * 支持：实时流式显示（done=false 时显示 spinner）、手动折叠/展开、完成后默认折叠。
+ */
 export function ThinkingBlock({ content, done }: { content: string; done?: boolean }) {
-  const [expanded, setExpanded] = useState(!done);
+  const [expanded, setExpanded] = useState(!done); // 正在流式输出时默认展开
 
   if (!content && !done) return null;
 
@@ -230,6 +268,7 @@ export function ThinkingBlock({ content, done }: { content: string; done?: boole
 
       {expanded && (
         <div className="px-3 pb-3">
+          {/* 使用 max-height + 滚动，避免过长的思考过程占用过多垂直空间 */}
           <div className="max-h-[200px] overflow-y-auto text-[11px] text-muted-foreground leading-relaxed italic whitespace-pre-wrap border-t border-border pt-2 scrollbar-thin">
             {content}
             {!done && <span className="inline-block w-1 h-3 ml-1 bg-primary/50 animate-pulse" />}
@@ -240,6 +279,15 @@ export function ThinkingBlock({ content, done }: { content: string; done?: boole
   );
 }
 
+// ── Markdown 渲染 ────────────────────────────────────────────────────────────────
+
+/**
+ * 渲染 Markdown 为 React 节点。
+ * 修复：
+ * - 代码块内容用 JSX 文本节点渲染，避免任何编码/转义导致的乱码
+ * - 所有文本强制 break-words + whitespace-pre-wrap，防止超出视口
+ * - 支持 # / ## / ### 标题、有序/无序列表、粗体、行内代码
+ */
 export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) => void): React.ReactNode {
   if (!text) return null;
   const lines = text.split('\n');
@@ -261,6 +309,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
   while (i < lines.length) {
     const line = lines[i];
 
+    // ── 代码块 ──────────────────────────────────────────────────────
     if (line.startsWith('```')) {
       const lang = line.slice(3).trim().toLowerCase();
       const codeLines: string[] = [];
@@ -271,6 +320,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
       }
       const codeText = codeLines.join('\n');
 
+      // diff / patch 语言 → DiffBlock 高亮渲染
       if (lang === 'diff' || lang === 'patch') {
         result.push(
           <div key={key++} className="my-2 min-w-0 w-full">
@@ -287,6 +337,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
               <span className="text-[10px] font-mono text-muted-foreground select-none">{lang}</span>
             </div>
           )}
+          {/* 代码块：overflow-x-auto 约束在气泡宽度内横向滚动，避免 Android WebView 撑爆父容器 */}
           <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <pre className="p-3 text-[11px] font-mono leading-relaxed whitespace-pre" style={{ display: 'inline-block', minWidth: '100%' }}>
               <code>{codeText}</code>
@@ -297,6 +348,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
       i++; continue;
     }
 
+    // ── 标题 ─────────────────────────────────────────────────────────
     if (line.startsWith('# ')) {
       result.push(<h1 key={key++} className="text-lg font-bold mt-4 mb-1.5 break-words text-balance">{line.slice(2)}</h1>);
       i++; continue;
@@ -310,7 +362,9 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
       i++; continue;
     }
 
+    // ── 无序列表（含 GFM checkbox） ────────────────────────────────────
     if (/^[-*+] /.test(line)) {
+      // 连续收集同级列表项（保留缩进行作为子内容）
       const listItems: Array<{ text: string; checked: boolean | null; indent: string }> = [];
       while (i < lines.length && (/^[-*+] /.test(lines[i]) || /^ {2,}/.test(lines[i]))) {
         const l = lines[i];
@@ -322,6 +376,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
             listItems.push({ text: body, checked: null, indent: '' });
           }
         } else {
+          // 缩进子行：追加到上一项
           if (listItems.length > 0) {
             listItems[listItems.length - 1].text += '\n' + l.trimStart();
           }
@@ -352,6 +407,7 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
       continue;
     }
 
+    // ── 有序列表 ─────────────────────────────────────────────────────
     if (/^\d+\. /.test(line)) {
       const listItems: Array<{ n: number; text: string }> = [];
       while (i < lines.length && /^\d+\. /.test(lines[i])) {
@@ -372,16 +428,19 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
       continue;
     }
 
+    // ── 分隔线 ───────────────────────────────────────────────────────
     if (/^---+$/.test(line.trim())) {
       result.push(<hr key={key++} className="my-2 border-border" />);
       i++; continue;
     }
 
+    // ── 空行 ─────────────────────────────────────────────────────────
     if (line.trim() === '') {
       if (result.length > 0) result.push(<div key={key++} className="h-1" />);
       i++; continue;
     }
 
+    // ── 普通段落 ─────────────────────────────────────────────────────
     result.push(
       <p key={key++} className="text-sm leading-relaxed break-words min-w-0 text-pretty">
         {renderInline(line, key)}
@@ -389,9 +448,11 @@ export function renderMarkdown(text: string, onApplyDiff?: (filePath: string) =>
     );
     i++;
   }
+  /* overflow-hidden 约束整个 markdown 区域宽度，让内层代码块的 overflow-x-auto 在气泡边界内滚动 */
   return <div className="flex flex-col gap-0.5 min-w-0 w-full overflow-hidden">{result}</div>;
 }
 
+// ── 模型专属头像组件 ────────────────────────────────────────────────────────────
 export function ModelAvatar({ modelDef, size = 'sm' }: { modelDef: ModelDef; size?: 'sm' | 'md' }) {
   const dim = size === 'sm' ? 'w-7 h-7' : 'w-9 h-9';
   const iconDim = size === 'sm' ? 'w-5 h-5' : 'w-6 h-6';
@@ -405,6 +466,7 @@ export function ModelAvatar({ modelDef, size = 'sm' }: { modelDef: ModelDef; siz
     );
   }
 
+  // 兜底：渐变文字头像
   return (
     <div
       className={cn(

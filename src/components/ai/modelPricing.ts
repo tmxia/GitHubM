@@ -1,15 +1,37 @@
 import i18n from "@/i18n";
 
+/**
+ * AI 模型官方定价表
+ * 单位：USD / 1M tokens（人民币按 1 USD = 7.2 CNY 换算）
+ * 数据来源：各平台官网定价页，最后更新：2026-05
+ *
+ * DeepSeek 最新定价（人民币，来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/）
+ *   deepseek-v4-flash：输入(缓存未命中) ¥1/M，输出 ¥2/M
+ *   deepseek-v4-pro  ：输入(缓存未命中) ¥3/M（当前折扣），输出 ¥6/M（当前折扣，原价 ¥12/¥24）
+ *   输入缓存命中：全系降至首发价 1/10（v4-flash ¥0.02/M，v4-pro ¥0.025/M）
+ *
+ * 通义千问 CNY 定价按 1 USD = 7.2 CNY 换算为 USD
+ * 标注 isEstimated=true 的条目为估算（无精确模型定价时按 provider 兜底价）
+ */
+
 export interface ModelPrice {
+  /** 输入 Token 单价（USD / 1M tokens） */
   inputPer1M: number;
+  /** 输出 Token 单价（USD / 1M tokens） */
   outputPer1M: number;
+  /** 是否免费（免费额度内） */
   isFree?: boolean;
+  /** 是否为估算/兜底价（非官方精确值） */
   isEstimated?: boolean;
+  /** 原始货币（USD/CNY 等） */
   currency?: string;
+  /** 定价来源链接 */
   sourceUrl?: string;
+  /** 备注（如「免费额度每分钟 15 次」） */
   note?: string;
 }
 
+// ── 定价来源 URL ─────────────────────────────────────────────────────────────
 const SOURCES = {
   deepseek: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/',
   gemini:   'https://ai.google.dev/pricing',
@@ -18,22 +40,32 @@ const SOURCES = {
   wenxin:   'https://cloud.baidu.com/doc/WENXINWORKSHOP/s/Blfmc9dlf',
 } as const;
 
+// ── 各平台精确定价（按模型 ID 精确匹配） ────────────────────────────────────
 const MODEL_PRICES: Record<string, ModelPrice> = {
 
+  // ── DeepSeek ──────────────────────────────────────────────────────────────
+  // 官方定价：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/（2026-05）
+  // 货币：人民币（CNY），按 1 USD = 7.2 CNY 换算
+  //
+  // deepseek-v4-flash（对应旧 deepseek-chat，2026/07/24 前旧名兼容）
+  //   缓存未命中输入 ¥1/M，输出 ¥2/M；缓存命中输入 ¥0.02/M
   'deepseek-v4-flash': {
-    inputPer1M: 1.00 / 7.2,
-    outputPer1M: 2.00 / 7.2,
+    inputPer1M: 1.00 / 7.2,          // ¥1.00/M → ~$0.139/M
+    outputPer1M: 2.00 / 7.2,         // ¥2.00/M → ~$0.278/M
     currency: 'CNY',
     sourceUrl: SOURCES.deepseek,
     note: i18n.t('缓存命中输入 ¥0.02/M (~$0.003/M)；上下文 1M / 最大输出 384K'),
   },
+  // deepseek-v4-pro（对应旧 deepseek-reasoner，含思考模式，2026/07/24 前旧名兼容）
+  //   当前 2.5 折优惠至 2026/05/31：缓存未命中输入 ¥3/M，输出 ¥6/M；原价 ¥12/¥24
   'deepseek-v4-pro': {
-    inputPer1M: 3.00 / 7.2,
-    outputPer1M: 6.00 / 7.2,
+    inputPer1M: 3.00 / 7.2,          // ¥3.00/M（折后） → ~$0.417/M
+    outputPer1M: 6.00 / 7.2,         // ¥6.00/M（折后） → ~$0.833/M
     currency: 'CNY',
     sourceUrl: SOURCES.deepseek,
     note: '当前 2.5 折至 2026/05/31（原价 ¥12/¥24/M）；缓存命中输入 ¥0.025/M；思考模式含 reasoning_content',
   },
+  // 旧名称兼容（2026/07/24 后弃用，内部分别映射到 v4-flash 非思考 / v4-pro）
   'deepseek-chat': {
     inputPer1M: 1.00 / 7.2,
     outputPer1M: 2.00 / 7.2,
@@ -56,6 +88,9 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
     note: i18n.t('已弃用旧名称（等价于 deepseek-v4-pro），建议升级'),
   },
 
+  // ── Google Gemini ─────────────────────────────────────────────────────────
+  // https://ai.google.dev/pricing（2025-05）
+  // 注：Google AI Studio 提供免费额度；以下为超额计费价格
   'gemini-2.5-flash-preview-05-20': {
     inputPer1M: 0.15,
     outputPer1M: 0.60,
@@ -101,42 +136,47 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
     isFree: true,
   },
 
+  // ── Qwen（通义千问 DashScope）────────────────────────────────────────────
+  // 官网 CNY 价格 ÷ 7.2 换算为 USD（2025-05）
+  // https://help.aliyun.com/zh/model-studio/developer-reference/
   'qwen2.5-coder-32b-instruct': {
-    inputPer1M: 2.00 / 7.2,
-    outputPer1M: 6.00 / 7.2,
+    inputPer1M: 2.00 / 7.2,        // ¥2.00/M → ~$0.278/M
+    outputPer1M: 6.00 / 7.2,       // ¥6.00/M → ~$0.833/M
     currency: 'CNY',
     sourceUrl: SOURCES.qwen,
     note: i18n.t('原价 ¥2.00/¥6.00 per 1M tokens，按 1 USD=7.2 CNY 换算'),
   },
   'qwen2.5-coder-7b-instruct': {
-    inputPer1M: 0.50 / 7.2,
-    outputPer1M: 2.00 / 7.2,
+    inputPer1M: 0.50 / 7.2,        // ¥0.50/M → ~$0.069/M
+    outputPer1M: 2.00 / 7.2,       // ¥2.00/M → ~$0.278/M
     currency: 'CNY',
     sourceUrl: SOURCES.qwen,
     note: i18n.t('原价 ¥0.50/¥2.00 per 1M tokens'),
   },
   'qwen-plus': {
-    inputPer1M: 0.80 / 7.2,
-    outputPer1M: 2.00 / 7.2,
+    inputPer1M: 0.80 / 7.2,        // ¥0.80/M → ~$0.111/M
+    outputPer1M: 2.00 / 7.2,       // ¥2.00/M → ~$0.278/M
     currency: 'CNY',
     sourceUrl: SOURCES.qwen,
     note: i18n.t('原价 ¥0.80/¥2.00 per 1M tokens'),
   },
   'qwen-turbo': {
-    inputPer1M: 0.30 / 7.2,
-    outputPer1M: 0.60 / 7.2,
+    inputPer1M: 0.30 / 7.2,        // ¥0.30/M → ~$0.042/M
+    outputPer1M: 0.60 / 7.2,       // ¥0.60/M → ~$0.083/M
     currency: 'CNY',
     sourceUrl: SOURCES.qwen,
     note: i18n.t('原价 ¥0.30/¥0.60 per 1M tokens'),
   },
   'qwen-max': {
-    inputPer1M: 2.40 / 7.2,
-    outputPer1M: 9.60 / 7.2,
+    inputPer1M: 2.40 / 7.2,        // ¥2.40/M → ~$0.333/M
+    outputPer1M: 9.60 / 7.2,       // ¥9.60/M → ~$1.333/M
     currency: 'CNY',
     sourceUrl: SOURCES.qwen,
     note: i18n.t('原价 ¥2.40/¥9.60 per 1M tokens'),
   },
 
+  // ── OpenAI ────────────────────────────────────────────────────────────────
+  // https://openai.com/api/pricing（2025-05）
   'gpt-4o': {
     inputPer1M: 2.50,
     outputPer1M: 10.00,
@@ -179,6 +219,7 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
   },
 };
 
+// ── Provider 级兜底价（模型 ID 未命中时使用） ──────────────────────────────
 const PROVIDER_FALLBACK: Record<string, ModelPrice> = {
   deepseek: {
     inputPer1M: 1.00 / 7.2,
@@ -226,14 +267,23 @@ const PROVIDER_FALLBACK: Record<string, ModelPrice> = {
   },
 };
 
+/**
+ * 获取指定平台+模型的定价
+ * 优先精确匹配 model ID，未命中时使用 provider 兜底价
+ */
 export function getModelPrice(providerType: string, model: string): ModelPrice {
   const exact = MODEL_PRICES[model];
   if (exact) return exact;
   const fallback = PROVIDER_FALLBACK[providerType];
   if (fallback) return fallback;
+  // 完全未知：按 $0 处理，标注估算
   return { inputPer1M: 0, outputPer1M: 0, isEstimated: true, note: i18n.t('未知平台，无法估算费用') };
 }
 
+/**
+ * 计算一条记录的估算费用（USD）
+ * promptTokens / 1_000_000 * inputPer1M + completionTokens / 1_000_000 * outputPer1M
+ */
 export function calcCostUsd(
   providerType: string,
   model: string,
@@ -247,6 +297,7 @@ export function calcCostUsd(
   return { costUsd, price };
 }
 
+/** 格式化费用展示（< $0.000001 显示 "< $0.000001"，其余保留 6 位有效数字） */
 export function formatCostUsd(costUsd: number): string {
   if (costUsd === 0) return '$0.00';
   if (costUsd < 0.000001) return '< $0.000001';

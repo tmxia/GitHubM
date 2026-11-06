@@ -1,6 +1,9 @@
+// AI 助手共享类型定义
 
-
+// ── 模型类型（在此定义，供 aiUtils.tsx 和其他文件导入，避免循环依赖）──────────────
 export type ModelType = 'wenxin' | 'deepseek' | 'gemini' | 'qwen' | 'openai' | 'custom';
+
+// ── 对话历史类型 ────────────────────────────────────────────────────────────────
 
 export interface ChatSession {
   id: string;
@@ -22,10 +25,13 @@ export interface ChatSessionMessage {
   created_at: string;
   message_type?: 'plain' | 'memory_summary';
   meta_json?: string | null;
-
+  /** 完整消息结构 JSON（含 bubbleType/inlineTools/toolResult 等展示字段），恢复时优先使用 */
   full_json?: string | null;
 }
 
+// ── 消息类型 ────────────────────────────────────────────────────────────────────
+
+/** 内联工具调用条目（在气泡内展示，兼容旧代码） */
 export interface InlineTool {
   id: string;
   tool: string;
@@ -36,6 +42,7 @@ export interface InlineTool {
   result?: string;
 }
 
+/** 内联任务计划步骤（在气泡内展示） */
 export interface InlineStep {
   id: string;
   title: string;
@@ -44,23 +51,25 @@ export interface InlineStep {
   retryCount?: number;
 }
 
+/** 用户上传的附件（图片或文本文件） */
 export interface Attachment {
   id: string;
   name: string;
-
+  /** 'image' = 图片（base64 预览）| 'text' = 代码/文本文件 | 'binary' = 其他二进制 */
   type: 'image' | 'text' | 'binary';
   mimeType: string;
-
+  /** 图片：base64 data URL；文本文件：原始文本内容；binary：base64 */
   content: string;
   size: number;
 }
 
+/** AI 发出的文件上传请求 */
 export interface FileRequest {
   id: string;
   filename: string;
   description: string;
   mime_types?: string;
-
+  /** 用户已完成上传，卡片变为已处理状态 */
   fulfilled?: boolean;
 }
 
@@ -69,43 +78,51 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
-
+  /** 持久化消息类型：plain=普通消息，memory_summary=压缩记忆 */
   messageType?: 'plain' | 'memory_summary';
-
+  /** 额外元信息（如摘要覆盖范围、来源 turn 等） */
   meta?: Record<string, unknown>;
-
+  // ── 新增字段 ────────────────────────────────────────────────────────────────
+  /** 思考过程内容 */
   thinkingContent?: string;
-
+  /** 思考是否完成 */
   thinkingDone?: boolean;
-
+  /** 内联任务步骤（气泡内展示，移动端可见） */
   inlinePlan?: InlineStep[];
-
+  /** 内联工具调用列表（气泡内展示，移动端可见） */
   inlineTools?: InlineTool[];
-
+  /** 用户消息携带的附件 */
   attachments?: Attachment[];
-
+  /** AI 发出的文件上传请求列表 */
   fileRequests?: FileRequest[];
-
+  /**
+   * 气泡类型：
+   *  - 'step'     = 每个任务步骤标题气泡（精简标题行）
+   *  - 'answer'   = 最终回答气泡（含 Markdown 正文）
+   *  - 'thinking' = AI 思考过程气泡（可折叠）
+   *  - 'tool'     = 单个工具调用气泡（含结果）
+   *  - undefined  = 普通消息（无 plan 时保持单气泡行为）
+   */
   bubbleType?: 'step' | 'answer' | 'thinking' | 'tool';
-
+  /** 步骤标题，bubbleType==='step' 时展示 */
   stepTitle?: string;
-
+  /** 关联的步骤 ID */
   stepId?: string;
-
+  /** 工具调用 ID（bubbleType==='tool' 时使用，用于 tool_end 更新） */
   toolCallId?: string;
-
+  /** 工具名称（bubbleType==='tool'） */
   toolName?: string;
-
+  /** 工具标签（bubbleType==='tool'） */
   toolLabel?: string;
-
+  /** 工具提示（bubbleType==='tool'） */
   toolHint?: string;
-
+  /** 工具调用状态（bubbleType==='tool'） */
   toolStatus?: 'queued' | 'running' | 'success' | 'fail' | 'blocked';
-
+  /** 工具耗时 ms（bubbleType==='tool'） */
   toolElapsedMs?: number;
-
+  /** 工具返回结果摘要（bubbleType==='tool'，可折叠） */
   toolResult?: string;
-}
+}// ── 工具调用记录类型 ────────────────────────────────────────────────────────────
 
 export interface ToolHistoryItem {
   id: string;
@@ -118,12 +135,19 @@ export interface ToolHistoryItem {
   result?: string;
 }
 
+// ── SSE Typed Chunk 类型 ───────────────────────────────────────────────────────
+
 export interface TaskPlanStep {
   id: string;
   title: string;
   desc: string;
 }
 
+/**
+ * SSE 事件信封（标准协议 v2）。
+ * 后端为每条事件注入 stream_id / turn_id / seq / timestamp，
+ * 前端用 seq 去重、idle timeout 检测，用 stream_id 校验归属。
+ */
 export interface SSEEnvelope {
   stream_id?: string;
   turn_id?: string;
@@ -157,36 +181,44 @@ export type SSEChunk = SSEEnvelope & (
   | { type: 'error'; code: string; message: string }
 );
 
+// ── 模型配置 ────────────────────────────────────────────────────────────────────
+
 export interface ModelConfig {
   type: ModelType;
   api_key?: string;
   endpoint?: string;
-
+  /** 无状态模型代理地址（Cloudflare Worker），配置后所有模型请求走代理 */
   proxy_url?: string;
-
+  /** Agent 编排引擎：classic=旧循环（默认），langgraph=LangGraph（实验） */
   agent_engine?: 'classic' | 'langgraph';
-
+  /** 模型思考强度；off=关闭思考，auto/undefined=模型默认 */
   reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
   model?: string;
-
+  /**
+   * 请求超时毫秒数（默认 300000 = 5 分钟）
+   * 用户可在模型设置中调整，复杂任务建议设 5~10 分钟
+   */
   timeoutMs?: number;
 }
 
+// ── 流式统计指标 ────────────────────────────────────────────────────────────────
+
+/** 每次流式对话的性能指标，用于监控和调试 */
 export interface StreamMetrics {
-
+  /** Time To First Token（ms） */
   ttft?: number;
-
+  /** 流速（tokens/s 近似，按字符估算） */
   throughput?: number;
-
+  /** 流开始时间戳（ms） */
   startedAt: number;
-
+  /** 首 token 时间戳（ms） */
   firstTokenAt?: number;
-
+  /** 流结束时间戳（ms） */
   finishedAt?: number;
-
+  /** 中断原因 */
   interruptReason?: 'user_stop' | 'network_error' | 'idle_timeout' | 'server_error' | 'completed';
-
+  /** 收到的总 seq 数 */
   totalSeq?: number;
-
+  /** stream_id */
   streamId?: string;
 }

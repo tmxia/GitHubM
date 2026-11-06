@@ -1,5 +1,6 @@
+import React from 'react';
 import { 
-  Wrench, CheckCircle2, XCircle, 
+  Wrench, CheckCircle2, XCircle, Clock, 
   ChevronRight, ChevronDown, Play,
   FolderOpen, Search, Pencil, Trash2,
   GitBranch, GitCommit, GitMerge, ListChecks,
@@ -56,10 +57,12 @@ export function ToolHistoryPanel({ items }: ToolHistoryPanelProps) {
           const Icon = TOOL_ICONS[item.tool] || TOOL_ICONS.default;
           return (
             <div key={item.id} className="relative pl-6 group">
+              {/* 连接线 */}
               {idx < items.length - 1 && (
                 <div className="absolute left-[11px] top-[24px] bottom-[-16px] w-[1px] bg-border group-hover:bg-primary/30 transition-colors" />
               )}
               
+              {/* 状态圆点/图标 */}
               <div className={cn(
                 "absolute left-0 top-1 w-6 h-6 rounded-full border bg-background flex items-center justify-center z-10",
                 item.status === 'running' && "border-primary text-primary animate-pulse",

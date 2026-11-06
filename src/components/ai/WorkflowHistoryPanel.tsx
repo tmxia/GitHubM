@@ -41,6 +41,8 @@ import {
 import { cn } from '@/lib/utils';
 import i18n from "@/i18n";
 
+// ── 类型 ──────────────────────────────────────────────────────────────────
+
 interface WorkflowRow {
   id: string;
   user_id: string;
@@ -72,9 +74,13 @@ interface StepRow {
 interface Props {
   userId: string;
   onResume?: (workflowId: string, taskSummary: string) => void;
+  /** 值变化时自动重新拉取列表（切换到本 Tab 时递增即可） */
   refreshTrigger?: number;
+  /** 加载完成后上报可恢复任务数量 */
   onInterruptedCount?: (count: number) => void;
 }
+
+// ── 辅助 ──────────────────────────────────────────────────────────────────
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '—';
@@ -109,6 +115,8 @@ function StepStatusIcon({ status }: { status: StepRow['status'] }) {
     default:        return <Clock        className="w-4 h-4 text-muted-foreground shrink-0" />;
   }
 }
+
+// ── 步骤详情弹窗 ──────────────────────────────────────────────────────────
 
 function StepDetailDialog({
   workflow,
@@ -196,6 +204,8 @@ function StepDetailDialog({
   );
 }
 
+// ── 主组件 ────────────────────────────────────────────────────────────────
+
 export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger, onInterruptedCount }: Props) {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -210,15 +220,19 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
     const rows = (data as WorkflowRow[]) ?? [];
     setWorkflows(rows);
     setLoading(false);
+    // 上报可恢复数量
     const resumable = rows.filter(w => w.interrupted || w.status === 'running').length;
     onInterruptedCount?.(resumable);
   }, [userId, onInterruptedCount]);
 
+  // 初始加载
   useEffect(() => { load(); }, [load]);
 
+  // refreshTrigger 变化时重新拉取（切换到 Tab 时触发）
   useEffect(() => {
     if (refreshTrigger === undefined) return;
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTrigger]);
 
   const handleDelete = async (id: string) => {
@@ -232,12 +246,15 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
     return w.status === statusFilter;
   });
 
+  // 可恢复任务数（侧边栏角标用）— 包含 interrupted 或 running（超时未完成）
   const interruptedCount = workflows.filter(w => w.interrupted || w.status === 'running').length;
 
+  // 只有最新一条可恢复任务才允许恢复（workflows 已按 created_at DESC 排序）
   const latestResumableId = workflows.find(w => w.interrupted || w.status === 'running')?.id ?? null;
 
   return (
     <div className="flex flex-col h-full">
+      {/* 顶部工具栏 */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
         <Select
           value={statusFilter}
@@ -268,6 +285,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
         </Button>
       </div>
 
+      {/* 列表 */}
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1.5">
           {loading && workflows.length === 0 && (
@@ -291,6 +309,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
             >
               <div className="flex items-start gap-2">
                 <div className="flex-1 min-w-0 space-y-1">
+                  {/* 摘要 + 状态 */}
                   <div className="flex items-start gap-2">
                     <p className="text-sm flex-1 min-w-0 line-clamp-2 text-pretty leading-snug">
                       {wf.task_summary}
@@ -304,6 +323,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                     </div>
                   </div>
 
+                  {/* 仓库 + 步骤统计 */}
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="truncate max-w-[120px]">{wf.repo}</span>
                     <span>
@@ -311,6 +331,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                     </span>
                   </div>
 
+                  {/* 时间 */}
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span>{fmtTime(wf.created_at)}</span>
                     {wf.finished_at && (
@@ -318,6 +339,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                     )}
                   </div>
 
+                  {/* 恢复执行按钮：仅最新一条可恢复任务显示 */}
                   {wf.id === latestResumableId && onResume && (
                     <Button
                       variant="outline"
@@ -333,6 +355,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                   )}
                 </div>
 
+                {/* 操作按钮 */}
                 <div className="flex items-center gap-1 shrink-0 ml-1">
                   <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                   <AlertDialog>
@@ -340,7 +363,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 transition-colors"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={e => e.stopPropagation()}
                       >
                         <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
@@ -355,10 +378,10 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
                         <AlertDialogDescription>
                           {i18n.t('此操作不可撤销，将永久删除该工作流及所有步骤记录。')}</AlertDialogDescription>
                       </AlertDialogHeader>
-                      <AlertDialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0">
-                        <AlertDialogCancel className="min-w-[80px] px-4">{i18n.t('取消')}</AlertDialogCancel>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{i18n.t('取消')}</AlertDialogCancel>
                         <AlertDialogAction
-                          className="min-w-[100px] px-6 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           onClick={() => handleDelete(wf.id)}
                         >
                           {i18n.t('删除')}</AlertDialogAction>
@@ -372,6 +395,7 @@ export default function WorkflowHistoryPanel({ userId, onResume, refreshTrigger,
         </div>
       </ScrollArea>
 
+      {/* 步骤详情弹窗 */}
       <StepDetailDialog
         workflow={selected}
         open={detailOpen}

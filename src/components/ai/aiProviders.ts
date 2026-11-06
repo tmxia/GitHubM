@@ -1,8 +1,12 @@
-
-
+// AI 平台直连层（已脱离 Supabase 后端）
+// - 各平台 OpenAI 兼容端点地址构建
+// - 模型列表拉取（前端直连各家官方 API）
+// - 连接测试（最小 chat 请求）
+// 所有请求均由浏览器直接发出，API Key 仅保存在本机 localStorage。
 import type { ModelType } from './aiTypes';
 import i18n from "@/i18n";
 
+// ── 各平台 OpenAI 兼容 Chat Completions 端点 ──────────────────────────────
 export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
   switch (type) {
     case 'deepseek': return 'https://api.deepseek.com/v1/chat/completions';
@@ -15,6 +19,7 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
   }
 }
 
+/** 从 chat/completions 端点推导 models 列表端点（OpenAI 兼容） */
 export function getProviderModelsUrl(type: ModelType, endpoint?: string): string {
   switch (type) {
     case 'deepseek': return 'https://api.deepseek.com/v1/models';
@@ -26,6 +31,7 @@ export function getProviderModelsUrl(type: ModelType, endpoint?: string): string
   }
 }
 
+/** 构建请求认证头（gemini OpenAI 兼容端点用 Bearer，其余同样） */
 function authHeaders(apiKey: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -33,6 +39,9 @@ function authHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+// ── 模型列表 ───────────────────────────────────────────────────────────────
+
+/** 解析各家 /models 响应（兼容 {data:[{id}]} 与直接数组两种格式） */
 function parseModelsList(json: unknown): Array<{ id: string; name: string }> {
   const raw = json as { data?: Array<{ id?: string; name?: string }> } | Array<{ id?: string; name?: string }>;
   let items: Array<{ id?: string; name?: string }> = [];
@@ -43,6 +52,10 @@ function parseModelsList(json: unknown): Array<{ id: string; name: string }> {
     .map(m => ({ id: m.id as string, name: m.name || m.id as string }));
 }
 
+/**
+ * 前端直连获取指定平台的可用模型列表。
+ * 已脱离 Edge Function list-ai-models。
+ */
 export async function fetchModelsFromAPI(
   type: ModelType,
   apiKey: string,
@@ -70,12 +83,18 @@ export async function fetchModelsFromAPI(
   return models;
 }
 
+// ── 连接测试 ───────────────────────────────────────────────────────────────
+
 export interface TestConnectionResult {
   success: boolean;
   elapsedMs?: number;
   error?: string;
 }
 
+/**
+ * 前端直连测试模型连接：发送最小 chat 请求验证 key 与端点可用性。
+ * 已脱离 Edge Function ai-test-connection。
+ */
 export async function testProviderConnection(
   type: ModelType,
   apiKey: string,
@@ -111,6 +130,7 @@ export async function testProviderConnection(
 
     if (res.ok) return { success: true, elapsedMs };
 
+    // 401/403：key 无效；404：端点错误；其余 4xx：已连通但请求参数（如模型名）有问题
     let detail = '';
     try {
       const j = await res.json() as { error?: { message?: string } | string };

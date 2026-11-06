@@ -1,3 +1,5 @@
+// 内联任务活动面板 —— 直接嵌入 AI 聊天气泡
+// 在移动端和桌面端均可见，无需打开侧边面板
 import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2, XCircle, Loader2, Clock,
@@ -12,6 +14,7 @@ import { cn } from '@/lib/utils';
 import type { InlineStep, InlineTool } from './aiTypes';
 import i18n from "@/i18n";
 
+// ── 工具图标映射 ───────────────────────────────────────────────────────────────
 const TOOL_ICONS: Record<string, React.ElementType> = {
   list_files: FolderOpen,
   read_file: FileSearch,
@@ -40,6 +43,7 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   list_actions_secrets: Wrench,
 };
 
+// ── 步骤状态图标 ───────────────────────────────────────────────────────────────
 function StepIcon({ status }: { status: InlineStep['status'] }) {
   if (status === 'running') return <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />;
   if (status === 'done') return <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />;
@@ -47,6 +51,7 @@ function StepIcon({ status }: { status: InlineStep['status'] }) {
   return <Circle className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />;
 }
 
+// ── 工具调用卡片 ──────────────────────────────────────────────────────────────
 function ToolRow({ tool }: { tool: InlineTool }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = TOOL_ICONS[tool.tool] ?? Terminal;
@@ -58,7 +63,9 @@ function ToolRow({ tool }: { tool: InlineTool }) {
       tool.status === 'success' && 'border-green-500/20 bg-green-500/5',
       tool.status === 'fail' && 'border-destructive/20 bg-destructive/5',
     )}>
+      {/* 主行 */}
       <div className="flex items-center gap-2 px-2.5 py-1.5">
+        {/* 工具图标 */}
         <Icon className={cn(
           'w-3.5 h-3.5 shrink-0',
           tool.status === 'running' && 'text-primary',
@@ -67,6 +74,7 @@ function ToolRow({ tool }: { tool: InlineTool }) {
           tool.status === 'running' || 'opacity-80',
         )} />
 
+        {/* 名称 + hint */}
         <div className="flex-1 min-w-0">
           <span className="font-medium text-foreground">{tool.label}</span>
           {tool.hint && (
@@ -76,6 +84,7 @@ function ToolRow({ tool }: { tool: InlineTool }) {
           )}
         </div>
 
+        {/* 右侧：状态 + 耗时 */}
         <div className="flex items-center gap-1.5 shrink-0">
           {tool.status === 'running' && (
             <Loader2 className="w-3 h-3 text-primary animate-spin" />
@@ -93,6 +102,7 @@ function ToolRow({ tool }: { tool: InlineTool }) {
                 : `${(tool.elapsedMs / 1000).toFixed(1)}s`}
             </span>
           )}
+          {/* 展开结果按钮 */}
           {tool.result && (
             <button
               onClick={() => setExpanded(v => !v)}
@@ -107,6 +117,7 @@ function ToolRow({ tool }: { tool: InlineTool }) {
         </div>
       </div>
 
+      {/* 展开的结果区域 */}
       {expanded && tool.result && (
         <div className="px-2.5 pb-2 border-t border-border/40 mt-0.5">
           <div className="mt-1.5 bg-muted/60 rounded p-2 font-mono text-[10px] whitespace-pre-wrap break-all max-h-40 overflow-y-auto text-foreground/80">
@@ -118,9 +129,11 @@ function ToolRow({ tool }: { tool: InlineTool }) {
   );
 }
 
+// ── 主组件 ────────────────────────────────────────────────────────────────────
 interface InlineActivityPanelProps {
   inlinePlan?: InlineStep[];
   inlineTools?: InlineTool[];
+  /** 是否正在 streaming（影响折叠默认状态） */
   streaming?: boolean;
 }
 
@@ -132,14 +145,17 @@ export default function InlineActivityPanel({
   const [planCollapsed, setPlanCollapsed] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
 
+  // 流式结束后自动折叠任务面板，避免遮挡最终回答文字
   useEffect(() => {
     if (streaming === false) {
+      // 延迟 400ms 折叠，让用户感知到任务完成状态后再收起
       const t = setTimeout(() => {
         setPlanCollapsed(true);
         setToolsCollapsed(true);
       }, 400);
       return () => clearTimeout(t);
     } else {
+      // 新任务开始时重新展开
       setPlanCollapsed(false);
       setToolsCollapsed(false);
     }
@@ -150,20 +166,25 @@ export default function InlineActivityPanel({
 
   if (!hasPlan && !hasTools) return null;
 
+  // 正在执行的步骤数 / 已完成数
   const doneSteps = inlinePlan?.filter(s => s.status === 'done' || s.status === 'error').length ?? 0;
   const totalSteps = inlinePlan?.length ?? 0;
+  // 正在执行的工具
   const runningTool = inlineTools?.find(t => t.status === 'running');
 
   return (
     <div className="mb-3 space-y-2">
+      {/* ── 任务计划 ─────────────────────────────────────────────────── */}
       {hasPlan && (
         <div className="rounded-xl border border-border/60 overflow-hidden bg-background/50">
+          {/* 标题行（可折叠） */}
           <button
             onClick={() => setPlanCollapsed(v => !v)}
             className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-muted/40 transition-colors"
           >
             <ListChecks className="w-3.5 h-3.5 text-primary shrink-0" />
             <span className="flex-1 text-left">{i18n.t('任务计划')}</span>
+            {/* 进度徽章 */}
             <span className={cn(
               'text-[10px] font-mono px-1.5 py-0.5 rounded-full',
               doneSteps === totalSteps
@@ -177,10 +198,12 @@ export default function InlineActivityPanel({
               : <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />}
           </button>
 
+          {/* 步骤列表 */}
           {!planCollapsed && (
             <div className="px-3 pb-2.5 space-y-1.5 border-t border-border/40">
               {inlinePlan.map((step, idx) => (
                 <div key={step.id} className="flex items-start gap-2 pt-1.5">
+                  {/* 竖线连接 */}
                   <div className="relative flex flex-col items-center shrink-0 mt-0.5">
                     <StepIcon status={step.status} />
                     {idx < inlinePlan.length - 1 && (
@@ -215,8 +238,10 @@ export default function InlineActivityPanel({
         </div>
       )}
 
+      {/* ── 工具调用列表 ─────────────────────────────────────────────── */}
       {hasTools && (
         <div className="rounded-xl border border-border/60 overflow-hidden bg-background/50">
+          {/* 标题行（可折叠） */}
           <button
             onClick={() => setToolsCollapsed(v => !v)}
             className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-muted/40 transition-colors"
@@ -244,11 +269,13 @@ export default function InlineActivityPanel({
               : <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />}
           </button>
 
+          {/* 工具卡片列表 */}
           {!toolsCollapsed && (
             <div className="px-2.5 pb-2.5 space-y-1.5 border-t border-border/40 pt-2">
               {inlineTools.map(tool => (
                 <ToolRow key={tool.id} tool={tool} />
               ))}
+              {/* 正在运行时的占位动效 */}
               {streaming && runningTool && (
                 <div className="flex items-center gap-2 px-2.5 py-1 text-[10px] text-muted-foreground">
                   <Clock className="w-3 h-3 animate-pulse" />

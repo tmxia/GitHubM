@@ -1,3 +1,5 @@
+// 流式响应性能指标条
+// 在每次 AI 回答完成后显示 TTFT、流速、事件总数等调试信息
 import React from 'react';
 import { Gauge, Timer, Hash, Wifi } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -16,6 +18,7 @@ function fmt(n: number, unit: string) {
 const StreamMetricsBar = React.memo(function StreamMetricsBar({ metrics, className }: StreamMetricsBarProps) {
   const { ttft, throughput, totalSeq, interruptReason } = metrics;
 
+  // 仅在有至少一个有效指标时渲染
   if (!ttft && !throughput && !totalSeq) return null;
 
   const items: { icon: React.ElementType; label: string; value: string; title: string }[] = [];

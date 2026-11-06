@@ -1,3 +1,4 @@
+// 新建分支对话框：memo 优化
 import { memo, useState, useEffect } from 'react';
 import { GitBranch, Plus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';

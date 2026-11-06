@@ -1,3 +1,4 @@
+// 历史执行日志面板：展示本 session 已持久化的工具调用记录，支持按轮次折叠 + 断点恢复
 import { useEffect, useState, useCallback } from 'react';
 import {
   Wrench, CheckCircle2, XCircle, Clock, History,
@@ -12,6 +13,8 @@ import { cn } from '@/lib/utils';
 import { fetchToolExecutionLogs, fetchLatestSnapshot } from '@/components/ai/aiSupabase';
 import type { ToolHistoryItem } from './aiTypes';
 import i18n from "@/i18n";
+
+// ── 类型 ─────────────────────────────────────────────────────────────────────
 
 interface LogRow {
   id: string;
@@ -36,9 +39,13 @@ interface TurnGroup {
 
 interface RunHistoryPanelProps {
   sessionId: string | null;
+  /** 断点恢复回调：将快照中的 toolHistory 写回父组件 */
   onRestore: (toolHistory: ToolHistoryItem[]) => void;
+  /** 是否正在流式中（流式中时禁用恢复按钮） */
   isStreaming: boolean;
 }
+
+// ── 工具图标映射 ──────────────────────────────────────────────────────────────
 
 const TOOL_ICONS: Record<string, React.ElementType> = {
   list_files: FolderOpen,
@@ -59,6 +66,8 @@ function getToolIcon(toolName: string): React.ElementType {
   return TOOL_ICONS[toolName] ?? Terminal;
 }
 
+// ── 格式化时间 ────────────────────────────────────────────────────────────────
+
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -71,11 +80,14 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ' ' + formatTime(iso);
 }
 
+// ── TurnGroup 折叠行 ──────────────────────────────────────────────────────────
+
 function TurnGroupRow({ group, defaultOpen }: { group: TurnGroup; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
 
   return (
     <div className="border border-border/60 rounded-lg overflow-hidden">
+      {/* 折叠头 */}
       <button
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/60 transition-colors text-left"
@@ -99,12 +111,14 @@ function TurnGroupRow({ group, defaultOpen }: { group: TurnGroup; defaultOpen?: 
         </div>
       </button>
 
+      {/* 展开内容 */}
       {open && (
         <div className="divide-y divide-border/40">
           {group.items.map((item, idx) => {
             const Icon = getToolIcon(item.tool_name);
             return (
               <div key={item.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/20 transition-colors">
+                {/* 序号 + 状态图标 */}
                 <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5">
                   <span className="text-[9px] font-mono text-muted-foreground/60 w-4 text-center">{idx + 1}</span>
                   <div className={cn(
@@ -123,6 +137,7 @@ function TurnGroupRow({ group, defaultOpen }: { group: TurnGroup; defaultOpen?: 
                   </div>
                 </div>
 
+                {/* 内容 */}
                 <div className="flex-1 min-w-0 space-y-0.5">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Icon className="w-3 h-3 text-muted-foreground shrink-0" />
@@ -160,6 +175,8 @@ function TurnGroupRow({ group, defaultOpen }: { group: TurnGroup; defaultOpen?: 
   );
 }
 
+// ── 主组件 ────────────────────────────────────────────────────────────────────
+
 export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistoryPanelProps) {
   const [groups, setGroups] = useState<TurnGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -171,6 +188,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
     setLoading(true);
     try {
       const rows = await fetchToolExecutionLogs(sessionId);
+      // 按 turn_id 分组
       const map = new Map<string, LogRow[]>();
       for (const row of rows) {
         const arr = map.get(row.turn_id) ?? [];
@@ -187,6 +205,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
           errorCount: items.filter(i => i.status === 'error').length,
         });
       }
+      // 按时间降序（最新在前）
       result.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
       setGroups(result);
       setLastRefreshed(new Date());
@@ -195,6 +214,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
     }
   }, [sessionId]);
 
+  // 初始加载
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
@@ -218,6 +238,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
 
   return (
     <div className="flex flex-col h-full bg-background border-l">
+      {/* 头部 */}
       <div className="p-3 border-b bg-muted/20 flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <History className="w-3.5 h-3.5 shrink-0" />
@@ -252,6 +273,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
         </div>
       </div>
 
+      {/* 统计条 */}
       {totalTools > 0 && (
         <div className="px-3 py-2 border-b flex items-center gap-3 shrink-0 bg-muted/10">
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -268,6 +290,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
         </div>
       )}
 
+      {/* 内容区 */}
       <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin">
         {!sessionId ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
@@ -303,6 +326,7 @@ export function RunHistoryPanel({ sessionId, onRestore, isStreaming }: RunHistor
         )}
       </div>
 
+      {/* 底部：最近刷新时间 + 恢复按钮 */}
       {groups.length > 0 && (
         <div className="px-3 py-2 border-t bg-muted/10 flex items-center justify-between gap-2 shrink-0">
           {lastRefreshed && (
