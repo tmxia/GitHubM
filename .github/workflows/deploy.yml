@@ -78,7 +78,7 @@ jobs:
           rm -f pnpm-lock.yaml
 
       - name: 安装依赖
-        run: pnpm install --registry=https://registry.npmmirror.com
+        run: pnpm install --registry=https://registry.npmjs.org
 
       - name: 构建 Web 应用（正常版 + 精简版）
         run: |
