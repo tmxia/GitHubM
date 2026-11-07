@@ -1,0 +1,558 @@
+[33mcommit e83b45d734bbe273665909631fa513b126a4375c[m[33m ([m[1;33mtag: [m[1;33mv1.0.463[m[33m)[m
+Author: 练习时长两年半的水怪 <140933838+qq5855144@users.noreply.github.com>
+Date:   Sat Nov 7 01:10:49 2026 +0800
+
+    feat(download): 自动测速并选择最快代理 (#53)
+    
+    默认开启自动代理测速，内置 wget.la/gh-proxy.com/ghproxy.net，10分钟缓存，全部失败回退直连；应用更新也复用最快代理。
+---
+ src/lib/githubDownload.ts       | 203 [32m++++++++[m[31m-[m
+ src/pages/SettingsPage.tsx      | 138 [32m+++++[m[31m-[m
+ .../download-proxy.test.ts      |  45 [32m++[m
+ 3 files changed, 374 insertions(+), 12 deletions(-)
+
+[1mdiff --git a/src/lib/githubDownload.ts b/src/lib/githubDownload.ts[m
+[1mindex 7a18c93c..45534e68 100644[m
+[1m--- a/src/lib/githubDownload.ts[m
+[1m+++ b/src/lib/githubDownload.ts[m
+[36m@@ -3,8 +3,37 @@[m [mimport { getBranch, getGitBlob, getGitTree } from '@/services/github';[m
+ [m
+ const DOWNLOAD_PROXY_ENABLED_KEY = 'github_download_wget_la';[m
+ const DOWNLOAD_PROXY_URL_KEY = 'github_download_accel_url';[m
+[32m+[m[32mconst DOWNLOAD_PROXY_AUTO_KEY = 'github_download_proxy_auto';[m
+[32m+[m[32mconst DOWNLOAD_PROXY_CACHE_KEY = 'github_download_proxy_fastest_v1';[m
+[32m+[m[32mconst DOWNLOAD_PROXY_TEST_URL = 'https://raw.githubusercontent.com/octocat/Hello-World/master/README';[m
+[32m+[m[32mconst DOWNLOAD_PROXY_CACHE_TTL = 10 * 60 * 1000;[m
+[32m+[m[32mconst DEFAULT_PROXY_TEST_TIMEOUT = 6000;[m
+[32m+[m
+ export const DEFAULT_DOWNLOAD_PROXY_URL = 'https://wget.la/';[m
+ [m
+[32m+[m[32m/** 自动测速的内置候选；自定义地址也会加入候选列表。 */[m
+[32m+[m[32mexport const DOWNLOAD_PROXY_PRESETS = [[m
+[32m+[m[32m  { name: 'wget.la', baseUrl: 'https://wget.la/' },[m
+[32m+[m[32m  { name: 'gh-proxy.com', baseUrl: 'https://gh-proxy.com/' },[m
+[32m+[m[32m  { name: 'ghproxy.net', baseUrl: 'https://ghproxy.net/' },[m
+[32m+[m[32m] as const;[m
+[32m+[m
+[32m+[m[32mexport interface DownloadProxyTestResult {[m
+[32m+[m[32m  name: string;[m
+[32m+[m[32m  baseUrl: string;[m
+[32m+[m[32m  ok: boolean;[m
+[32m+[m[32m  latencyMs: number;[m
+[32m+[m[32m  error?: string;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mexport interface FastestDownloadProxy {[m
+[32m+[m[32m  name: string;[m
+[32m+[m[32m  baseUrl: string;[m
+[32m+[m[32m  latencyMs: number;[m
+[32m+[m[32m  testedAt: number;[m
+[32m+[m[32m  candidatesKey: string;[m
+[32m+[m[32m}[m
+[32m+[m
+ export function isDownloadProxyEnabled(): boolean {[m
+   try {[m
+     return localStorage.getItem(DOWNLOAD_PROXY_ENABLED_KEY) === '1';[m
+[36m@@ -19,6 +48,21 @@[m [mexport function setDownloadProxyEnabled(enabled: boolean): void {[m
+   } catch { /* ignore */ }[m
+ }[m
+ [m
+[32m+[m[32m/** 默认开启自动测速；显式存过 0 才使用固定代理。 */[m
+[32m+[m[32mexport function isAutoDownloadProxyEnabled(): boolean {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    return localStorage.getItem(DOWNLOAD_PROXY_AUTO_KEY) !== '0';[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    return true;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mexport function setAutoDownloadProxyEnabled(enabled: boolean): void {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    localStorage.setItem(DOWNLOAD_PROXY_AUTO_KEY, enabled ? '1' : '0');[m
+[32m+[m[32m  } catch { /* ignore */ }[m
+[32m+[m[32m}[m
+[32m+[m
+ /** 全局下载代理：支持前缀或模板，仅对公开 GitHub 资源有效 */[m
+ export function getDownloadProxyUrl(): string {[m
+   try {[m
+[36m@@ -36,15 +80,159 @@[m [mexport function setDownloadProxyUrl(value: string): void {[m
+   } catch { /* ignore */ }[m
+ }[m
+ [m
+[31m-/** 支持前缀或模板：https://proxy/、https://proxy/?url={url}、...?url={url_encoded} */[m
+[31m-export function toDownloadProxyUrl(url: string): string {[m
+[32m+[m[32mfunction normalizeProxyBase(value: string): string {[m
+[32m+[m[32m  const clean = value.trim();[m
+[32m+[m[32m  if (!clean) return '';[m
+[32m+[m[32m  if (clean.includes('{url}') || clean.includes('{url_encoded}') || clean.includes('?')) return clean;[m
+[32m+[m[32m  return `${clean.replace(/\/+$/, '')}/`;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/** 用指定代理前缀/模板包装 URL */[m
+[32m+[m[32mexport function toProxyUrl(baseUrl: string, url: string): string {[m
+   if (!/^https?:\/\//i.test(url)) return url;[m
+[31m-  const template = getDownloadProxyUrl();[m
+[32m+[m[32m  const template = normalizeProxyBase(baseUrl);[m
+[32m+[m[32m  if (!template) return url;[m
+   if (template.includes('{url_encoded}')) return template.replace('{url_encoded}', encodeURIComponent(url));[m
+   if (template.includes('{url}')) return template.replace('{url}', url);[m
+   return `${template.replace(/\/+$/, '')}/${url}`;[m
+ }[m
+ [m
+[32m+[m[32m/** 支持前缀或模板：https://proxy/、https://proxy/?url={url}、...?url={url_encoded} */[m
+[32m+[m[32mexport function toDownloadProxyUrl(url: string): string {[m
+[32m+[m[32m  return toProxyUrl(getDownloadProxyUrl(), url);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/** 候选列表：内置预设 + 用户自定义代理 */[m
+[32m+[m[32mexport function getDownloadProxyCandidates(): Array<{ name: string; baseUrl: string }> {[m
+[32m+[m[32m  const candidates = new Map<string, string>();[m
+[32m+[m[32m  for (const preset of DOWNLOAD_PROXY_PRESETS) {[m
+[32m+[m[32m    candidates.set(normalizeProxyBase(preset.baseUrl), preset.name);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  const custom = normalizeProxyBase(getDownloadProxyUrl());[m
+[32m+[m[32m  if (custom && !candidates.has(custom)) candidates.set(custom, '自定义代理');[m
+[32m+[m[32m  return Array.from(candidates, ([baseUrl, name]) => ({ name, baseUrl }));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction candidatesKey(candidates: Array<{ baseUrl: string }>): string {[m
+[32m+[m[32m  return candidates.map((item) => item.baseUrl).join('|');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction nowMs(): number {[m
+[32m+[m[32m  return typeof performance !== 'undefined' && typeof performance.now === 'function'[m
+[32m+[m[32m    ? performance.now()[m
+[32m+[m[32m    : Date.now();[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {[m
+[32m+[m[32m  const controller = new AbortController();[m
+[32m+[m[32m  const timer = setTimeout(() => controller.abort(), timeoutMs);[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    return await fetch(url, { signal: controller.signal, cache: 'no-store' });[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    clearTimeout(timer);[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mexport function getCachedFastestDownloadProxy(): FastestDownloadProxy | null {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const raw = localStorage.getItem(DOWNLOAD_PROXY_CACHE_KEY);[m
+[32m+[m[32m    if (!raw) return null;[m
+[32m+[m[32m    const parsed = JSON.parse(raw) as FastestDownloadProxy;[m
+[32m+[m[32m    if (!parsed?.baseUrl || !parsed?.testedAt || !parsed?.candidatesKey) return null;[m
+[32m+[m[32m    return parsed;[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    return null;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mlet proxyTestInFlight: Promise<{ results: DownloadProxyTestResult[]; selected: FastestDownloadProxy }> | null = null;[m
+[32m+[m
+[32m+[m[32m/** 并发测试全部候选，延迟最低且响应有效的代理胜出。 */[m
+[32m+[m[32mexport function testFastestDownloadProxy(options: { timeoutMs?: number } = {}): Promise<{[m
+[32m+[m[32m  results: DownloadProxyTestResult[];[m
+[32m+[m[32m  selected: FastestDownloadProxy;[m
+[32m+[m[32m}> {[m
+[32m+[m[32m  if (proxyTestInFlight) return proxyTestInFlight;[m
+[32m+[m
+[32m+[m[32m  const timeoutMs = options.timeoutMs ?? DEFAULT_PROXY_TEST_TIMEOUT;[m
+[32m+[m[32m  const candidates = getDownloadProxyCandidates();[m
+[32m+[m[32m  proxyTestInFlight = (async () => {[m
+[32m+[m[32m    const results = await Promise.all(candidates.map(async (candidate): Promise<DownloadProxyTestResult> => {[m
+[32m+[m[32m      const started = nowMs();[m
+[32m+[m[32m      try {[m
+[32m+[m[32m        const res = await fetchWithTimeout(toProxyUrl(candidate.baseUrl, DOWNLOAD_PROXY_TEST_URL), timeoutMs);[m
+[32m+[m[32m        if (!res.ok) throw new Error(`HTTP ${res.status}`);[m
+[32m+[m[32m        const text = await res.text();[m
+[32m+[m[32m        if (!text.trim()) throw new Error('空响应');[m
+[32m+[m[32m        return {[m
+[32m+[m[32m          ...candidate,[m
+[32m+[m[32m          ok: true,[m
+[32m+[m[32m          latencyMs: Math.max(1, Math.round(nowMs() - started)),[m
+[32m+[m[32m        };[m
+[32m+[m[32m      } catch (err) {[m
+[32m+[m[32m        return {[m
+[32m+[m[32m          ...candidate,[m
+[32m+[m[32m          ok: false,[m
+[32m+[m[32m          latencyMs: Math.max(1, Math.round(nowMs() - started)),[m
+[32m+[m[32m          error: err instanceof Error ? err.message : '测试失败',[m
+[32m+[m[32m        };[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }));[m
+[32m+[m
+[32m+[m[32m    const successful = results[m
+[32m+[m[32m      .filter((result) => result.ok)[m
+[32m+[m[32m      .sort((a, b) => a.latencyMs - b.latencyMs);[m
+[32m+[m[32m    const best = successful[0];[m
+[32m+[m[32m    const fallbackBase = normalizeProxyBase(getDownloadProxyUrl()) || DEFAULT_DOWNLOAD_PROXY_URL;[m
+[32m+[m[32m    const selected: FastestDownloadProxy = best[m
+[32m+[m[32m      ? {[m
+[32m+[m[32m          name: best.name,[m
+[32m+[m[32m          baseUrl: best.baseUrl,[m
+[32m+[m[32m          latencyMs: best.latencyMs,[m
+[32m+[m[32m          testedAt: Date.now(),[m
+[32m+[m[32m          candidatesKey: candidatesKey(candidates),[m
+[32m+[m[32m        }[m
+[32m+[m[32m      : {[m
+[32m+[m[32m          name: '直连回退',[m
+[32m+[m[32m          baseUrl: fallbackBase,[m
+[32m+[m[32m          latencyMs: -1,[m
+[32m+[m[32m          testedAt: Date.now(),[m
+[32m+[m[32m          candidatesKey: candidatesKey(candidates),[m
+[32m+[m[32m        };[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      localStorage.setItem(DOWNLOAD_PROXY_CACHE_KEY, JSON.stringify(selected));[m
+[32m+[m[32m    } catch { /* ignore */ }[m
+[32m+[m
+[32m+[m[32m    return { results, selected };[m
+[32m+[m[32m  })().finally(() => {[m
+[32m+[m[32m    proxyTestInFlight = null;[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  return proxyTestInFlight;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/** 自动模式：优先使用10分钟内的测速缓存，到期后重新测速。 */[m
+[32m+[m[32mexport async function resolveDownloadProxyUrl([m
+[32m+[m[32m  sourceUrl: string,[m
+[32m+[m[32m  options: { force?: boolean; timeoutMs?: number } = {}[m
+[32m+[m[32m): Promise<string> {[m
+[32m+[m[32m  if (!isDownloadProxyEnabled() || !isGitHubDownloadUrl(sourceUrl)) return sourceUrl;[m
+[32m+[m[32m  if (!isAutoDownloadProxyEnabled()) return toDownloadProxyUrl(sourceUrl);[m
+[32m+[m
+[32m+[m[32m  const candidates = getDownloadProxyCandidates();[m
+[32m+[m[32m  const key = candidatesKey(candidates);[m
+[32m+[m[32m  if (!options.force) {[m
+[32m+[m[32m    const cached = getCachedFastestDownloadProxy();[m
+[32m+[m[32m    if (cached && cached.candidatesKey === key && Date.now() - cached.testedAt < DOWNLOAD_PROXY_CACHE_TTL) {[m
+[32m+[m[32m      return cached.latencyMs < 0 ? sourceUrl : toProxyUrl(cached.baseUrl, sourceUrl);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const { selected } = await testFastestDownloadProxy({ timeoutMs: options.timeoutMs });[m
+[32m+[m[32m  return selected.latencyMs < 0 ? sourceUrl : toProxyUrl(selected.baseUrl, sourceUrl);[m
+[32m+[m[32m}[m
+[32m+[m
+ function isGitHubDownloadUrl(url: string): boolean {[m
+   return /^https:\/\/(github\.com|raw\.githubusercontent\.com|objects\.githubusercontent\.com)\//i.test(url);[m
+ }[m
+[36m@@ -64,16 +252,17 @@[m [mfunction triggerBlobDownload(blob: Blob, filename: string): void {[m
+  * 带认证下载文件。[m
+  * - AndroidBridge：交给原生 DownloadManager[m
+  * - 浏览器：fetch + Bearer token → Blob → a[download][m
+[31m- * - 全局下载代理：仅用于公开 GitHub 资源，不向代理发送 token[m
+[32m+[m[32m * - 全局下载代理：自动模式会先测速，且不向代理发送 token[m
+  */[m
+ export async function downloadGithubFile([m
+   url: string,[m
+   filename: string,[m
+   token: string,[m
+[31m-  options: { accelerate?: boolean } = {},[m
+ ): Promise<void> {[m
+[31m-  const accelerate = (options.accelerate ?? isDownloadProxyEnabled()) && isGitHubDownloadUrl(url);[m
+[31m-  const finalUrl = accelerate ? toDownloadProxyUrl(url) : url;[m
+[32m+[m[32m  const finalUrl = isDownloadProxyEnabled() && isGitHubDownloadUrl(url)[m
+[32m+[m[32m    ? await resolveDownloadProxyUrl(url)[m
+[32m+[m[32m    : url;[m
+[32m+[m[32m  const accelerate = finalUrl !== url;[m
+   const bridge = (window as unknown as {[m
+     AndroidBridge?: { downloadFile?: (u: string, f: string, t: string) => void }[m
+   }).AndroidBridge;[m
+[1mdiff --git a/src/pages/SettingsPage.tsx b/src/pages/SettingsPage.tsx[m
+[1mindex 66513cf6..6a6a2a54 100644[m
+[1m--- a/src/pages/SettingsPage.tsx[m
+[1m+++ b/src/pages/SettingsPage.tsx[m
+[36m@@ -55,10 +55,18 @@[m [mimport { formatCostUsd, getModelPrice, SOURCES } from '@/components/ai/modelPric[m
+ import { fetchVisitStats, type DailyStats, type VisitSummary } from '@/lib/visitStats';[m
+ import {[m
+   DEFAULT_DOWNLOAD_PROXY_URL,[m
+[32m+[m[32m  downloadGithubFile,[m
+[32m+[m[32m  getCachedFastestDownloadProxy,[m
+[32m+[m[32m  getDownloadProxyCandidates,[m
+   getDownloadProxyUrl,[m
+[32m+[m[32m  isAutoDownloadProxyEnabled,[m
+   isDownloadProxyEnabled,[m
+[32m+[m[32m  setAutoDownloadProxyEnabled,[m
+   setDownloadProxyEnabled,[m
+   setDownloadProxyUrl,[m
+[32m+[m[32m  testFastestDownloadProxy,[m
+[32m+[m[32m  type DownloadProxyTestResult,[m
+[32m+[m[32m  type FastestDownloadProxy,[m
+ } from '@/lib/githubDownload';[m
+ import {[m
+   XAxis,[m
+[36m@@ -257,6 +265,10 @@[m [mexport default function SettingsPage() {[m
+   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadCollapsed());[m
+   const [downloadProxyEnabled, setDownloadProxyEnabledState] = useState(() => isDownloadProxyEnabled());[m
+   const [downloadProxyUrlDraft, setDownloadProxyUrlDraft] = useState(() => getDownloadProxyUrl());[m
+[32m+[m[32m  const [autoDownloadProxy, setAutoDownloadProxyState] = useState(() => isAutoDownloadProxyEnabled());[m
+[32m+[m[32m  const [proxyTesting, setProxyTesting] = useState(false);[m
+[32m+[m[32m  const [proxyTestResults, setProxyTestResults] = useState<DownloadProxyTestResult[]>([]);[m
+[32m+[m[32m  const [selectedProxy, setSelectedProxy] = useState<FastestDownloadProxy | null>(() => getCachedFastestDownloadProxy());[m
+ [m
+   const toggleSection = (id: string) => {[m
+     setCollapsed(prev => {[m
+[36m@@ -428,22 +440,54 @@[m [mexport default function SettingsPage() {[m
+     localStorage.setItem('app_language', lng);[m
+   };[m
+ [m
+[32m+[m[32m  const handleTestDownloadProxy = async () => {[m
+[32m+[m[32m    setProxyTesting(true);[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      const { results, selected } = await testFastestDownloadProxy();[m
+[32m+[m[32m      const sorted = [...results].sort((a, b) => {[m
+[32m+[m[32m        if (a.ok !== b.ok) return a.ok ? -1 : 1;[m
+[32m+[m[32m        return a.latencyMs - b.latencyMs;[m
+[32m+[m[32m      });[m
+[32m+[m[32m      setProxyTestResults(sorted);[m
+[32m+[m[32m      setSelectedProxy(selected);[m
+[32m+[m[32m      if (selected.latencyMs > 0) {[m
+[32m+[m[32m        toast.success(`最快代理：${selected.name}（${selected.latencyMs} ms）`);[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        toast.error('代理测速全部失败，已回退直连下载');[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch (err) {[m
+[32m+[m[32m      toast.error(err instanceof Error ? `代理测速失败：${err.message}` : '代理测速失败');[m
+[32m+[m[32m    } finally {[m
+[32m+[m[32m      setProxyTesting(false);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  };[m
+[32m+[m
+[32m+[m[32m  const handleToggleAutoDownloadProxy = (checked: boolean) => {[m
+[32m+[m[32m    setAutoDownloadProxyState(checked);[m
+[32m+[m[32m    setAutoDownloadProxyEnabled(checked);[m
+[32m+[m[32m    toast.success(checked ? '已开启自动选择最快代理' : '已切换为固定代理');[m
+[32m+[m[32m    if (checked) void handleTestDownloadProxy();[m
+[32m+[m[32m  };[m
+[32m+[m
+   const handleToggleDownloadProxy = (checked: boolean) => {[m
+     setDownloadProxyEnabledState(checked);[m
+     setDownloadProxyEnabled(checked);[m
+     toast.success(checked ? '全局下载代理已开启' : '全局下载代理已关闭');[m
+[32m+[m[32m    if (checked && autoDownloadProxy) void handleTestDownloadProxy();[m
+   };[m
+ [m
+   const handleSaveDownloadProxy = () => {[m
+     setDownloadProxyUrl(downloadProxyUrlDraft);[m
+     setDownloadProxyUrlDraft(getDownloadProxyUrl());[m
+     toast.success('下载代理地址已保存');[m
+[32m+[m[32m    if (autoDownloadProxy) void handleTestDownloadProxy();[m
+   };[m
+ [m
+   const handleResetDownloadProxy = () => {[m
+     setDownloadProxyUrl('');[m
+     setDownloadProxyUrlDraft(DEFAULT_DOWNLOAD_PROXY_URL);[m
+     toast.success('已恢复默认下载代理');[m
+[32m+[m[32m    if (autoDownloadProxy) void handleTestDownloadProxy();[m
+   };[m
+ [m
+   return ([m
+[36m@@ -708,10 +752,76 @@[m [mexport default function SettingsPage() {[m
+           </div>[m
+         </div>[m
+ [m
+[32m+[m[32m        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-secondary/30 p-3">[m
+[32m+[m[32m          <div className="min-w-0">[m
+[32m+[m[32m            <p className="text-sm font-medium text-foreground">自动选择最快代理</p>[m
+[32m+[m[32m            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">[m
+[32m+[m[32m              下载前自动测试候选代理并选择延迟最低的一个，结果缓存 10 分钟。[m
+[32m+[m[32m            </p>[m
+[32m+[m[32m          </div>[m
+[32m+[m[32m          <Switch[m
+[32m+[m[32m            checked={autoDownloadProxy}[m
+[32m+[m[32m            onCheckedChange={handleToggleAutoDownloadProxy}[m
+[32m+[m[32m            aria-label="自动选择最快下载代理"[m
+[32m+[m[32m          />[m
+[32m+[m[32m        </div>[m
+[32m+[m
+[32m+[m[32m        {autoDownloadProxy && ([m
+[32m+[m[32m          <div className="space-y-2">[m
+[32m+[m[32m            <div className="flex items-center justify-between gap-2">[m
+[32m+[m[32m              <div className="text-xs text-muted-foreground min-w-0">[m
+[32m+[m[32m                当前选择：[m
+[32m+[m[32m                <span className="text-foreground font-medium">[m
+[32m+[m[32m                  {selectedProxy[m
+[32m+[m[32m                    ? `${selectedProxy.name}${selectedProxy.latencyMs > 0 ? ` · ${selectedProxy.latencyMs} ms` : ' · 直连回退'}`[m
+[32m+[m[32m                    : proxyTesting ? '测速中…' : '尚未测速（下载时自动测速）'}[m
+[32m+[m[32m                </span>[m
+[32m+[m[32m              </div>[m
+[32m+[m[32m              <Button[m
+[32m+[m[32m                size="sm"[m
+[32m+[m[32m                variant="outline"[m
+[32m+[m[32m                className="border-border hover:bg-secondary h-7 text-xs shrink-0"[m
+[32m+[m[32m                onClick={() => void handleTestDownloadProxy()}[m
+[32m+[m[32m                disabled={proxyTesting}[m
+[32m+[m[32m              >[m
+[32m+[m[32m                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${proxyTesting ? 'animate-spin' : ''}`} />[m
+[32m+[m[32m                {proxyTesting ? '测速中…' : '测速'}[m
+[32m+[m[32m              </Button>[m
+[32m+[m[32m            </div>[m
+[32m+[m[32m            <p className="text-[11px] text-muted-foreground">[m
+[32m+[m[32m              候选：{getDownloadProxyCandidates().map((item) => item.name).join(' / ')}[m
+[32m+[m[32m            </p>[m
+[32m+[m[32m            {proxyTestResults.length > 0 && ([m
+[32m+[m[32m              <div className="space-y-1">[m
+[32m+[m[32m                {proxyTestResults.map((result) => {[m
+[32m+[m[32m                  const isBest = selectedProxy?.baseUrl === result.baseUrl && result.ok;[m
+[32m+[m[32m                  return ([m
+[32m+[m[32m                    <div[m
+[32m+[m[32m                      key={result.baseUrl}[m
+[32m+[m[32m                      className={cn([m
+[32m+[m[32m                        'flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs',[m
+[32m+[m[32m                        isBest ? 'border-success/30 bg-success/10' : 'border-border/60 bg-secondary/20'[m
+[32m+[m[32m                      )}[m
+[32m+[m[32m                      title={result.error}[m
+[32m+[m[32m                    >[m
+[32m+[m[32m                      <span className="font-mono truncate">{result.name}</span>[m
+[32m+[m[32m                      <span className={isBest ? 'text-success font-medium' : result.ok ? 'text-muted-foreground' : 'text-destructive'}>[m
+[32m+[m[32m                        {result.ok ? `${result.latencyMs} ms` : '失败'}[m
+[32m+[m[32m                      </span>[m
+[32m+[m[32m                    </div>[m
+[32m+[m[32m                  );[m
+[32m+[m[32m                })}[m
+[32m+[m[32m              </div>[m
+[32m+[m[32m            )}[m
+[32m+[m[32m          </div>[m
+[32m+[m[32m        )}[m
+[32m+[m
+         <div className="border-t border-border/60" />[m
+ [m
+         <div className="space-y-2">[m
+[31m-          <Label className="text-xs font-medium text-muted-foreground">代理地址或模板</Label>[m
+[32m+[m[32m          <Label className="text-xs font-medium text-muted-foreground">[m
+[32m+[m[32m            {autoDownloadProxy ? '自定义候选代理（参与自动测速）' : '固定代理地址或模板'}[m
+[32m+[m[32m          </Label>[m
+           <Input[m
+             value={downloadProxyUrlDraft}[m
+             onChange={(e) => setDownloadProxyUrlDraft(e.target.value)}[m
+[36m@@ -748,6 +858,10 @@[m [mexport default function SettingsPage() {[m
+             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />[m
+             代理只对公开 GitHub 资源生效；私有仓库仍携带 Token 直连，不向代理发送 Token。[m
+           </p>[m
+[32m+[m[32m          <p className="flex items-start gap-1.5">[m
+[32m+[m[32m            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />[m
+[32m+[m[32m            自动测速只请求公开测试文件，不会携带 Token；测速全部失败时自动回退直连。[m
+[32m+[m[32m          </p>[m
+           <p className="flex items-start gap-1.5">[m
+             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />[m
+             文件下载与 Release 附件使用此配置；根目录 ZIP（codeload）、GitHub API 目录打包与 Actions Artifacts 仍走直连。[m
+[36m@@ -1241,13 +1355,27 @@[m [mexport default function SettingsPage() {[m
+                   <Button[m
+                     size="sm"[m
+                     className="h-7 text-xs px-2 bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"[m
+[31m-                    onClick={(e) => {[m
+[32m+[m[32m                    onClick={async (e) => {[m
+                       e.preventDefault();[m
+[32m+[m[32m                      const filename = updateInfo.downloadUrl.split('/').pop() || 'update.apk';[m
+[32m+[m[32m                      const token = localStorage.getItem('github_manager_token') || '';[m
+                       const bridge = (window as unknown as { AndroidBridge?: { downloadFile?: (u: string, f: string, t: string) => void } }).AndroidBridge;[m
+[32m+[m
+[32m+[m[32m                      // 开启全局代理时，应用更新也复用自动测速/最快代理[m
+[32m+[m[32m                      if (isDownloadProxyEnabled()) {[m
+[32m+[m[32m                        try {[m
+[32m+[m[32m                          await downloadGithubFile(updateInfo.downloadUrl, filename, token);[m
+[32m+[m[32m                          toast.success('开始下载更新');[m
+[32m+[m[32m                        } catch (err) {[m
+[32m+[m[32m                          toast.error(err instanceof Error ? `更新下载失败：${err.message}` : '更新下载失败');[m
+[32m+[m[32m                          if (!bridge?.downloadFile) {[m
+[32m+[m[32m                            window.open(updateInfo.downloadUrl, '_blank', 'noopener,noreferrer');[m
+[32m+[m[32m                          }[m
+[32m+[m[32m                        }[m
+[32m+[m[32m                        return;[m
+[32m+[m[32m                      }[m
+[32m+[m
+                       if (bridge?.downloadFile) {[m
+[31m-                        const filename = updateInfo.downloadUrl.split('/').pop() || 'update.apk';[m
+[31m-                        // 获取 token，更新通常在公开仓库，token 传空也可，但传 token 更稳妥[m
+[31m-                        const token = localStorage.getItem('github_manager_token') || '';[m
+                         bridge.downloadFile(updateInfo.downloadUrl, filename, token);[m
+                       } else {[m
+                         window.open(updateInfo.downloadUrl, '_blank', 'noopener,noreferrer');[m
+[1mdiff --git a/src/tests/download-proxy.test.ts b/src/tests/download-proxy.test.ts[m
+[1mindex 1b5988ea..c59d59db 100644[m
+[1m--- a/src/tests/download-proxy.test.ts[m
+[1m+++ b/src/tests/download-proxy.test.ts[m
+[36m@@ -2,6 +2,10 @@[m [mimport { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';[m
+ import {[m
+   DEFAULT_DOWNLOAD_PROXY_URL,[m
+   downloadGithubFile,[m
+[32m+[m[32m  isAutoDownloadProxyEnabled,[m
+[32m+[m[32m  resolveDownloadProxyUrl,[m
+[32m+[m[32m  setAutoDownloadProxyEnabled,[m
+[32m+[m[32m  testFastestDownloadProxy,[m
+   getDownloadProxyUrl,[m
+   isDownloadProxyEnabled,[m
+   setDownloadProxyEnabled,[m
+[36m@@ -17,11 +21,13 @@[m [mdescribe('global download proxy', () => {[m
+ [m
+   afterEach(() => {[m
+     delete (window as unknown as { AndroidBridge?: unknown }).AndroidBridge;[m
+[32m+[m[32m    vi.unstubAllGlobals();[m
+     vi.restoreAllMocks();[m
+   });[m
+ [m
+   it('defaults to disabled with wget.la as the fallback proxy', () => {[m
+     expect(isDownloadProxyEnabled()).toBe(false);[m
+[32m+[m[32m    expect(isAutoDownloadProxyEnabled()).toBe(true);[m
+     expect(getDownloadProxyUrl()).toBe(DEFAULT_DOWNLOAD_PROXY_URL);[m
+   });[m
+ [m
+[36m@@ -42,10 +48,48 @@[m [mdescribe('global download proxy', () => {[m
+     );[m
+   });[m
+ [m
+[32m+[m
+[32m+[m[32m  it('auto-tests candidates and uses the fastest cached proxy', async () => {[m
+[32m+[m[32m    setDownloadProxyEnabled(true);[m
+[32m+[m[32m    setAutoDownloadProxyEnabled(true);[m
+[32m+[m
+[32m+[m[32m    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {[m
+[32m+[m[32m      const url = String(input);[m
+[32m+[m[32m      const delay = url.includes('gh-proxy.com') ? 5 : url.includes('ghproxy.net') ? 20 : 40;[m
+[32m+[m[32m      await new Promise((resolve) => setTimeout(resolve, delay));[m
+[32m+[m[32m      return {[m
+[32m+[m[32m        ok: true,[m
+[32m+[m[32m        status: 200,[m
+[32m+[m[32m        text: async () => 'Hello World',[m
+[32m+[m[32m      } as Response;[m
+[32m+[m[32m    }));[m
+[32m+[m
+[32m+[m[32m    const { selected, results } = await testFastestDownloadProxy({ timeoutMs: 1000 });[m
+[32m+[m[32m    expect(results).toHaveLength(3);[m
+[32m+[m[32m    expect(selected.baseUrl).toBe('https://gh-proxy.com/');[m
+[32m+[m
+[32m+[m[32m    const resolved = await resolveDownloadProxyUrl('https://github.com/a/b/releases/download/v1/app.apk');[m
+[32m+[m[32m    expect(resolved).toBe('https://gh-proxy.com/https://github.com/a/b/releases/download/v1/app.apk');[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m
+[32m+[m[32m  it('falls back to direct download when every candidate fails', async () => {[m
+[32m+[m[32m    setDownloadProxyEnabled(true);[m
+[32m+[m[32m    setAutoDownloadProxyEnabled(true);[m
+[32m+[m[32m    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));[m
+[32m+[m
+[32m+[m[32m    const { selected } = await testFastestDownloadProxy({ timeoutMs: 50 });[m
+[32m+[m[32m    expect(selected.latencyMs).toBe(-1);[m
+[32m+[m
+[32m+[m[32m    const source = 'https://github.com/a/b/releases/download/v1/app.apk';[m
+[32m+[m[32m    await expect(resolveDownloadProxyUrl(source)).resolves.toBe(source);[m
+[32m+[m[32m  });[m
+[32m+[m
+   it('uses the global proxy for GitHub downloads without leaking token', async () => {[m
+     const downloadFile = vi.fn();[m
+     (window as unknown as { AndroidBridge?: { downloadFile: typeof downloadFile } }).AndroidBridge = { downloadFile };[m
+     setDownloadProxyEnabled(true);[m
+[32m+[m[32m    setAutoDownloadProxyEnabled(false);[m
+ [m
+     await downloadGithubFile('https://github.com/a/b/releases/download/v1/app.apk', 'app.apk', 'secret-token');[m
+ [m
+[36m@@ -60,6 +104,7 @@[m [mdescribe('global download proxy', () => {[m
+     const downloadFile = vi.fn();[m
+     (window as unknown as { AndroidBridge?: { downloadFile: typeof downloadFile } }).AndroidBridge = { downloadFile };[m
+     setDownloadProxyEnabled(false);[m
+[32m+[m[32m    setAutoDownloadProxyEnabled(false);[m
+ [m
+     await downloadGithubFile('https://github.com/a/b/releases/download/v1/app.apk', 'app.apk', 'secret-token');[m
+ [m
