@@ -111,7 +111,12 @@ export default function RepoActionsSettingsPage() {
           });
         }
       }
-      await updateArtifactLogRetention(owner, repoName, retentionDays);
+      // 企业版 API 容错：非企业版可能会报错，隔离它以免影响核心设置保存
+      try {
+        await updateArtifactLogRetention(owner, repoName, retentionDays);
+      } catch (e) {
+        console.warn('非企业版或权限不足，跳过保留天数保存', e);
+      }
       toast.success(i18n.t('Actions 设置已保存'));
       await load();
     } catch (e) {
