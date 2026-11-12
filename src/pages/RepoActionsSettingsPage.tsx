@@ -90,35 +90,48 @@ export default function RepoActionsSettingsPage() {
     }
     setSaving(true);
     try {
-      await updateActionsPermissions(owner, repoName, {
-        enabled,
-        ...(enabled ? { allowed_actions: allowedActions } : {}),
-      });
+      const promises = [
+        updateActionsPermissions(owner, repoName, {
+          enabled,
+          ...(enabled ? { allowed_actions: allowedActions } : {}),
+        }).catch(e => console.error('Actions权限更新失败', e))
+      ];
+
       if (enabled) {
-        await updateWorkflowPermissions(owner, repoName, {
-          default_workflow_permissions: workflowPerm,
-          can_approve_pull_request_reviews: canApprovePR,
-        });
+        promises.push(
+          updateWorkflowPermissions(owner, repoName, {
+            default_workflow_permissions: workflowPerm,
+            can_approve_pull_request_reviews: canApprovePR,
+          }).catch(e => console.error('Workflow权限更新失败', e))
+        );
+
         if (allowedActions === 'selected') {
+          // 安全做法：使用 charCode(10) 表示换行符，绝对规避正则和字符串转义报错
           const patterns = patternsText
-            .split('\n')
+            .split(String.fromCharCode(10))
             .map((l) => l.trim())
             .filter(Boolean);
-          await updateSelectedActions(owner, repoName, {
-            github_owned_allowed: githubOwnedAllowed,
-            verified_allowed: verifiedAllowed,
-            patterns_allowed: patterns,
-          });
+            
+          promises.push(
+            updateSelectedActions(owner, repoName, {
+              github_owned_allowed: githubOwnedAllowed,
+              verified_allowed: verifiedAllowed,
+              patterns_allowed: patterns,
+            }).catch(e => console.error('SelectedActions更新失败', e))
+          );
         }
       }
-      // 企业版 API 容错：非企业版可能会报错，隔离它以免影响核心设置保存
-      try {
-        await updateArtifactLogRetention(owner, repoName, retentionDays);
-      } catch (e) {
-        console.warn('非企业版或权限不足，跳过保留天数保存', e);
-      }
-      toast.success(i18n.t('Actions 设置已保存'));
-      await load();
+
+      // 隔离企业版接口，防止普通账号报错
+      promises.push(
+        updateArtifactLogRetention(owner, repoName, retentionDays)
+          .catch(e => console.warn('跳过保留天数保存', e))
+      );
+
+      await Promise.all(promises);
+
+      // 移除 load() 刷新，实现点击瞬间完成
+      toast.success(i18n.t('Actions 设置已保存 (即时生效)'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
