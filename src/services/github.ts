@@ -2307,10 +2307,20 @@ export async function updateActionsPermissions(
   repo: string,
   data: { enabled: boolean; allowed_actions?: 'all' | 'local_only' | 'selected' }
 ): Promise<void> {
-  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions`, {
+  console.log('🚀 正在请求 PUT Actions 权限:', data);
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/permissions`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    headers: {
+      ...buildHeaders(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
   });
+  console.log('📥 服务器返回状态码:', res.status);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`GitHub API 报错 (HTTP ${res.status}): ${err}`);
+  }
 }
 
 export interface WorkflowPermissions {
@@ -2327,10 +2337,20 @@ export async function updateWorkflowPermissions(
   repo: string,
   data: { default_workflow_permissions: 'read' | 'write'; can_approve_pull_request_reviews?: boolean }
 ): Promise<void> {
-  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions/workflow`, {
+  console.log('🚀 正在请求 PUT Workflow 权限:', data);
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/permissions/workflow`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    headers: {
+      ...buildHeaders(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
   });
+  console.log('📥 服务器返回状态码:', res.status);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`GitHub API 报错 (HTTP ${res.status}): ${err}`);
+  }
 }
 
 export interface SelectedActions {
