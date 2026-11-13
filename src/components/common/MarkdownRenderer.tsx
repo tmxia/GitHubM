@@ -154,7 +154,7 @@ export function resolveMarkdownImage(src: string | undefined, ctx?: RepoLinkCont
   return rawFileUrl(ctx, resolved);
 }
 
-export default function MarkdownRenderer({ content, className, repoContext }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, className, repoContext, onLinkClick }: MarkdownRendererProps) {
   const navigate = useNavigate();
 
   return (
@@ -188,9 +188,17 @@ export default function MarkdownRenderer({ content, className, repoContext }: Ma
                 <a
                   href={`#${to}`}
                   {...props}
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     e.preventDefault();
+                    
+                    // 核心修复：优先调用外部传进来的拦截器（如 RepoDetailPage 里的无缝切换）
+                    if (onLinkClick) {
+                      const handled = await onLinkClick(href || '');
+                      if (handled) return;
+                    }
+                    
+                    // 如果外部没有处理，才执行默认路由跳转
                     navigate(to);
                   }}
                 >
