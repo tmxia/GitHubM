@@ -78,7 +78,17 @@ export default function RepoDeployKeysPage() {
       toast.success(i18n.t('部署密钥已添加'));
       setAddOpen(false);
       setTitle(''); setKeyContent(''); setReadOnly(true);
-      await load();
+      
+      // 核心修复：本地瞬间插入
+      setKeys(prev => [...prev, {
+        id: Date.now(),
+        title: title.trim(),
+        key: keyContent.trim(),
+        read_only: readOnly,
+        created_at: new Date().toISOString()
+      } as any]);
+      
+      setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('添加失败'));
     } finally {
@@ -92,8 +102,13 @@ export default function RepoDeployKeysPage() {
     try {
       await deleteDeployKey(owner, repoName, deleteTarget.id);
       toast.success(i18n.t('已删除'));
+      const deletedId = deleteTarget.id;
       setDeleteTarget(null);
-      await load();
+      
+      // 核心修复：本地瞬间移除
+      setKeys(prev => prev.filter(k => k.id !== deletedId));
+      
+      setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
     } finally {

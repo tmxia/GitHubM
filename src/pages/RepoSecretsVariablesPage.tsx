@@ -114,7 +114,16 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       await putRepoSecret(owner, repo, secretName.trim(), encrypted, pk.key_id, scope);
       toast.success(i18n.t('机密已保存'));
       setSecretOpen(false);
-      await load();
+      
+      // 核心修复：乐观更新，立刻让列表显示出新的 Secret 名称
+      setSecrets(prev => {
+        const exists = prev.find(s => s.name === secretName.trim());
+        if (exists) return prev;
+        return [{ name: secretName.trim(), updated_at: new Date().toISOString() } as any, ...prev];
+      });
+      
+      // 延迟 800ms 重新拉取，避开 API 延迟
+      setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
@@ -149,7 +158,18 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       }
       toast.success(i18n.t('变量已保存'));
       setVarOpen(false);
-      await load();
+      
+      // 核心修复：乐观更新，立刻修改本地的 variables 数组
+      setVariables(prev => {
+        if (varEditMode) {
+          return prev.map(v => v.name === varOriginalName ? { ...v, name: varName.trim(), value: varValue } as any : v);
+        } else {
+          return [{ name: varName.trim(), value: varValue, updated_at: new Date().toISOString() } as any, ...prev];
+        }
+      });
+      
+      // 延迟 800ms 重新拉取，保证最终一致性
+      setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
