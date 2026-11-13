@@ -130,7 +130,7 @@ export default function RepoActionsSettingsPage() {
 
       await Promise.all(promises);
 
-      // 移除 load() 刷新，实现点击瞬间完成
+      await load(true); // 保存成功后静默拉取最新状态，确保 UI 同步
       toast.success(i18n.t('Actions 设置已保存 (即时生效)'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
