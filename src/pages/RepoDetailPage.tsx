@@ -681,10 +681,9 @@ export default function RepoDetailPage() {
                     }
 
                     if (href.endsWith('.md') || href.toLowerCase().includes('readme')) {
+                      toast.loading('正在切换语言...', { id: 'lang-switch' });
                       try {
-                        toast.loading('正在切换语言...', { id: 'lang-switch' });
                         const cleanPath = href.replace(/^\.\//, '').replace(/^\//, '');
-
                         const res = await getFileContent(
                           repo?.owner.login || '',
                           repo?.name || '',
@@ -695,12 +694,15 @@ export default function RepoDetailPage() {
                         if (res && res.content) {
                           const decoded = decodeBase64Content(res.content);
                           setReadme(decoded);
-                          toast.success('语言已切换', { id: 'lang-switch' });
+                          toast.success('语言已切换');
                         } else {
-                          toast.error('未找到该语言文件', { id: 'lang-switch' });
+                          toast.error('未找到该语言文件');
                         }
                       } catch (e) {
-                        toast.error('切换失败，文件可能不存在', { id: 'lang-switch' });
+                        toast.error('切换失败，文件可能不存在');
+                      } finally {
+                        // 核心修复：强制关闭挂起的 loading 胶囊
+                        toast.dismiss('lang-switch');
                       }
                       return true;
                     }
