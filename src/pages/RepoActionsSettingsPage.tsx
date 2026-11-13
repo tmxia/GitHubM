@@ -89,12 +89,14 @@ export default function RepoActionsSettingsPage() {
       return;
     }
     setSaving(true);
+
     try {
+      // 1. 执行所有更新请求（严格遵循，不吞错误）
       const promises = [
         updateActionsPermissions(owner, repoName, {
           enabled,
           ...(enabled ? { allowed_actions: allowedActions } : {}),
-        }).catch(e => console.error('Actions权限更新失败', e))
+        })
       ];
 
       if (enabled) {
@@ -102,38 +104,60 @@ export default function RepoActionsSettingsPage() {
           updateWorkflowPermissions(owner, repoName, {
             default_workflow_permissions: workflowPerm,
             can_approve_pull_request_reviews: canApprovePR,
-          }).catch(e => console.error('Workflow权限更新失败', e))
+          })
         );
 
         if (allowedActions === 'selected') {
-          // 安全做法：使用 charCode(10) 表示换行符，绝对规避正则和字符串转义报错
           const patterns = patternsText
             .split(String.fromCharCode(10))
             .map((l) => l.trim())
             .filter(Boolean);
-            
           promises.push(
             updateSelectedActions(owner, repoName, {
               github_owned_allowed: githubOwnedAllowed,
               verified_allowed: verifiedAllowed,
               patterns_allowed: patterns,
-            }).catch(e => console.error('SelectedActions更新失败', e))
+            })
           );
         }
       }
 
-      // 隔离企业版接口，防止普通账号报错
-      promises.push(
-        updateArtifactLogRetention(owner, repoName, retentionDays)
-          .catch(e => console.warn('跳过保留天数保存', e))
-      );
-
       await Promise.all(promises);
 
-      await load(true); // 保存成功后静默拉取最新状态，确保 UI 同步
-      toast.success(i18n.t('Actions 设置已保存 (即时生效)'));
+      // 隔离企业版接口，静默忽略它的报错，不影响整体流程
+      await updateArtifactLogRetention(owner, repoName, retentionDays).catch(() => {});
+
+      // 2. 完美对齐仓库设置：强制重新拉取最新数据（带 fresh 标志，如果底层支持的话）
+      // 为了兼容性，如果我们的 api 没有 fresh 参数，我们直接通过重新执行 load(true) 并在内部加上防缓存参数，或者直接用本地状态覆盖。
+      // 这里我们选择重新请求接口拉取最新真实状态
+      const [freshPerm, freshWf, freshSel, freshRet] = await Promise.all([
+        getActionsPermissions(owner, repoName).catch(() => null),
+        getWorkflowPermissions(owner, repoName).catch(() => null),
+        getSelectedActions(owner, repoName).catch(() => null),
+        getArtifactLogRetention(owner, repoName).catch(() => null),
+      ]);
+
+      if (freshPerm) {
+        setEnabled(freshPerm.enabled);
+        if (freshPerm.allowed_actions) setAllowedActions(freshPerm.allowed_actions);
+      }
+      if (freshWf) {
+        if (freshWf.default_workflow_permissions) setWorkflowPerm(freshWf.default_workflow_permissions);
+        setCanApprovePR(!!freshWf.can_approve_pull_request_reviews);
+      }
+      if (freshSel) {
+        setGithubOwnedAllowed(!!freshSel.github_owned_allowed);
+        setVerifiedAllowed(!!freshSel.verified_allowed);
+        setPatternsText((freshSel.patterns_allowed || []).join('\n'));
+      }
+      if (freshRet && typeof freshRet.days === 'number') setRetentionDays(freshRet.days);
+
+      // 3. 成功提示
+      toast.success(i18n.t('Actions 设置已保存并同步生效'));
+
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
+      // 只要有一个步骤报错，这里一定会接住
+      toast.error(e instanceof Error ? e.message : i18n.t('保存失败，请检查权限或网络'));
     } finally {
       setSaving(false);
     }
