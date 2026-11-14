@@ -13,6 +13,7 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
     case 'gemini':   return 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
     case 'qwen':     return 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
     case 'openai':   return 'https://api.openai.com/v1/chat/completions';
+    case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
     case 'custom':   return endpoint || '';
     case 'wenxin':   // 平台内置免费通道已随后端移除，不再支持
       return '';
@@ -26,6 +27,7 @@ export function getProviderModelsUrl(type: ModelType, endpoint?: string): string
     case 'gemini':   return 'https://generativelanguage.googleapis.com/v1beta/openai/models';
     case 'qwen':     return 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
     case 'openai':   return 'https://api.openai.com/v1/models';
+    case 'openrouter': return 'https://openrouter.ai/api/v1/models';
     case 'custom':   return (endpoint || '').replace(/\/chat\/completions$/, '') + '/models';
     case 'wenxin':   return '';
   }
@@ -37,6 +39,21 @@ function authHeaders(apiKey: string): Record<string, string> {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
   };
+}
+
+// ── 默认模型 ────────────────────────────────────────────────────────────────
+/** 各平台未显式选择模型时用于连接测试和首次请求的默认值 */
+export function getDefaultProviderModel(type: ModelType): string {
+  switch (type) {
+    case 'deepseek': return 'deepseek-v4-flash';
+    case 'gemini': return 'gemini-2.5-flash-preview-05-20';
+    case 'qwen': return 'qwen2.5-coder-32b-instruct';
+    case 'openai': return 'gpt-4o-mini';
+    case 'openrouter': return 'particle-ai/particle-1:free';
+    case 'custom':
+    case 'wenxin':
+      return 'default';
+  }
 }
 
 // ── 模型列表 ───────────────────────────────────────────────────────────────
@@ -104,7 +121,7 @@ export async function testProviderConnection(
 ): Promise<TestConnectionResult> {
   if (type === 'wenxin') return { success: false, error: i18n.t('该平台已不再支持') };
   const proxyBase = proxyUrl?.trim().replace(/\/+$/, '') ||
-    (type !== 'custom' ? 'https://llm.callact.xyz' : '');
+    (type !== 'custom' && type !== 'openrouter' ? 'https://llm.callact.xyz' : '');
   const url = proxyBase
     ? `${proxyBase}/v1/chat/completions`
     : getProviderChatUrl(type, endpoint);
@@ -120,7 +137,7 @@ export async function testProviderConnection(
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: model || 'default',
+        model: model || getDefaultProviderModel(type),
         messages: [{ role: 'user', content: 'ping' }],
         max_tokens: 1,
         stream: false,
