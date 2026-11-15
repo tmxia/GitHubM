@@ -90,10 +90,14 @@ export default function CommitsPage() {
         const names = branchResult.data.map((b) => b.name);
         const defaultBranch = repoData?.default_branch || '';
         let initial = '';
-        if (saved && names.includes(saved)) initial = saved;
-        else if (defaultBranch && names.includes(defaultBranch)) initial = defaultBranch;
-        else initial = names[0] || '';
-        setSelectedBranch(initial);
+      if (defaultBranch && names.includes(defaultBranch)) {
+        initial = defaultBranch;
+      } else if (saved && names.includes(saved)) {
+        initial = saved;
+      } else {
+        initial = names[0] || '';
+      }
+      setSelectedBranch(initial);
       })
       .catch(console.error);
   }, [owner, repo]);
