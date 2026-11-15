@@ -1,5 +1,5 @@
-// 工具改进工坊面板
-// 展示 AI 在执行过程中自主上报的工具问题和改进提案，支持审核、拒绝、标记应用
+
+
 import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,7 +44,6 @@ import {
 } from './toolWorkshopStore';
 import i18n from "@/i18n";
 
-// ── 类型 ──────────────────────────────────────────────────────────────────
 export type Proposal = StoreProposal;
 
 interface Stats {
@@ -62,9 +61,6 @@ interface ToolWorkshopPanelProps {
   refreshTrigger?: number;
   onProposalCount?: (count: number) => void;
 }
-
-// ── 工具函数 ─────────────────────────────────────────────────────────────
-// 数据源：项目仓库 qq5855144/GitHubM 的 GitHub Issues（见 toolWorkshopStore.ts）
 
 function severityColor(s: string) {
   if (s === 'high')   return 'bg-destructive/15 text-destructive border-destructive/30';
@@ -93,7 +89,6 @@ function formatTime(iso: string) {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// ── 代码块组件 ────────────────────────────────────────────────────────────
 function CodeBlock({ label, code, colorClass }: { label: string; code: string; colorClass: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
@@ -120,7 +115,6 @@ function CodeBlock({ label, code, colorClass }: { label: string; code: string; c
   );
 }
 
-// ── 提案卡片 ──────────────────────────────────────────────────────────────
 function ProposalCard({
   proposal,
   onApprove,
@@ -150,7 +144,7 @@ function ProposalCard({
       proposal.status === 'rejected' ? 'opacity-50' : '',
       proposal.status === 'applied'  ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-card',
     )}>
-      {/* 卡片头 */}
+
       <button
         className="w-full flex items-start gap-2 p-3 text-left"
         onClick={() => setExpanded(v => !v)}
@@ -180,7 +174,6 @@ function ProposalCard({
         </span>
       </button>
 
-      {/* 展开详情 */}
       {expanded && (
         <div className="px-3 pb-3 space-y-3 border-t border-border pt-3">
           {proposal.context && (
@@ -202,7 +195,6 @@ function ProposalCard({
             <CodeBlock label={i18n.t('修改后')} code={proposal.code_after} colorClass="bg-green-500/10 text-green-600 dark:text-green-400" />
           )}
 
-          {/* 操作按钮 */}
           {proposal.status === 'pending' && (
             <div className="flex gap-2 pt-1">
               <Button size="sm" className="h-7 text-xs flex-1" onClick={handleApprove} disabled={loading}>
@@ -228,7 +220,6 @@ function ProposalCard({
         </div>
       )}
 
-      {/* 拒绝确认弹窗 */}
       <AlertDialog open={rejectOpen} onOpenChange={setRejectOpen}>
         <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg">
           <AlertDialogHeader>
@@ -248,7 +239,6 @@ function ProposalCard({
   );
 }
 
-// ── 应用提案弹窗 ──────────────────────────────────────────────────────────
 function ApplyDialog({
   proposal,
   open,
@@ -338,7 +328,6 @@ function ApplyDialog({
   );
 }
 
-// ── 主组件 ────────────────────────────────────────────────────────────────
 export default function ToolWorkshopPanel({ refreshTrigger = 0, onProposalCount }: ToolWorkshopPanelProps) {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [stats, setStats]         = useState<Stats | null>(null);
@@ -394,7 +383,7 @@ export default function ToolWorkshopPanel({ refreshTrigger = 0, onProposalCount 
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* 顶部统计栏 */}
+
       {stats && (
         <div className="grid grid-cols-4 gap-px bg-border shrink-0">
           {[
@@ -411,7 +400,6 @@ export default function ToolWorkshopPanel({ refreshTrigger = 0, onProposalCount 
         </div>
       )}
 
-      {/* 过滤器 */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
         <Select value={filter} onValueChange={v => setFilter(v as 'all' | Proposal['status'])}>
           <SelectTrigger className="h-7 text-xs flex-1 min-w-0">
@@ -430,7 +418,6 @@ export default function ToolWorkshopPanel({ refreshTrigger = 0, onProposalCount 
         </Button>
       </div>
 
-      {/* 提案列表 */}
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-3 space-y-2">
           {loading && proposals.length === 0 && (
@@ -471,7 +458,6 @@ export default function ToolWorkshopPanel({ refreshTrigger = 0, onProposalCount 
         </div>
       </ScrollArea>
 
-      {/* 应用提案弹窗 */}
       <ApplyDialog
         proposal={applyTarget}
         open={applyOpen}

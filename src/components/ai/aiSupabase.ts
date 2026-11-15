@@ -1,6 +1,5 @@
-// AI 助手本地数据层（已脱离 Supabase 后端）
-// 会话 / 消息 / 工具执行日志 / workflow 快照均持久化到 localStorage。
-// 对外函数签名与旧 Supabase 版本完全一致，调用方零改动。
+
+
 import type { ChatSession, ChatSessionMessage, ToolHistoryItem } from './aiTypes';
 import type { Message } from './aiTypes';
 import i18n from "@/i18n";
@@ -10,20 +9,19 @@ export interface PersistMessageInput {
   content: string;
   messageType?: 'plain' | 'memory_summary';
   meta?: Record<string, unknown>;
-  /** 完整消息结构（含 bubbleType/inlineTools 等），序列化到 full_json，恢复时优先使用 */
+
   full?: unknown;
 }
 
-// ── 本地存储键 ──────────────────────────────────────────────────────────────
 const KEY_SESSIONS = 'ai_local_sessions';
 const keyMsgs = (sid: string) => `ai_local_msgs_${sid}`;
 const keyTools = (sid: string) => `ai_local_tools_${sid}`;
 const keySnaps = (sid: string) => `ai_local_snaps_${sid}`;
 
-const MAX_SESSIONS = 30;      // 会话数量上限（localStorage 容量有限）
-const MAX_MSGS = 300;         // 每会话消息上限（超出丢弃最旧，避免 5MB 配额）
-const MAX_TOOLS = 500;        // 每会话工具日志上限（同旧版 DB limit 500）
-const MAX_SNAPS = 20;         // 每会话快照上限
+const MAX_SESSIONS = 30;
+const MAX_MSGS = 300;
+const MAX_TOOLS = 500;
+const MAX_SNAPS = 20;
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -38,7 +36,7 @@ function writeJson(key: string, value: unknown): void {
     localStorage.setItem(key, JSON.stringify(value));
     return;
   } catch (e) {
-    // 配额不足：优先淘汰最旧的本地会话（含消息/工具/快照），再重试一次
+
     try {
       if (key !== KEY_SESSIONS) {
         const sessions = readJson<ChatSession[]>(KEY_SESSIONS, []);
@@ -58,9 +56,6 @@ function writeJson(key: string, value: unknown): void {
   }
 }
 
-// ── 会话操作 ────────────────────────────────────────────────────────────────
-
-/** 新建或更新会话标题 */
 export async function upsertSession(
   session: Omit<ChatSession, 'created_at' | 'updated_at'>
 ): Promise<string | null> {
@@ -78,7 +73,7 @@ export async function upsertSession(
         updated_at: now,
       } as ChatSession);
     }
-    // 按更新时间降序并限制数量
+
     sessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     writeJson(KEY_SESSIONS, sessions.slice(0, MAX_SESSIONS));
     return session.id;
@@ -88,7 +83,6 @@ export async function upsertSession(
   }
 }
 
-/** 批量插入对话消息 */
 export async function insertMessages(
   sessionId: string,
   msgs: PersistMessageInput[]
@@ -112,11 +106,7 @@ export async function insertMessages(
     console.error(i18n.t('保存消息失败'), e);
   }
 }
-/**
- * 全量覆盖保存会话消息（替代增量 insertMessages 的易丢数据问题）。
- * 完整持久化 messages 列表（含 step/tool/thinking 等中间气泡），
- * 修复「退出对话再打开」时只恢复每轮 user+assistant 两条、中间过程全部丢失的问题。
- */
+
 export async function replaceSessionMessages(
   sessionId: string,
   msgs: PersistMessageInput[]
@@ -139,7 +129,6 @@ export async function replaceSessionMessages(
   }
 }
 
-/** 获取指定用户的会话列表（按更新时间降序，最多 50 条） */
 export async function fetchSessions(login: string): Promise<ChatSession[]> {
   const sessions = readJson<ChatSession[]>(KEY_SESSIONS, []);
   return sessions
@@ -149,7 +138,6 @@ export async function fetchSessions(login: string): Promise<ChatSession[]> {
     .slice(0, MAX_SESSIONS);
 }
 
-/** 获取会话下所有消息（按时间升序） */
 export async function fetchSessionMessages(sessionId: string): Promise<ChatSessionMessage[]> {
   const rows = readJson<ChatSessionMessage[]>(keyMsgs(sessionId), []);
   return rows
@@ -166,7 +154,6 @@ export async function fetchSessionMessages(sessionId: string): Promise<ChatSessi
     }));
 }
 
-/** 删除会话（连带删除其消息、工具日志与快照） */
 export async function deleteSession(sessionId: string): Promise<void> {
   try {
     const sessions = readJson<ChatSession[]>(KEY_SESSIONS, []).filter(s => s.id !== sessionId);
@@ -176,8 +163,6 @@ export async function deleteSession(sessionId: string): Promise<void> {
     localStorage.removeItem(keySnaps(sessionId));
   } catch { /* ignore */ }
 }
-
-// ── 工具执行日志持久化 ──────────────────────────────────────────────────────
 
 export interface LocalToolLogRow {
   id: string;
@@ -192,7 +177,6 @@ export interface LocalToolLogRow {
   started_at: string;
 }
 
-/** 批量插入本轮工具调用日志 */
 export async function insertToolExecutionLogs(
   sessionId: string,
   turnId: string,
@@ -221,7 +205,6 @@ export async function insertToolExecutionLogs(
   }
 }
 
-/** 查询指定 session 的工具执行日志（按时间升序，最多 500 条） */
 export async function fetchToolExecutionLogs(
   sessionId: string,
 ): Promise<Array<{
@@ -233,8 +216,6 @@ export async function fetchToolExecutionLogs(
   return rows.sort((a, b) => a.started_at.localeCompare(b.started_at)).slice(-500);
 }
 
-// ── workflow 快照 ───────────────────────────────────────────────────────────
-
 interface LocalSnapshotRow {
   turn_id: string;
   messages_json: string;
@@ -242,7 +223,6 @@ interface LocalSnapshotRow {
   created_at: string;
 }
 
-/** Upsert 本轮 workflow 快照（messages + toolHistory） */
 export async function upsertWorkflowSnapshot(
   sessionId: string,
   turnId: string,
@@ -268,7 +248,6 @@ export async function upsertWorkflowSnapshot(
   }
 }
 
-/** 获取指定 session 最新的 workflow 快照 */
 export async function fetchLatestSnapshot(
   sessionId: string,
 ): Promise<{ messages: Message[]; toolHistory: ToolHistoryItem[] } | null> {

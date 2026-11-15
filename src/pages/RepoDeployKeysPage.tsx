@@ -4,7 +4,7 @@ import PullToRefresh from '@/components/common/PullToRefresh';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Key, Plus, Trash2, ChevronRight, RefreshCw, AlertCircle, Lock, Check, 
+  Key, Plus, Trash2, ChevronRight, RefreshCw, AlertCircle, Lock, Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -78,8 +78,7 @@ export default function RepoDeployKeysPage() {
       toast.success(i18n.t('部署密钥已添加'));
       setAddOpen(false);
       setTitle(''); setKeyContent(''); setReadOnly(true);
-      
-      // 核心修复：本地瞬间插入
+
       setKeys(prev => [...prev, {
         id: Date.now(),
         title: title.trim(),
@@ -87,7 +86,7 @@ export default function RepoDeployKeysPage() {
         read_only: readOnly,
         created_at: new Date().toISOString()
       } as any]);
-      
+
       setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('添加失败'));
@@ -104,10 +103,9 @@ export default function RepoDeployKeysPage() {
       toast.success(i18n.t('已删除'));
       const deletedId = deleteTarget.id;
       setDeleteTarget(null);
-      
-      // 核心修复：本地瞬间移除
+
       setKeys(prev => prev.filter(k => k.id !== deletedId));
-      
+
       setTimeout(() => { load(); }, 800);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
@@ -133,7 +131,7 @@ export default function RepoDeployKeysPage() {
             {i18n.t('部署密钥')}
           </h1>
         <div className="flex items-center gap-2">
-          
+
           <Button variant="ghost" size="sm" className="border border-border text-muted-foreground hover:bg-secondary h-9" onClick={() => setAddOpen(true)}>
           <Plus className="w-3.5 h-3.5 mr-1" />
           {i18n.t('添加部署密钥')}

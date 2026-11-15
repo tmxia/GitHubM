@@ -1,9 +1,4 @@
-// LangGraph.js Agent 运行时
-//
-// 迁移目标：把「计划 → 模型 → 工具 → 验证 → checkpoint」交给 LangGraph，
-// 不再在 aiAgentCore 里手写 for 循环和字符串协议。
-//
-// 模型与工具通过 adapter 注入，当前模块不直接依赖 aiAgentCore。
+
 
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 
@@ -12,9 +7,9 @@ export type GraphRole = 'system' | 'user' | 'assistant' | 'tool';
 export interface GraphMessage {
   role: GraphRole;
   content: string;
-  /** tool 消息对应的调用 id */
+
   toolCallId?: string;
-  /** assistant 消息上的工具调用 */
+
   toolCall?: GraphToolCall;
 }
 
@@ -67,11 +62,11 @@ export interface GraphEvent {
   step?: number;
   tool?: string;
   toolCallId?: string;
-  /** 工具参数摘要，用于 UI hint */
+
   arguments?: Record<string, unknown>;
   content?: string;
   error?: string;
-  /** 工具执行耗时（毫秒） */
+
   elapsedMs?: number;
   plan?: GraphPlanStep[];
   verification?: GraphVerificationResult;
@@ -87,19 +82,16 @@ export type GraphToolExecutor = (
   signal?: AbortSignal
 ) => Promise<string | GraphToolResult>;
 
-/** 可选的计划器；不传则跳过 plan 节点 */
 export type GraphPlanner = (
   messages: GraphMessage[],
   signal?: AbortSignal
 ) => Promise<GraphPlanStep[]>;
 
-/** 可选的验证器；写操作后调用 */
 export type GraphVerifier = (
   messages: GraphMessage[],
   signal?: AbortSignal
 ) => Promise<GraphVerificationResult>;
 
-/** 交付检查：由模型判断当前结果是否已经可交付 */
 export interface GraphDeliverableResult {
   deliverable: boolean;
   missing?: string;
@@ -118,19 +110,19 @@ export interface RunLangGraphOptions {
   messages: GraphMessage[];
   signal?: AbortSignal;
   maxVerifyAttempts?: number;
-  /** 交付检查最多追问次数，避免检查器自身死循环；默认 3 */
+
   maxDeliverableChecks?: number;
-  /** 框架级防死循环上限，不是产品层“工具轮数”；默认 1000 */
+
   recursionLimit?: number;
-  /** START → plan → model */
+
   planner?: GraphPlanner;
-  /** 写操作后的验证节点 */
+
   verifier?: GraphVerifier;
-  /** 交付检查器；不传则模型输出最终答案即结束 */
+
   assessDeliverable?: GraphDeliverableAssessor;
-  /** 工具风险分类；默认按工具名推断 */
+
   classifyTool?: (name: string) => GraphToolRisk;
-  /** 每次工具执行 / 验证后调用，用于持久化 checkpoint */
+
   onCheckpoint?: (snapshot: {
     messages: GraphMessage[];
     plan: GraphPlanStep[];
@@ -200,14 +192,6 @@ const AgentStateAnnotation = Annotation.Root({
   }),
 });
 
-/**
- * 状态图：
- *
- *   START → plan → model ──(toolCall)──→ tools → checkpoint → model
- *                    ├──(需要验证)──────→ verify → model
- *                    ├──(交付检查未过)──→ model
- *                    └──(可交付)────────→ END
- */
 export function createAgentGraph(options: {
   model: GraphModel;
   executeTool: GraphToolExecutor;
@@ -332,7 +316,7 @@ export function createAgentGraph(options: {
       return {};
     })
     .addNode('deliverable_check', async (state) => {
-      // 没有执行过工具，或没有配置检查器：模型输出最终答案即视为可交付
+
       if (!assessDeliverable || state.steps === 0 || state.deliverableChecks >= maxDeliverableChecks) {
         onEvent?.({ type: 'final', step: state.steps, content: state.finalText });
         return { deliverable: true };
@@ -343,7 +327,7 @@ export function createAgentGraph(options: {
       try {
         result = await assessDeliverable(state.messages, state.finalText, state.plan, signal);
       } catch {
-        // 检查器异常不应阻塞任务交付
+
         result = { deliverable: true };
       }
       onEvent?.({
@@ -441,7 +425,6 @@ export interface LangGraphRunResult {
   paused?: boolean;
 }
 
-/** 执行一次图，返回完整状态与最终回答 */
 export async function runLangGraphAgent(
   options: RunLangGraphOptions
 ): Promise<LangGraphRunResult> {
@@ -477,7 +460,7 @@ export async function runLangGraphAgent(
   let result: Awaited<ReturnType<typeof graph.invoke>>;
   try {
     result = await graph.invoke(initialState, {
-      // 框架级防死循环，不是产品层的工具轮数限制
+
       recursionLimit: options.recursionLimit ?? 1000,
     });
   } catch (err) {

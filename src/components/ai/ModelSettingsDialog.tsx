@@ -1,4 +1,4 @@
-// 模型设置弹窗：memo 优化，config/open 不变则不重渲染
+
 import { memo, useState, useEffect } from 'react';
 import {
   RefreshCw, RotateCw,
@@ -47,10 +47,10 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
   const [draft, setDraft] = useState<ModelConfig>(config);
   const [fetchState, setFetchState] = useState<FetchState>('idle');
   const [fetchError, setFetchError] = useState('');
-  // 测试连接状态
+
   const [testState, setTestState] = useState<TestState>('idle');
   const [testResult, setTestResult] = useState<{ elapsedMs?: number; error?: string }>({});
-  // 动态获取的模型列表（每个 type 独立缓存）
+
   const [fetchedModels, setFetchedModels] = useState<Record<string, Array<{ id: string; name: string }>>>({});
   const def = getModelDef(draft.type);
 
@@ -65,8 +65,7 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
   }, [open, config]);
 
   const handleTypeChange = (type: ModelType) => {
-    // 切换平台时自动预填该平台已存储的 API Key 和默认模型，
-    // 避免未选择模型就测试连接时把 "default" 发给真实接口。
+
     const savedKey = loadProviderKey(type);
     setDraft({
       type,
@@ -121,7 +120,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
     }
   };
 
-  // 当前 type 的模型列表：优先用动态获取的，回退到静态定义
   const availableModels: Array<{ id: string; name: string }> = (() => {
     const dynamic = fetchedModels[draft.type];
     if (dynamic?.length) return dynamic;
@@ -132,7 +130,7 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
   const handleSave = () => {
     if (def.needKey && !draft.api_key?.trim()) { toast.error(i18n.t('请填写 API Key')); return; }
     if (def.needEndpoint && !draft.endpoint?.trim()) { toast.error(i18n.t('请填写接口地址')); return; }
-    // 同步保存到独立 key 仓库
+
     if (draft.api_key && draft.type !== 'wenxin') {
       saveProviderKey(draft.type, draft.api_key);
     }
@@ -148,7 +146,7 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
           <DialogTitle className="text-base">{i18n.t('AI 模型配置')}</DialogTitle>
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-4 flex flex-col gap-4">
-          {/* 平台选择 */}
+
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-normal">{i18n.t('选择平台')}</Label>
             <Select value={draft.type} onValueChange={v => handleTypeChange(v as ModelType)}>
@@ -169,7 +167,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             <p className="text-xs text-muted-foreground">{def.desc}</p>
           </div>
 
-          {/* 自定义接口地址 */}
           {def.needEndpoint && (
             <div className="flex flex-col gap-1.5">
               <Label className="text-sm font-normal">{i18n.t('接口地址')}</Label>
@@ -184,7 +181,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* API Key + 获取模型按钮 */}
           {def.needKey && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
@@ -250,7 +246,7 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
               )}
               <p className="text-xs text-muted-foreground">
                 {i18n.t('Key 仅保存在本地；配置代理后由无状态 Worker 转发，不会保存 Key')}</p>
-              {/* 测试连接按钮 */}
+
               <div className="flex flex-col gap-1.5">
                   <Button
                     type="button"
@@ -281,7 +277,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* 无状态模型代理（Cloudflare Worker） */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm font-normal">{i18n.t('模型代理（可选）')}</Label>
             <Input
@@ -295,7 +290,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </p>
           </div>
 
-           {/* 模型选择 */}
           {availableModels.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
@@ -323,7 +317,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* custom 手动输入模型名 */}
           {draft.type === 'custom' && availableModels.length === 0 && (
             <div className="flex flex-col gap-1.5">
               <Label className="text-sm font-normal">{i18n.t('模型名称（可选）')}</Label>
@@ -337,7 +330,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* Gemini 免费说明 */}
           {draft.type === 'gemini' && (
             <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3">
               <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
@@ -348,7 +340,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* Qwen 说明 */}
           {draft.type === 'qwen' && (
             <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3">
               <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
@@ -387,7 +378,6 @@ const ModelSettingsDialog = memo(function ModelSettingsDialog({
             </div>
           )}
 
-          {/* 超时时间设置 */}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5">
               <Timer className="w-3.5 h-3.5 text-muted-foreground" />

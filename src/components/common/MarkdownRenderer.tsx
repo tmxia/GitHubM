@@ -191,14 +191,12 @@ export default function MarkdownRenderer({ content, className, repoContext, onLi
                   onClick={async (e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     e.preventDefault();
-                    
-                    // 核心修复：优先调用外部传进来的拦截器（如 RepoDetailPage 里的无缝切换）
+
                     if (onLinkClick) {
                       const handled = await onLinkClick(href || '');
                       if (handled) return;
                     }
-                    
-                    // 如果外部没有处理，才执行默认路由跳转
+
                     navigate(to);
                   }}
                 >

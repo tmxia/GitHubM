@@ -1,4 +1,4 @@
-// 任务工作流面板：展示 AI 任务规划的步骤列表及实时执行状态
+
 import React from 'react';
 import {
   ListChecks, CheckCircle2, XCircle, Clock,
@@ -42,7 +42,7 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
 
   return (
     <div className="flex flex-col h-full bg-background border-l">
-      {/* 面板头部 */}
+
       <div className="p-4 border-b bg-muted/20">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-2">
@@ -52,7 +52,7 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
             {doneCount}/{steps.length}
           </span>
         </div>
-        {/* 进度条 */}
+
         <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
           <div
             className="h-full bg-primary transition-all duration-500 rounded-full"
@@ -61,7 +61,6 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
         </div>
       </div>
 
-      {/* 步骤列表 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-thin">
         {steps.map((step, idx) => {
           const status: StepStatus = stepStatuses[step.id] ?? 'pending';
@@ -70,7 +69,7 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
 
           return (
             <div key={step.id} className="relative">
-              {/* 竖线连接器（不含最后一项） */}
+
               {idx < steps.length - 1 && (
                 <div className="absolute left-[18px] top-[30px] w-[1px] h-[calc(100%-4px)] bg-border" />
               )}
@@ -82,7 +81,7 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
                   status === 'done' && "opacity-70",
                 )}
               >
-                {/* 图标（带背景圆，保证与连接线对齐） */}
+
                 <div className={cn(
                   "mt-0.5 w-6 h-6 rounded-full border flex items-center justify-center shrink-0 bg-background z-10",
                   status === 'running' && "border-primary",
@@ -93,7 +92,6 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
                   <StepIcon status={status} />
                 </div>
 
-                {/* 步骤内容 */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[10px] font-mono text-muted-foreground/60 shrink-0">
@@ -106,7 +104,7 @@ export function TaskPlanPanel({ steps, stepStatuses, stepRetryCounts, currentSte
                     )}>
                       {step.title}
                     </span>
-                    {/* 状态标签 */}
+
                     {status === 'running' && retryCount === 0 && (
                       <span className="ml-auto shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wide">
                         {i18n.t('执行中')}</span>

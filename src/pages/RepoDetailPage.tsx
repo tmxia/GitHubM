@@ -701,7 +701,7 @@ export default function RepoDetailPage() {
                       } catch (e) {
                         toast.error('切换失败，文件可能不存在');
                       } finally {
-                        // 核心修复：强制关闭挂起的 loading 胶囊
+
                         toast.dismiss('lang-switch');
                       }
                       return true;

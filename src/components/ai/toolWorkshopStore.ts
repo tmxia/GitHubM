@@ -1,7 +1,5 @@
-// 工具改进工坊数据层（已脱离 Supabase 后端）
-// 工具提案直接以 GitHub Issues 形式存储在项目仓库 qq5855144/GitHubM，
-// 状态流转通过 label 实现（status/pending → status/approved → status/applied / status/rejected）。
-// 优点：零后端、跨设备同步、可公开讨论。
+
+
 import { getToken } from '@/services/github';
 import i18n from "@/i18n";
 
@@ -26,8 +24,6 @@ export interface Proposal {
   applied_at: string | null;
   created_at: string;
 }
-
-// ── GitHub API 基础封装 ─────────────────────────────────────────────────────
 
 function ghHeaders(token: string): Record<string, string> {
   return {
@@ -58,19 +54,16 @@ async function ghRequest(
   return res.json();
 }
 
-// ── Issue body 与 Proposal 互转 ──────────────────────────────────────────────
-
 const FENCE = '```';
 
 function escapeField(v: string): string {
-  // 防注入：字段值中的 ``` 会被替换，避免破坏代码块结构
+
   return v.replace(/`{3,}/g, '``~');
 }
 function unescapeField(v: string): string {
   return v.replace(/``~/g, '```');
 }
 
-/** 将提案序列化为 Issue body（键值行 + Markdown 代码块） */
 function proposalToBody(p: {
   tool_name: string; severity: string; issue: string;
   context?: string | null; explanation?: string | null;
@@ -89,7 +82,6 @@ function proposalToBody(p: {
   return lines.join('\n');
 }
 
-/** 从 Issue body 解析出提案字段 */
 function bodyToFields(body: string): {
   tool_name: string; severity: 'low' | 'medium' | 'high'; issue: string;
   context: string | null; explanation: string | null;
@@ -153,9 +145,6 @@ function issueToProposal(issue: RawIssue): Proposal {
   };
 }
 
-// ── 查询 ────────────────────────────────────────────────────────────────────
-
-/** 拉取全部提案（按创建时间降序） */
 export async function fetchProposals(): Promise<Proposal[]> {
   const token = getToken();
   if (!token) throw new Error(i18n.t('未登录，请先设置 GitHub Token'));
@@ -169,14 +158,12 @@ export async function fetchProposals(): Promise<Proposal[]> {
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-/** 按状态过滤提案 */
 export async function fetchProposalsByStatus(status: 'all' | Proposal['status']): Promise<Proposal[]> {
   const all = await fetchProposals();
   if (status === 'all') return all;
   return all.filter(p => p.status === status);
 }
 
-/** 提案统计 */
 export async function fetchProposalStats(): Promise<{
   total: number; pending: number; approved: number; applied: number; rejected: number;
   high: number; medium: number; low: number;
@@ -190,8 +177,6 @@ export async function fetchProposalStats(): Promise<{
   return stats;
 }
 
-// ── 状态流转 ────────────────────────────────────────────────────────────────
-
 async function addLabel(issueNumber: string, label: string): Promise<void> {
   const token = getToken();
   if (!token) throw new Error(i18n.t('未登录，请先设置 GitHub Token'));
@@ -204,19 +189,16 @@ async function removeLabel(issueNumber: string, label: string): Promise<void> {
   await ghRequest('DELETE', `/repos/${PROPOSAL_REPO}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`, token);
 }
 
-/** 审核通过 */
 export async function approveProposal(id: string): Promise<void> {
   await addLabel(id, LABEL_APPROVED);
   await removeLabel(id, LABEL_PENDING);
 }
 
-/** 拒绝 */
 export async function rejectProposal(id: string): Promise<void> {
   await addLabel(id, LABEL_REJECTED);
   await removeLabel(id, LABEL_PENDING);
 }
 
-/** 标记应用（并关闭 Issue） */
 export async function applyProposal(id: string): Promise<void> {
   const token = getToken();
   if (!token) throw new Error(i18n.t('未登录，请先设置 GitHub Token'));
@@ -225,8 +207,6 @@ export async function applyProposal(id: string): Promise<void> {
   await removeLabel(id, LABEL_APPROVED).catch(() => { /* ignore */ });
   await ghRequest('PATCH', `/repos/${PROPOSAL_REPO}/issues/${id}`, token, { state: 'closed' });
 }
-
-// ── 提交（供 AI Agent 的 report_tool_issue / propose_tool_fix 工具调用）──────
 
 export interface SubmitProposalInput {
   tool_name: string;
@@ -238,7 +218,6 @@ export interface SubmitProposalInput {
   code_after?: string | null;
 }
 
-/** 提交新提案（创建带标签的 Issue） */
 export async function submitProposal(input: SubmitProposalInput): Promise<string> {
   const token = getToken();
   if (!token) throw new Error(i18n.t('未登录，请先设置 GitHub Token'));

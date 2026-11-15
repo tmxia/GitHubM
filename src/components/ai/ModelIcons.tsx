@@ -1,4 +1,4 @@
-// 各 AI 模型品牌 SVG 图标组件
+
 import React from 'react';
 
 interface IconProps {
@@ -6,7 +6,6 @@ interface IconProps {
   style?: React.CSSProperties;
 }
 
-/** 文心 ERNIE（百度）*/
 export function WenxinIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">
@@ -23,7 +22,6 @@ export function WenxinIcon({ className, style }: IconProps) {
   );
 }
 
-/** DeepSeek */
 export function DeepSeekIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 1391 1024" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">
@@ -35,7 +33,6 @@ export function DeepSeekIcon({ className, style }: IconProps) {
   );
 }
 
-/** Google Gemini */
 export function GeminiIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">
@@ -47,7 +44,6 @@ export function GeminiIcon({ className, style }: IconProps) {
   );
 }
 
-/** 通义千问（阿里）*/
 export function QwenIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">
@@ -60,7 +56,6 @@ export function QwenIcon({ className, style }: IconProps) {
   );
 }
 
-/** 自定义 / 其他（OpenAI 也复用此图标） */
 export function CustomIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">
@@ -72,7 +67,6 @@ export function CustomIcon({ className, style }: IconProps) {
   );
 }
 
-/** OpenAI（使用简洁的 AI 文字版，无专用官方 SVG）*/
 export function OpenAIIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className={className} style={style} aria-hidden="true">

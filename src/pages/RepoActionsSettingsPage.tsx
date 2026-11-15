@@ -81,7 +81,6 @@ export default function RepoActionsSettingsPage() {
 
   useEffect(() => { load(); }, [load, reloadKey]);
 
-  
   const handleSave = async () => {
     if (!owner || !repoName) return;
     if (retentionDays < 1 || retentionDays > 400) {
@@ -91,7 +90,7 @@ export default function RepoActionsSettingsPage() {
     setSaving(true);
 
     try {
-      // 1. 执行所有更新请求（严格遵循，不吞错误）
+
       const promises = [
         updateActionsPermissions(owner, repoName, {
           enabled,
@@ -124,12 +123,8 @@ export default function RepoActionsSettingsPage() {
 
       await Promise.all(promises);
 
-      // 隔离企业版接口，静默忽略它的报错，不影响整体流程
       await updateArtifactLogRetention(owner, repoName, retentionDays).catch(() => {});
 
-      // 2. 完美对齐仓库设置：强制重新拉取最新数据（带 fresh 标志，如果底层支持的话）
-      // 为了兼容性，如果我们的 api 没有 fresh 参数，我们直接通过重新执行 load(true) 并在内部加上防缓存参数，或者直接用本地状态覆盖。
-      // 这里我们选择重新请求接口拉取最新真实状态
       const [freshPerm, freshWf, freshSel, freshRet] = await Promise.all([
         getActionsPermissions(owner, repoName).catch(() => null),
         getWorkflowPermissions(owner, repoName).catch(() => null),
@@ -152,11 +147,10 @@ export default function RepoActionsSettingsPage() {
       }
       if (freshRet && typeof freshRet.days === 'number') setRetentionDays(freshRet.days);
 
-      // 3. 成功提示
       toast.success(i18n.t('Actions 设置已保存并同步生效'));
 
     } catch (e) {
-      // 只要有一个步骤报错，这里一定会接住
+
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败，请检查权限或网络'));
     } finally {
       setSaving(false);
@@ -178,7 +172,7 @@ export default function RepoActionsSettingsPage() {
       <div className="p-4 md:p-6 max-w-3xl mx-auto text-center py-12 text-destructive">
         <AlertCircle className="w-10 h-10 mx-auto mb-3" />
         <p>{error}</p>
-        
+
       </div>
     );
   }
@@ -200,7 +194,7 @@ export default function RepoActionsSettingsPage() {
             {i18n.t('Actions 设置')}
           </h1>
         <div className="flex items-center gap-2">
-          
+
           <Button
           variant="ghost"
           size="sm"

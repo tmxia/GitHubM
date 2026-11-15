@@ -1,5 +1,4 @@
-// 代码验证辅助逻辑：把 GitHub Checks 结果转成 Agent 可读的结论，
-// 并判断一次修改是否属于“需要验证”的代码变更。
+
 
 export interface CheckRunLike {
   name?: string;
@@ -33,7 +32,6 @@ const FAILED_CONCLUSIONS = new Set([
   'startup_failure',
 ]);
 
-/** 汇总 check-runs 列表 */
 export function summarizeCheckRuns(runs: CheckRunLike[]): CheckSummary {
   const total = runs.length;
   let passed = 0;
@@ -54,7 +52,7 @@ export function summarizeCheckRuns(runs: CheckRunLike[]): CheckSummary {
       failedNames.push(name);
       continue;
     }
-    // success / neutral / skipped 都视为未阻塞
+
     passed++;
   }
 
@@ -66,7 +64,6 @@ export function summarizeCheckRuns(runs: CheckRunLike[]): CheckSummary {
   return { state, total, passed, failed, pending, failedNames, pendingNames };
 }
 
-/** 汇总旧版 commit status API */
 export function summarizeCommitStatus(status: {
   state?: string;
   statuses?: Array<{ context?: string; state?: string; description?: string }>;
@@ -91,7 +88,6 @@ export function summarizeCommitStatus(status: {
   return { state, total, passed, failed, pending, failedNames, pendingNames };
 }
 
-/** 生成给模型看的检查报告 */
 export function formatCheckSummary(
   summary: CheckSummary,
   meta: { ref: string; sha: string; elapsedMs: number }
@@ -117,10 +113,6 @@ export function formatCheckSummary(
 
 const DOC_EXTENSIONS = new Set(['md', 'mdx', 'txt', 'rst', 'adoc']);
 
-/**
- * 判断修改文件是否需要代码验证。
- * 文档类变更不强制；无扩展名（如 Makefile、Dockerfile）和代码文件都要求。
- */
 export function requiresVerification(paths: string[]): boolean {
   if (paths.length === 0) return false;
   return paths.some((path) => {
@@ -132,7 +124,6 @@ export function requiresVerification(paths: string[]): boolean {
   });
 }
 
-/** 从工具参数中提取被修改的文件路径（兼容本地工具与 MCP 工具） */
 export function extractChangedPaths(toolName: string, args: Record<string, unknown>): string[] {
   const paths = new Set<string>();
   const add = (value: unknown) => {
