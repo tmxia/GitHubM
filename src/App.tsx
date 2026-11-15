@@ -8,6 +8,7 @@ import { NetworkStatusBanner } from '@/components/NetworkStatusBanner';
 import { routes } from './routes';
 import { recordVisit } from '@/lib/visitStats';
 import { startPolling } from '@/lib/compilePoller';
+import RouteScrollManager from '@/components/system/RouteScrollManager';
 
 function RouteGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -73,6 +74,8 @@ function AppContent() {
           </div>
         }
       >
+            <RouteScrollManager />
+
       <Routes>
         {routes
           .filter((r) => r.public)
