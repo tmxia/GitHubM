@@ -719,51 +719,66 @@ export default function DashboardPage() {
   };
 
   const restoredRef = useRef(false);
-  useEffect(() => {
-    if (loading || restoredRef.current) return;
-    restoredRef.current = true;
 
+  // 移动端 iOS 级精准恢复：锚点优先 + 像素兜底 + 触摸防抖
+  useEffect(() => {
     const isReturning = sessionStorage.getItem('dashboard_is_returning') === '1';
 
-    if (!isReturning) {
-
+    // 正常首次进入，强制置顶
+    if (!isReturning && !restoredRef.current) {
       window.scrollTo(0, 0);
-      clearListScroll(DASHBOARD_SCROLL_KEY);
+      restoredRef.current = true;
       return;
     }
 
-    sessionStorage.removeItem('dashboard_is_returning');
-    const y = readListScroll(DASHBOARD_SCROLL_KEY);
-    if (y <= 0) return;
+    // 如果是返回，等数据彻底加载完再操作
+    if (isReturning && !loading && compileStatus.length > 0) {
+      const anchorId = sessionStorage.getItem('dash_anchor_id');
+      const exactY = sessionStorage.getItem('dash_exact_y');
 
-    let attempts = 0;
-    const tryScroll = () => {
-      window.scrollTo(0, y);
-      document.documentElement.scrollTop = y;
-      document.body.scrollTop = y;
-      const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      if (anchorId || exactY) {
+        let isUserTouching = false;
+        
+        // 移动端核心：手指一碰屏幕，立刻交出控制权
+        const handleTouch = () => { isUserTouching = true; };
+        window.addEventListener('touchstart', handleTouch, { passive: true });
+        window.addEventListener('touchmove', handleTouch, { passive: true });
 
-      if (Math.abs(actual - y) <= 2) {
-        clearListScroll(DASHBOARD_SCROLL_KEY);
-      } else {
+        let attempts = 0;
+        
+        const restorePosition = () => {
+          // 用户滑动了，或者等待超时（约 2 秒），清理环境
+          if (isUserTouching || attempts > 120) {
+            sessionStorage.removeItem('dashboard_is_returning');
+            sessionStorage.removeItem('dash_anchor_id');
+            sessionStorage.removeItem('dash_exact_y');
+            clearListScroll(DASHBOARD_SCROLL_KEY);
+            window.removeEventListener('touchstart', handleTouch);
+            window.removeEventListener('touchmove', handleTouch);
+            return;
+          }
 
-        const maxScrollHeight = Math.max(
-          document.body.scrollHeight, document.documentElement.scrollHeight,
-          document.body.offsetHeight, document.documentElement.offsetHeight,
-          document.body.clientHeight, document.documentElement.clientHeight
-        );
+          // 策略 1：如果卡片已经渲染出来，使用锚点强制定位
+          const el = document.getElementById(`anchor-${anchorId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'instant', block: 'center' });
+          } 
+          // 策略 2：如果卡片还没出来，先用绝对像素兜底
+          else if (exactY) {
+            window.scrollTo({ top: parseInt(exactY, 10), behavior: 'instant' });
+          }
 
-        if (maxScrollHeight < y + window.innerHeight || attempts < 300) {
           attempts++;
-          setTimeout(tryScroll, 30);
-        } else {
+          requestAnimationFrame(restorePosition);
+        };
 
-          console.warn('滚动恢复失败：页面高度不足或超时');
-        }
+        // 延迟一帧启动，让 React 完成首次 DOM 挂载
+        setTimeout(() => {
+          requestAnimationFrame(restorePosition);
+        }, 50);
       }
-    };
-    setTimeout(tryScroll, 50);
-  }, [loading]);
+    }
+  }, [loading, compileStatus]);
 
   useEffect(() => {
     if (!compileEnabled) return;
@@ -1062,7 +1077,18 @@ export default function DashboardPage() {
                         const durationStr = fmtDuration(run?.run_started_at || run?.created_at, run?.status === 'completed' ? run?.updated_at : null);
 
                         return (
-                          <div key={`${repo.id}-${run?.id ?? idx}`} className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left block cursor-pointer" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(`/repos/${repo?.full_name}/actions`); }}>
+                          <div 
+                          id={`anchor-${repo.full_name}`}
+                          key={`${repo.id}-${run?.id ?? idx}`} 
+                          className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left block cursor-pointer" 
+                          onClick={() => { 
+                            sessionStorage.setItem('dashboard_is_returning', '1'); 
+                            sessionStorage.setItem('dash_anchor_id', repo.full_name);
+                            sessionStorage.setItem('dash_exact_y', String(window.scrollY));
+                            saveListScroll(DASHBOARD_SCROLL_KEY); 
+                            navigate(`/repos/${repo?.full_name}/actions`); 
+                          }}
+                        >
 
                             <div className="flex items-center gap-2 mb-1">
                               <div className="w-5 h-5 flex items-center justify-center shrink-0">
