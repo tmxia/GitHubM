@@ -78,26 +78,37 @@ export default function CommitsPage() {
 
   useEffect(() => {
     if (!owner || !repo) return;
-    const storageKey = `commits_branch:${owner}/${repo}`;
-    const saved = localStorage.getItem(storageKey);
-
+    
+    // 核心修复 1：强制加上 fresh: true 穿透缓存
     Promise.all([
       getBranches(owner, repo),
-      getRepo(owner, repo).catch(() => null),
+      getRepo(owner, repo, { fresh: true }).catch(() => null),
     ])
       .then(([branchResult, repoData]) => {
-        setBranches(branchResult.data);
-        const names = branchResult.data.map((b) => b.name);
+        let branchList = branchResult.data;
         const defaultBranch = repoData?.default_branch || '';
+
+        // 核心修复 2：如果因为分页导致默认分支不在列表里，强行插到最前面
+        if (defaultBranch && !branchList.some((b) => b.name === defaultBranch)) {
+          branchList = [{ name: defaultBranch, commit: { sha: '' } } as any, ...branchList];
+        }
+        
+        setBranches(branchList);
+        const names = branchList.map((b) => b.name);
+
         let initial = '';
-      if (defaultBranch && names.includes(defaultBranch)) {
-        initial = defaultBranch;
-      } else if (saved && names.includes(saved)) {
-        initial = saved;
-      } else {
-        initial = names[0] || '';
-      }
-      setSelectedBranch(initial);
+        // 核心修复 3：绝对优先相信 API 返回的默认分支
+        if (defaultBranch && names.includes(defaultBranch)) {
+          initial = defaultBranch;
+        } else if (names.includes('main')) {
+          initial = 'main';
+        } else if (names.includes('master')) {
+          initial = 'master';
+        } else if (names.length > 0) {
+          initial = names[0];
+        }
+        
+        setSelectedBranch(initial);
       })
       .catch(console.error);
   }, [owner, repo]);
