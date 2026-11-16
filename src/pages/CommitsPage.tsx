@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useRepoPermissions } from '@/hooks/use-repo-permissions';
 import {
   Clock,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import PullToRefresh from '@/components/common/PullToRefresh';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
@@ -41,6 +43,7 @@ import i18n from "@/i18n";
 
 export default function CommitsPage() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>();
+  const { canPush } = useRepoPermissions(owner, repo);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const branchParam = searchParams.get('branch') || '';
@@ -156,7 +159,8 @@ export default function CommitsPage() {
   };
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
+    <PullToRefresh onRefresh={() => loadCommits(1, false, true)}>
+      <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       {/* 面包屑 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -347,5 +351,6 @@ export default function CommitsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </PullToRefresh>
   );
 }
