@@ -104,26 +104,10 @@ jobs:
             pnpm exec vite build
             mv dist dist-full
 
-            # ============ 下面是精简版（Lite）的专属瘦身操作 ============
-            # 核心修复：在构建 Lite 版前，物理切掉 AI V2 巨大的依赖目录
-            rm -rf src/ai-v2
-            
-            # 把 AI 页面替换成一个空的占位组件，彻底切断对 jszip/pdfjs 等大库的引用
-            echo "export default function AiAssistantV2Page() { return null; }" > src/pages/AiAssistantV2Page.tsx
-
             # 精简版（不含 AI 助手）
-            # 核心修复：在编译前，将路由里的 AI 页面替换为一个空占位组件，彻底剔除体积
-            cp src/routes.tsx src/routes.tsx.bak
-            sed -i "s|import('@/pages/AiAssistantV2Page')|import('@/pages/_AiStub')|g" src/routes.tsx
-            
+            # 核心修复：不需要物理删除任何文件！Vite 会根据环境变量自动 Tree-shaking
             VITE_AI_ENABLED=false pnpm exec vite build
             mv dist dist-lite
-            
-            # 恢复原版路由
-            mv src/routes.tsx.bak src/routes.tsx
-
-            # 恢复被修改和删除的文件，保证后续 Job（如 Tauri）不受影响
-            git checkout -- src/ai-v2 src/pages/AiAssistantV2Page.tsx
 
           echo "✅ 两份构建完成：dist-full / dist-lite"
 

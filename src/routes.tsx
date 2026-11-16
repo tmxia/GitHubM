@@ -39,6 +39,7 @@ const UserReposPage = lazy(() => import('./pages/UserReposPage'));
 const StargazersPage = lazy(() => import('./pages/StargazersPage'));
 const PrDiffPage = lazy(() => import('./pages/PrDiffPage'));
 const AiAssistantV2Page = lazy(() => import('@/pages/AiAssistantV2Page'));
+const AiSettingsPage = lazy(() => import('@/pages/AiSettingsPage'));
 const MorePage = lazy(() => import('./pages/MorePage'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 import i18n from "@/i18n";
@@ -95,6 +96,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('设置'), path: '/settings', element: <SettingsPage /> },
   { name: 'GraphQL Playground', path: '/graphql-playground', element: <GraphQLPlaygroundPage /> },
   ...(AI_ENABLED && AiAssistantV2Page ? [{ name: i18n.t('AI 助手'), path: '/ai-assistant', element: <AiAssistantV2Page /> }] : []),
+  ...(AI_ENABLED && AiSettingsPage ? [{ name: i18n.t('AI 设置'), path: '/ai-settings', element: <AiSettingsPage /> }, { name: i18n.t('AI 设置'), path: '/ai-settings/:section', element: <AiSettingsPage /> }] : []),
   { name: i18n.t('后台任务'), path: '/tasks', element: <TasksPage /> },
   { name: '全部功能', path: '/more', element: <MorePage /> },
 ];
