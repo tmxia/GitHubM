@@ -38,7 +38,7 @@ const RepoSettingsPage = lazy(() => import('./pages/RepoSettingsPage'));
 const UserReposPage = lazy(() => import('./pages/UserReposPage'));
 const StargazersPage = lazy(() => import('./pages/StargazersPage'));
 const PrDiffPage = lazy(() => import('./pages/PrDiffPage'));
-const AiAssistantPage = lazy(() => import('@/pages/AiAssistantPage'));
+const AiAssistantV2Page = lazy(() => import('@/pages/AiAssistantV2Page'));
 const MorePage = lazy(() => import('./pages/MorePage'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 import i18n from "@/i18n";
@@ -94,7 +94,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('仓库收藏者'), path: '/repos/:owner/:repo/stargazers', element: <StargazersPage /> },
   { name: i18n.t('设置'), path: '/settings', element: <SettingsPage /> },
   { name: 'GraphQL Playground', path: '/graphql-playground', element: <GraphQLPlaygroundPage /> },
-  ...(AI_ENABLED && AiAssistantPage ? [{ name: i18n.t('AI 助手'), path: '/ai-assistant', element: <AiAssistantPage /> }] : []),
+  ...(AI_ENABLED && AiAssistantV2Page ? [{ name: i18n.t('AI 助手'), path: '/ai-assistant', element: <AiAssistantV2Page /> }] : []),
   { name: i18n.t('后台任务'), path: '/tasks', element: <TasksPage /> },
   { name: '全部功能', path: '/more', element: <MorePage /> },
 ];

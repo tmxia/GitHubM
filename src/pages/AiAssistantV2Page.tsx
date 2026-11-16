@@ -1,0 +1,2866 @@
+// AI Assistant V2 — 通用聊天优先，仓库可选，Operit 风格对话流
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { runGeneralAgent, toAgentHistory, toolCallLabel } from '@/ai-v2/agent';
+import type { AgentEvent, ApprovalRequest, ArtifactMeta, RepoContext, UiAssistantBlock, UiChatMessage, UiToolRun, V2ProviderMessage } from '@/ai-v2/types';
+import { readArtifact } from '@/ai-v2/artifacts';
+import { appendRunEvent, clearRunSnapshot, clearRunSnapshots, finishRun, latestRunSnapshot, resumeRun, saveRunSnapshot, startRun } from '@/ai-v2/runStore';
+import type { RunSnapshot } from '@/ai-v2/runStore';
+import { loadV2Settings } from '@/ai-v2/settings';
+import { buildUnifiedDiff } from '@/ai-v2/diff';
+import { applyUnifiedDiff, diffStats } from '@/ai-v2/patch';
+import {
+  buildModelUserContent,
+  buildModelUserParts,
+  filterRepoFiles,
+  formatFileSize,
+  hydrateAttachmentImages,
+  hydrateMessageImages,
+  isTextFilePath,
+  makeAttachmentId,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  prepareImageAttachment,
+} from '@/ai-v2/attachments';
+import type { UiAttachment } from '@/ai-v2/attachments';
+import { putImageBlob } from '@/ai-v2/imageStore';
+import { loadActiveCharacter } from '@/ai-v2/characters';
+import type { CharacterCard } from '@/ai-v2/characters';
+import {
+  deleteSessionMessages,
+  loadSessionIndex,
+  loadSessionMessages,
+  saveSessionIndex,
+  saveSessionMessages,
+  toSessionMeta,
+} from '@/ai-v2/sessionStore';
+import type { SessionIndex, V2Session } from '@/ai-v2/sessionStore';
+import { appendBlockDelta, appendToolBlock, buildRenderGroups, ensureBlocks } from '@/ai-v2/blocks';
+import AiExecutionPanel from '@/components/ai/AiExecutionPanel';
+import { deriveSessionTitle } from '@/ai-v2/sessionTitle';
+import { extractPdfText, MAX_PDF_BYTES } from '@/ai-v2/pdf';
+import RepoSelector from '@/components/ai/RepoSelector';
+import {
+  MODEL_DEFS,
+  ModelAvatar,
+  getModelDef,
+  loadModelConfig,
+  loadProviderKey,
+  renderMarkdown,
+} from '@/components/ai/aiUtils';
+import type { ModelType } from '@/components/ai/aiTypes';
+import { getModelCapabilities } from '@/ai-v2/modelCapabilities';
+import type { ModelConfig } from '@/components/ai/aiTypes';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import type { GitHubRepo } from '@/types/types';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import i18n from '@/i18n';
+import {
+  ArrowDown,
+  AtSign,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Copy,
+  Eye,
+  FileText,
+  GitBranch,
+  Loader2,
+  Menu,
+  MessageSquarePlus,
+  Paperclip,
+  PanelRight,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Settings,
+  ShieldAlert,
+  Sparkles,
+  Square,
+  Trash2,
+  Wrench,
+  X,
+  XCircle,
+  Zap,
+} from 'lucide-react';
+
+const LEGACY_PREFIX = 'githubm_ai_v2_session:';
+const MAX_SESSIONS = 20;
+const MAX_SAVED_MESSAGES = 40;
+const MAX_TOOL_RESULT = 4000;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_USER_MESSAGE_CHARS = 4000;
+const USER_MESSAGE_PREVIEW_CHARS = 2000;
+const STREAMING_PLAIN_LIMIT = 400_000;
+
+function readFileAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+const CLOUDFLARE_FALLBACK_CONFIG: ModelConfig = {
+  type: 'cloudflare',
+  api_key: 'cloudflare-free',
+  model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  proxy_url: 'https://llm.callact.xyz',
+};
+
+function isOpenRouterDailyLimit(message: string): boolean {
+  return /429/.test(message) && /free-models-per-day|free model requests per day/i.test(message);
+}
+
+function friendlyModelError(message: string): string {
+  if (message.includes('Cloudflare AI 兜底也失败：')) {
+    const detail = message.split('Cloudflare AI 兜底也失败：').pop() || '';
+    return `OpenRouter 免费额度已用完，Cloudflare AI 兜底也失败：${detail}`;
+  }
+  if (isOpenRouterDailyLimit(message)) {
+    return 'OpenRouter 免费模型今日额度已用完。可等待额度重置，或切换到其他模型平台。';
+  }
+  if (/HTTP 429/.test(message)) {
+    return '请求过于频繁，已触发模型平台限流，请稍后再试。';
+  }
+  return message;
+}
+
+function makeId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newSession(): V2Session {
+  const now = new Date().toISOString();
+  return {
+    id: makeId('s'),
+    title: i18n.t('新对话'),
+    titleSource: 'auto',
+    messages: [],
+    repo: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function migrateLegacyRoundLimit(messages: UiChatMessage[]): UiChatMessage[] {
+  return messages.map(message => {
+    // 上次运行被中断时，消息可能停在 streaming / running 状态，加载时统一收尾
+    let next = message.streaming ? { ...message, streaming: false } : message;
+    if (next.tools?.some(tool => tool.status === 'running')) {
+      next = {
+        ...next,
+        tools: next.tools.map(tool => (tool.status === 'running'
+          ? { ...tool, status: 'error' as const, content: tool.content || i18n.t('已中断') }
+          : tool)),
+      };
+    }
+    if (next.role !== 'assistant' || !next.content.includes('已达到最大工具轮数')) return next;
+    return {
+      ...next,
+      content: i18n.t('这条消息来自旧版 AI（v1.0.528 之前）。V2 已移除固定工具轮数限制，可以直接继续任务。'),
+      error: false,
+      streaming: false,
+    };
+  });
+}
+
+function compactMessages(messages: UiChatMessage[]): UiChatMessage[] {
+  return messages.slice(-MAX_SAVED_MESSAGES).map(message => {
+    let attachmentBudget = 30_000;
+    const attachments = message.attachments?.map(attachment => {
+      const content = attachment.content.slice(0, Math.max(0, attachmentBudget));
+      attachmentBudget -= content.length;
+      return {
+        ...attachment,
+        content,
+        // 图片正文存 IndexedDB（imageBlobId），持久化时只保留缩略图
+        dataUrl: attachment.imageBlobId ? undefined : attachment.dataUrl,
+      };
+    });
+    return {
+      ...message,
+      content: message.content.slice(0, 20000),
+      modelContent: undefined,
+      attachments,
+      reasoning: message.reasoning?.slice(0, 8000),
+      blocks: message.blocks?.slice(-20).map(block => ({
+        ...block,
+        text: block.text ? block.text.slice(0, 12000) : undefined,
+      })),
+      tools: message.tools?.map(tool => ({
+        ...tool,
+        content: tool.content?.slice(0, MAX_TOOL_RESULT),
+      })),
+    };
+  });
+}
+
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function groupSessions(sessions: V2Session[]): Array<{ label: string; items: V2Session[] }> {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = today - 86400000;
+  const groups = [
+    { label: i18n.t('今天'), items: [] as V2Session[] },
+    { label: i18n.t('昨天'), items: [] as V2Session[] },
+    { label: i18n.t('更早'), items: [] as V2Session[] },
+  ];
+  for (const session of [...sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))) {
+    const time = Date.parse(session.updatedAt) || 0;
+    if (time >= today) groups[0].items.push(session);
+    else if (time >= yesterday) groups[1].items.push(session);
+    else groups[2].items.push(session);
+  }
+  return groups.filter(group => group.items.length > 0);
+}
+
+function ReasoningPanel({ text, streaming }: { text: string; streaming?: boolean }) {
+  const [open, setOpen] = useState(Boolean(streaming));
+  useEffect(() => {
+    if (!streaming) setOpen(false);
+  }, [streaming]);
+  if (!text) return null;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen(prev => !prev)}
+        className="inline-flex items-center gap-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span>{streaming ? i18n.t('思考中') : i18n.t('已思考')}</span>
+        {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+      </button>
+      {open && (
+        <div className="mt-1.5 whitespace-pre-wrap border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+function ToolCard({ tool, onOpenArtifact }: { tool: UiToolRun; onOpenArtifact: (meta: ArtifactMeta) => void }) {
+  const [open, setOpen] = useState(false);
+  const duration = tool.startedAt && tool.endedAt
+    ? `${Math.max(0.1, (tool.endedAt - tool.startedAt) / 1000).toFixed(1)}s`
+    : '';
+  const statusIcon = tool.status === 'running'
+    ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+    : tool.status === 'done'
+      ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+      : <XCircle className="h-3.5 w-3.5 text-destructive" />;
+
+  return (
+    <div className={cn(
+      'overflow-hidden rounded-lg border bg-card/70',
+      tool.status === 'error' ? 'border-destructive/30' : 'border-border',
+    )}>
+      <button
+        type="button"
+        onClick={() => setOpen(prev => !prev)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/35"
+      >
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate font-mono">{toolCallLabel({ id: tool.id, name: tool.name, arguments: tool.arguments })}</span>
+        {duration && <span className="shrink-0 text-[10px] text-muted-foreground">{duration}</span>}
+        {statusIcon}
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-border px-3 py-2">
+          <div>
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">{i18n.t('参数')}</p>
+            <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 text-[10px] font-mono">{tool.arguments || '{}'}</pre>
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">{i18n.t('结果')}</p>
+            {tool.status === 'running' ? (
+              <p className="text-xs text-muted-foreground">{i18n.t('正在执行…')}</p>
+            ) : (
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 text-[10px] font-mono">{tool.content || i18n.t('无输出')}</pre>
+            )}
+            {tool.artifact && (
+              <button
+                type="button"
+                onClick={() => onOpenArtifact(tool.artifact!)}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-primary/25 bg-primary/5 px-2 py-1 text-[10px] text-primary hover:bg-primary/10"
+              >
+                <Eye className="h-3 w-3" />
+                {i18n.t('查看完整结果')} · {tool.artifact.size.toLocaleString()} {i18n.t('字符')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolActivity({ tools, onOpenArtifact }: { tools: UiToolRun[]; onOpenArtifact: (meta: ArtifactMeta) => void }) {
+  if (!tools.length) return null;
+  return (
+    <div className="my-2 space-y-1.5 border-l-2 border-primary/20 pl-2.5">
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <Zap className="h-3 w-3" />
+        {i18n.t('工具调用')}
+        <span className="rounded-full bg-muted px-1.5 text-[9px]">{tools.length}</span>
+      </div>
+      {tools.map(tool => <ToolCard key={tool.id} tool={tool} onOpenArtifact={onOpenArtifact} />)}
+    </div>
+  );
+}
+
+function AssistantTextBlock({ text, streaming, error, onApplyDiff }: {
+  text: string;
+  streaming?: boolean;
+  error?: boolean;
+  onApplyDiff: (path: string, diff: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  // 流式阶段不解析 Markdown：只渲染纯文本，流结束后再渲染一次
+  const base = streaming && text.length > STREAMING_PLAIN_LIMIT
+    ? `…
+${text.slice(-STREAMING_PLAIN_LIMIT)}`
+    : text;
+  const isLong = !streaming && base.length > 12000;
+  const display = isLong && !expanded ? `${base.slice(0, 12000)}
+
+…` : base;
+  return (
+    <div className={cn(
+      'min-w-0 text-[15px] leading-7 break-words',
+      error ? 'text-destructive' : 'text-foreground',
+    )}>
+      {streaming ? (
+        <p className="whitespace-pre-wrap break-words">
+          {display}
+          <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-sm bg-primary align-middle" />
+        </p>
+      ) : (
+        renderMarkdown(display, onApplyDiff)
+      )}
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(value => !value)}
+          className="mt-1 text-[10px] text-primary hover:underline"
+        >
+          {expanded ? i18n.t('收起内容') : i18n.t('展开全文')}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AssistantTurn({ message, onOpenArtifact, onApplyDiff }: {
+  message: UiChatMessage;
+  onOpenArtifact: (meta: ArtifactMeta) => void;
+  onApplyDiff: (path: string, diff: string) => void;
+}) {
+  const blocks = message.blocks || [];
+  const tools = message.tools || [];
+  const isStreaming = Boolean(message.streaming);
+
+  const hasBody = blocks.length > 0 || Boolean(message.content || message.reasoning) || tools.length > 0;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      toast.success(i18n.t('已复制回答'));
+    } catch {
+      toast.error(i18n.t('复制失败'));
+    }
+  };
+
+  // 新消息按区块顺序渲染：思考 → 工具 → 正文 → 工具 → 正文…
+  // 区块合并成展示分组：连续工具调用收进执行面板，正文保持独立
+  const groups = buildRenderGroups(blocks);
+  const lastGroupIndex = groups.length - 1;
+  const renderedBlocks = groups.map((group, index) => {
+    const isLast = index === lastGroupIndex;
+    if (group.kind === 'reasoning') {
+      return <ReasoningPanel key={group.id} text={group.text} streaming={isStreaming && isLast} />;
+    }
+    if (group.kind === 'execution') {
+      const groupTools = group.toolIds
+        .map(id => tools.find(item => item.id === id))
+        .filter((tool): tool is UiToolRun => Boolean(tool));
+      if (!groupTools.length) return null;
+      return (
+        <AiExecutionPanel
+          key={group.id}
+          tools={groupTools}
+          onOpenArtifact={onOpenArtifact}
+        />
+      );
+    }
+    return (
+      <AssistantTextBlock
+        key={group.id}
+        text={group.text}
+        streaming={isStreaming && isLast}
+        error={message.error && isLast}
+        onApplyDiff={onApplyDiff}
+      />
+    );
+  });
+
+  return (
+    <div className="min-w-0">
+      {groups.length > 0 ? (
+        <div className="space-y-2">{renderedBlocks}</div>
+      ) : (
+        <>
+          <ReasoningPanel text={message.reasoning || ''} streaming={message.streaming} />
+          <ToolActivity tools={tools} onOpenArtifact={onOpenArtifact} />
+          {message.content ? (
+            <AssistantTextBlock
+              text={message.content}
+              streaming={isStreaming}
+              error={message.error}
+              onApplyDiff={onApplyDiff}
+            />
+          ) : null}
+        </>
+      )}
+
+      {isStreaming && !hasBody && (
+        <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {i18n.t('思考中…')}
+        </div>
+      )}
+
+      {!message.streaming && (message.content || message.metrics) && (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {message.content && (
+            <button
+              type="button"
+              onClick={copy}
+              title={i18n.t('复制')}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Copy className="h-4 w-4" />
+            </button>
+          )}
+          {message.metrics && (
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/70">
+              {message.metrics.totalTokens ? <span>{message.metrics.totalTokens} tokens</span> : null}
+              {message.metrics.firstTokenMs ? <span>首字 {Math.round(message.metrics.firstTokenMs / 100) / 10}s</span> : null}
+              {message.metrics.durationMs ? <span>总耗时 {Math.round(message.metrics.durationMs / 100) / 10}s</span> : null}
+              {message.metrics.model ? <span className="max-w-[180px] truncate font-mono">{message.metrics.model}</span> : null}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ConversationTurn {
+  id: string;
+  user: UiChatMessage | null;
+  assistants: UiChatMessage[];
+}
+
+function buildTurns(messages: UiChatMessage[]): ConversationTurn[] {
+  const turns: ConversationTurn[] = [];
+  let current: ConversationTurn | null = null;
+  for (const message of messages) {
+    if (message.role === 'user') {
+      current = { id: message.id, user: message, assistants: [] };
+      turns.push(current);
+      continue;
+    }
+    if (!current) {
+      current = { id: message.id, user: null, assistants: [] };
+      turns.push(current);
+    }
+    current.assistants.push(message);
+  }
+  return turns;
+}
+
+function ConversationTurnView({ turn, onOpenArtifact, onApplyDiff }: {
+  turn: ConversationTurn;
+  index: number;
+  onOpenArtifact: (meta: ArtifactMeta) => void;
+  onApplyDiff: (path: string, diff: string) => void;
+}) {
+  const [userExpanded, setUserExpanded] = useState(false);
+  const userContent = turn.user?.content || '';
+  const userIsLong = userContent.length > MAX_USER_MESSAGE_CHARS;
+  const shownUserContent = userIsLong && !userExpanded
+    ? `${userContent.slice(0, USER_MESSAGE_PREVIEW_CHARS)}\n\n…`
+    : userContent;
+
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      {turn.user && (
+        <div className="flex min-w-0 flex-col items-end gap-1.5">
+          <div className="max-w-[86%] min-w-0 rounded-2xl rounded-br-md bg-muted px-3.5 py-2.5 text-[15px] leading-7 text-foreground">
+            <span className="whitespace-pre-wrap break-words">{shownUserContent}</span>
+            {userIsLong && (
+              <button
+                type="button"
+                onClick={() => setUserExpanded(value => !value)}
+                className="mt-1 block text-[10px] text-primary underline-offset-2 hover:underline"
+              >
+                {userExpanded
+                  ? i18n.t('收起内容')
+                  : i18n.t('展开全部（共 {{count}} 字）', { count: userContent.length })}
+              </button>
+            )}
+          </div>
+          {turn.user.attachments && turn.user.attachments.length > 0 && (
+            <div className="flex max-w-[94%] flex-wrap justify-end gap-1">
+              {turn.user.attachments.map(attachment => (
+                <span
+                  key={attachment.id}
+                  className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[9px] text-muted-foreground"
+                  title={attachment.path || attachment.name}
+                >
+                  {attachment.kind === 'image' && (attachment.thumbDataUrl || attachment.dataUrl) ? (
+                    <img src={attachment.thumbDataUrl || attachment.dataUrl} alt={attachment.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+                  ) : attachment.source === 'repo' ? <AtSign className="h-2.5 w-2.5 shrink-0 text-primary" /> : <Paperclip className="h-2.5 w-2.5 shrink-0" />}
+                  <span className="truncate">{attachment.path || attachment.name}</span>
+                  <span className="shrink-0 opacity-70">{formatFileSize(attachment.size)}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="min-w-0 border-t border-border/60 pt-3">
+
+        {turn.assistants.length > 0 ? (
+          <div className="min-w-0 space-y-4">
+            {turn.assistants.map(message => (
+              <div key={message.id} className="min-w-0">
+                <AssistantTurn message={message} onOpenArtifact={onOpenArtifact} onApplyDiff={onApplyDiff} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {i18n.t('思考中…')}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ApplyPatchDialog({
+  request,
+  repo,
+  token,
+  onClose,
+}: {
+  request: { path: string; diff: string } | null;
+  repo: RepoContext | null;
+  token: string;
+  onClose: () => void;
+}) {
+  const [message, setMessage] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!request) return;
+    setMessage(`Apply AI patch to ${request.path}`);
+    setApplying(false);
+    setError('');
+  }, [request]);
+
+  const stats = useMemo(() => request ? diffStats(request.diff) : { additions: 0, deletions: 0 }, [request]);
+
+  const apply = async () => {
+    if (!request || !repo || !token || applying) return;
+    const branch = repo.branch || repo.defaultBranch || 'main';
+    setApplying(true);
+    setError('');
+    try {
+      const encodedPath = request.path.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.fullName}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        },
+      );
+      if (response.status === 404) throw new Error(i18n.t('目标文件不存在，无法应用补丁'));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { content?: string; encoding?: string; sha?: string };
+      if (!data.content || data.encoding !== 'base64' || !data.sha) throw new Error(i18n.t('无法读取目标文件'));
+      const binary = atob(data.content.replace(/\s/g, ''));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const original = new TextDecoder().decode(bytes);
+      const next = applyUnifiedDiff(original, request.diff);
+
+      const encoded = new TextEncoder().encode(next);
+      let text = '';
+      for (let index = 0; index < encoded.length; index += 0x8000) {
+        text += String.fromCharCode(...encoded.subarray(index, index + 0x8000));
+      }
+      const put = await fetch(`https://api.github.com/repos/${repo.fullName}/contents/${encodedPath}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({
+          message: message.trim() || `Apply AI patch to ${request.path}`,
+          content: btoa(text),
+          branch,
+          sha: data.sha,
+        }),
+      });
+      if (!put.ok) {
+        const detail = await put.text();
+        throw new Error(`HTTP ${put.status}: ${detail.slice(0, 200)}`);
+      }
+      toast.success(i18n.t('补丁已应用'));
+      onClose();
+    } catch (reason) {
+      setError((reason as Error).message || String(reason));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <Dialog open={Boolean(request)} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <GitBranch className="h-4 w-4 text-primary" />
+            {i18n.t('应用 AI 补丁')}
+          </DialogTitle>
+        </DialogHeader>
+        {request && (
+          <div className="space-y-3">
+            <div className="space-y-1 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+              <p><span className="text-muted-foreground">{i18n.t('文件')}：</span><span className="font-mono">{request.path}</span></p>
+              <p><span className="text-muted-foreground">{i18n.t('分支')}：</span><span className="font-mono">{repo?.branch || repo?.defaultBranch || 'main'}</span></p>
+              <p className="text-[11px] text-muted-foreground">+{stats.additions} / -{stats.deletions}</p>
+            </div>
+            <div>
+              <p className="mb-1 text-[10px] text-muted-foreground">{i18n.t('Diff 预览')}</p>
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-2 font-mono text-[10px] leading-4">{request.diff.slice(0, 20000)}</pre>
+            </div>
+            <input
+              value={message}
+              onChange={event => setMessage(event.target.value)}
+              placeholder={i18n.t('提交信息')}
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+            />
+            {error && <p className="rounded-lg bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={applying}>
+                {i18n.t('取消')}
+              </Button>
+              <Button type="button" size="sm" onClick={() => void apply()} disabled={applying || !message.trim()}>
+                {applying && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                {i18n.t('应用补丁')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ModelPickerDialog({
+  open,
+  onOpenChange,
+  providers,
+  currentType,
+  currentModel,
+  capabilities,
+  onSelect,
+  onOpenSettings,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  providers: typeof MODEL_DEFS;
+  currentType: string;
+  currentModel: string;
+  capabilities: ReturnType<typeof getModelCapabilities>;
+  onSelect: (type: string, model: string) => void;
+  onOpenSettings: () => void;
+}) {
+  const currentProvider = providers.find(item => item.type === currentType) || providers[0];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <ModelAvatar modelDef={currentProvider} size="sm" />
+            {i18n.t('会话模型')}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+          <Badge variant="secondary" className="text-[9px]">{currentProvider.label}</Badge>
+          <Badge variant="outline" className="text-[9px]">{i18n.t('上下文')} {Math.round(capabilities.contextWindow / 1000)}K</Badge>
+          <Badge variant="outline" className="text-[9px]">{capabilities.supportsTools ? i18n.t('支持工具') : i18n.t('仅聊天')}</Badge>
+          {capabilities.supportsVision && <Badge variant="outline" className="text-[9px]">{i18n.t('支持图片')}</Badge>}
+        </div>
+        <div className="max-h-[55vh] space-y-3 overflow-y-auto">
+          {providers.map(provider => (
+            <div key={provider.type}>
+              <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
+                <ModelAvatar modelDef={provider} size="sm" />
+                <span className="font-medium">{provider.label}</span>
+                {!loadProviderKey(provider.type) && provider.type !== currentType && <span>· {i18n.t('未配置 Key')}</span>}
+              </div>
+              <div className="space-y-1">
+                {(provider.models || []).map(model => {
+                  const selected = provider.type === currentType && model.value === currentModel;
+                  return (
+                    <button
+                      key={`${provider.type}:${model.value}`}
+                      type="button"
+                      onClick={() => {
+                        onSelect(provider.type, model.value);
+                        onOpenChange(false);
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs',
+                        selected
+                          ? 'border-primary/35 bg-primary/10 text-primary'
+                          : 'border-border hover:bg-muted/50',
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{model.label}</span>
+                        <span className="block truncate font-mono text-[9px] text-muted-foreground">{model.value}</span>
+                      </span>
+                      {selected && <Check className="h-3.5 w-3.5 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        <Button type="button" variant="outline" size="sm" className="w-full gap-1.5" onClick={onOpenSettings}>
+          <Settings className="h-3.5 w-3.5" />
+          {i18n.t('打开模型设置')}
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BranchPickerDialog({
+  open,
+  onOpenChange,
+  repo,
+  token,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  repo: RepoContext | null;
+  token: string;
+  onSelect: (branch: string) => void;
+}) {
+  const [branches, setBranches] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open || !repo || !token) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setQuery('');
+    fetch(`https://api.github.com/repos/${repo.fullName}/branches?per_page=100`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json() as Promise<Array<{ name?: string }>>;
+    }).then(data => {
+      if (!cancelled) setBranches(data.map(item => item.name).filter((name): name is string => Boolean(name)));
+    }).catch(reason => {
+      if (!cancelled) setError((reason as Error).message || String(reason));
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [open, repo, token]);
+
+  const visible = branches.filter(name => !query.trim() || name.toLowerCase().includes(query.trim().toLowerCase()));
+  const current = repo?.branch || repo?.defaultBranch || '';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <GitBranch className="h-4 w-4 text-primary" />
+            {i18n.t('切换分支')}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="relative">
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={i18n.t('搜索分支')}
+            autoFocus
+            className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+          />
+        </div>
+        <div className="max-h-[50vh] min-h-[180px] overflow-y-auto rounded-lg border border-border">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {i18n.t('读取分支…')}
+            </div>
+          ) : error ? (
+            <p className="px-3 py-6 text-center text-xs text-destructive">{error}</p>
+          ) : visible.length === 0 ? (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">{i18n.t('没有匹配的分支')}</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {visible.map(branch => (
+                <button
+                  key={branch}
+                  type="button"
+                  onClick={() => {
+                    onSelect(branch);
+                    onOpenChange(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50',
+                    branch === current && 'bg-primary/10 text-primary',
+                  )}
+                >
+                  <GitBranch className="h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate font-mono">{branch}</span>
+                  {branch === repo?.defaultBranch && <Badge variant="secondary" className="text-[9px]">{i18n.t('默认')}</Badge>}
+                  {branch === current && <Check className="h-3.5 w-3.5 shrink-0" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] text-muted-foreground">{i18n.t('显示前 100 个分支')}</p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RepoFilePicker({
+  open,
+  onOpenChange,
+  repo,
+  token,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  repo: RepoContext | null;
+  token: string;
+  onSelect: (attachment: UiAttachment) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [files, setFiles] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [truncated, setTruncated] = useState(false);
+  const [selecting, setSelecting] = useState('');
+
+  useEffect(() => {
+    if (!open || !repo || !token) return;
+    const branch = repo.branch || repo.defaultBranch || 'main';
+    const encodedBranch = branch.split('/').map(encodeURIComponent).join('/');
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setQuery('');
+    setFiles([]);
+    setTruncated(false);
+    fetch(`https://api.github.com/repos/${repo.fullName}/git/trees/${encodedBranch}?recursive=1`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json() as Promise<{
+        tree?: Array<{ path?: string; type?: string }>;
+        truncated?: boolean;
+      }>;
+    }).then(data => {
+      if (cancelled) return;
+      const paths = (data.tree || [])
+        .filter(item => item.type === 'blob' && item.path && isTextFilePath(item.path))
+        .map(item => String(item.path))
+        .sort((a, b) => a.localeCompare(b));
+      setFiles(paths);
+      setTruncated(Boolean(data.truncated));
+    }).catch(reason => {
+      if (!cancelled) setError((reason as Error).message || String(reason));
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [open, repo, token]);
+
+  const visible = useMemo(() => filterRepoFiles(files, query, 120), [files, query]);
+
+  const selectFile = async (path: string) => {
+    if (!repo || !token || selecting) return;
+    const branch = repo.branch || repo.defaultBranch || 'main';
+    setSelecting(path);
+    setError('');
+    try {
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.fullName}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { content?: string; encoding?: string; size?: number; type?: string };
+      if (data.type === 'dir' || !data.content || data.encoding !== 'base64') throw new Error(i18n.t('该文件无法作为文本读取'));
+      if ((data.size || 0) > MAX_ATTACHMENT_BYTES) throw new Error(i18n.t('文件超过 200 KB'));
+      const binary = atob(data.content.replace(/\s/g, ''));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const content = new TextDecoder().decode(bytes);
+      onSelect({
+        id: makeAttachmentId('repo'),
+        name: path.split('/').pop() || path,
+        path,
+        source: 'repo',
+        size: bytes.length,
+        content,
+      });
+      onOpenChange(false);
+    } catch (reason) {
+      setError((reason as Error).message || String(reason));
+    } finally {
+      setSelecting('');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <AtSign className="h-4 w-4 text-primary" />
+            {i18n.t('引用仓库文件')}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={i18n.t('搜索文件路径')}
+            autoFocus
+            className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:border-primary/50"
+          />
+        </div>
+        <div className="min-h-[180px] max-h-[50vh] overflow-y-auto rounded-lg border border-border">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {i18n.t('读取仓库文件列表…')}
+            </div>
+          ) : error ? (
+            <p className="px-3 py-6 text-center text-xs text-destructive">{error}</p>
+          ) : !visible.length ? (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">{i18n.t('没有匹配的文本文件')}</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {visible.map(path => (
+                <button
+                  key={path}
+                  type="button"
+                  onClick={() => void selectFile(path)}
+                  disabled={Boolean(selecting)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 disabled:opacity-60"
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate font-mono">{path}</span>
+                  {selecting === path && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>{i18n.t('仅显示文本文件')} · {files.length}</span>
+          {truncated && <span className="text-amber-500">{i18n.t('仓库文件过多，列表已截断')}</span>}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SessionList({
+  sessions,
+  activeId,
+  streaming,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  sessions: V2Session[];
+  activeId: string;
+  streaming: boolean;
+  onSelect: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [renameTarget, setRenameTarget] = useState<V2Session | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const normalized = query.trim().toLowerCase();
+  const filtered = normalized
+    ? sessions.filter(session => {
+        if ((session.title || '').toLowerCase().includes(normalized)) return true;
+        return session.messages.some(message => message.content.toLowerCase().includes(normalized));
+      })
+    : sessions;
+  const groups = groupSessions(filtered);
+
+  return (
+    <>
+      <div className="sticky top-0 z-10 bg-background/95 px-2 pb-2 backdrop-blur">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={i18n.t('搜索对话')}
+            className="h-8 w-full rounded-lg border border-border bg-muted/30 pl-7 pr-7 text-[11px] outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/40"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!groups.length ? (
+        <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+          {normalized ? i18n.t('没有匹配的对话') : i18n.t('暂无对话')}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {groups.map(group => (
+            <div key={group.label}>
+              <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{group.label}</p>
+              <div className="space-y-0.5">
+                {group.items.map(session => (
+                  <div
+                    key={session.id}
+                    className={cn(
+                      'group flex items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-colors',
+                      session.id === activeId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelect(session.id)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <span className="block truncate">{session.title || i18n.t('新对话')}</span>
+                      <span className="mt-0.5 block text-[9px] opacity-70">
+                        {session.messages.length ? i18n.t('{{count}} 条消息', { count: session.messages.length }) : i18n.t('空对话')}
+                        {' · '}
+                        {formatTime(session.updatedAt)}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenameTarget(session);
+                        setRenameValue(session.title || '');
+                      }}
+                      className="shrink-0 rounded p-1 opacity-100 hover:bg-primary/10 hover:text-primary sm:opacity-0 sm:group-hover:opacity-100"
+                      title={i18n.t('重命名对话')}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(session.id)}
+                      disabled={streaming}
+                      className="shrink-0 rounded p-1 opacity-100 hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                      title={i18n.t('删除对话')}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={Boolean(renameTarget)} onOpenChange={open => { if (!open) setRenameTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{i18n.t('重命名对话')}</DialogTitle>
+          </DialogHeader>
+          <input
+            value={renameValue}
+            onChange={event => setRenameValue(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && renameTarget && renameValue.trim()) {
+                onRename(renameTarget.id, renameValue.trim());
+                setRenameTarget(null);
+              }
+            }}
+            autoFocus
+            maxLength={80}
+            className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+            placeholder={i18n.t('输入对话名称')}
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setRenameTarget(null)}>
+              {i18n.t('取消')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                if (!renameTarget || !renameValue.trim()) return;
+                onRename(renameTarget.id, renameValue.trim());
+                setRenameTarget(null);
+              }}
+            >
+              {i18n.t('保存')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ContextContent({
+  repo,
+  modelLabel,
+  characterLabel,
+  onAddRepo,
+  onRemoveRepo,
+  onSwitchBranch,
+}: {
+  repo: RepoContext | null;
+  modelLabel: string;
+  characterLabel: string;
+  onAddRepo: () => void;
+  onRemoveRepo: () => void;
+  onSwitchBranch: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{i18n.t('当前模式')}</p>
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium">{repo ? i18n.t('通用 + 仓库') : i18n.t('通用聊天')}</p>
+            <p className="truncate text-[10px] text-muted-foreground">{modelLabel}</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{i18n.t('角色卡')}</p>
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium">{characterLabel}</p>
+            <button type="button" onClick={() => window.location.hash = '#/ai-settings/characters'} className="mt-0.5 text-[10px] text-muted-foreground hover:text-primary">
+              {i18n.t('更换角色卡')}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{i18n.t('仓库')}</p>
+        {repo ? (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-start gap-2">
+              <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-primary">{repo.fullName}</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">{i18n.t('分支')}：{repo.branch || repo.defaultBranch}</p>
+                <button type="button" onClick={onSwitchBranch} className="mt-1 text-[10px] text-primary hover:underline">
+                  {i18n.t('切换分支')}
+                </button>
+              </div>
+              <button type="button" onClick={onRemoveRepo} className="rounded p-1 text-muted-foreground hover:bg-primary/10">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onAddRepo}
+            className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-left text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          >
+            <Plus className="h-4 w-4" />
+            {i18n.t('选择仓库')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function AiAssistantV2Page() {
+  const { token, user } = useAuth();
+  const navigate = useNavigate();
+  const [sessions, setSessions] = useState<V2Session[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [modelConfig] = useState<ModelConfig>(() => loadModelConfig());
+  const [character, setCharacter] = useState<CharacterCard>(() => loadActiveCharacter(user?.login));
+  const [v2Settings] = useState(() => loadV2Settings());
+  const [repoDialogOpen, setRepoDialogOpen] = useState(false);
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
+  const [contextDialogOpen, setContextDialogOpen] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
+  const [artifactMeta, setArtifactMeta] = useState<ArtifactMeta | null>(null);
+  const [artifactContent, setArtifactContent] = useState('');
+  const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
+  const [approvalDiff, setApprovalDiff] = useState('');
+  const [approvalDiffLoading, setApprovalDiffLoading] = useState(false);
+  const [approvalRemoteMissing, setApprovalRemoteMissing] = useState(false);
+  const [resumableSnapshot, setResumableSnapshot] = useState<RunSnapshot | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<UiAttachment[]>([]);
+  const [repoFileDialogOpen, setRepoFileDialogOpen] = useState(false);
+  const [patchRequest, setPatchRequest] = useState<{ path: string; diff: string } | null>(null);
+  const [storageError, setStorageError] = useState('');
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadedSessionsRef = useRef<Set<string>>(new Set());
+  const dirtySessionsRef = useRef<Set<string>>(new Set());
+  const runCapabilitiesRef = useRef<string[]>([]);
+  const runMetricsRef = useRef<{ runId: string; startedAt: number; firstTokenAt?: number } | null>(null);
+  const pendingStreamRef = useRef<{ assistantId: string; content: string; reasoning: string } | null>(null);
+  const streamFlushTimerRef = useRef<number | null>(null);
+  const approvalResolverRef = useRef<((approved: boolean) => void) | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const hydratedRef = useRef(false);
+
+  const legacyKey = user?.login ? `${LEGACY_PREFIX}${user.login}` : '';
+  const isAndroid = useMemo(
+    () => typeof window !== 'undefined' && !!(window as unknown as { AndroidBridge?: unknown }).AndroidBridge,
+    [],
+  );
+  const activeSession = useMemo(
+    () => sessions.find(session => session.id === activeId) || sessions[0] || null,
+    [sessions, activeId],
+  );
+  const messages = activeSession?.messages || [];
+  const repoContext = activeSession?.repo || null;
+  const hasConversation = messages.length > 0;
+  const turns = useMemo(() => buildTurns(messages), [messages]);
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 240,
+    overscan: 4,
+  });
+  const sessionType = (activeSession?.modelType as ModelType | undefined) || modelConfig.type;
+  const providerDef = useMemo(() => getModelDef(sessionType), [sessionType]);
+  const defaultProviderModel = providerDef.models?.[0]?.value || '';
+  const sessionModel = activeSession?.model
+    || (sessionType === modelConfig.type ? modelConfig.model || '' : defaultProviderModel);
+  const sessionApiKey = (sessionType === modelConfig.type ? modelConfig.api_key : loadProviderKey(sessionType)) || '';
+  const effectiveConfig = useMemo<ModelConfig>(
+    () => ({ ...modelConfig, type: sessionType, model: sessionModel, api_key: sessionApiKey }),
+    [modelConfig, sessionType, sessionModel, sessionApiKey],
+  );
+  const modelDef = providerDef;
+  const hasModelKey = Boolean(effectiveConfig.api_key?.trim());
+  const modelCapabilities = useMemo(
+    () => getModelCapabilities(effectiveConfig.type, sessionModel),
+    [effectiveConfig.type, sessionModel],
+  );
+  const modelLabel = useMemo(() => {
+    const option = modelDef.models?.find(item => item.value === sessionModel);
+    return option?.label || sessionModel || modelDef.label;
+  }, [modelDef, sessionModel]);
+
+  useEffect(() => {
+    setCharacter(loadActiveCharacter(user?.login));
+  }, [user?.login]);
+
+  useEffect(() => {
+    hydratedRef.current = false;
+    loadedSessionsRef.current = new Set();
+    dirtySessionsRef.current = new Set();
+    let cancelled = false;
+    if (!user?.login) {
+      setSessions([]);
+      setActiveId('');
+      hydratedRef.current = true;
+      return;
+    }
+    const login = user.login;
+    void (async () => {
+      let index = await loadSessionIndex(login);
+      if (cancelled) return;
+      if (!index?.sessions?.length) {
+        try {
+          const legacyRaw = legacyKey ? localStorage.getItem(legacyKey) : null;
+          if (legacyRaw) {
+            const legacy = JSON.parse(legacyRaw) as { messages?: UiChatMessage[]; repo?: RepoContext | null };
+            const migrated = newSession();
+            const legacyMessages = Array.isArray(legacy.messages) ? migrateLegacyRoundLimit(legacy.messages) : [];
+            migrated.messages = legacyMessages;
+            migrated.repo = legacy.repo || null;
+            migrated.title = deriveSessionTitle(legacyMessages);
+            migrated.titleSource = 'auto';
+            await saveSessionMessages(login, migrated.id, compactMessages(legacyMessages));
+            loadedSessionsRef.current.add(migrated.id);
+            index = { sessions: [toSessionMeta(migrated)], activeId: migrated.id };
+            if (legacyKey) localStorage.removeItem(legacyKey);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const metas = (index?.sessions?.length ? index.sessions : [toSessionMeta(newSession())])
+        .map(meta => {
+          const looksLikePrompt = /^(请|帮我|请帮我|解释|阅读|分析|Actions|README|写一个)/.test(meta.title);
+          const titleSource: 'auto' | 'manual' = meta.titleSource === 'manual' && !looksLikePrompt ? 'manual' : 'auto';
+          return { ...meta, titleSource };
+        });
+      const nextActive = index?.activeId && metas.some(meta => meta.id === index?.activeId)
+        ? index.activeId
+        : metas[0].id;
+      // 只有当前会话的消息进入内存，其余会话等待切换时再加载
+      setSessions(metas.map(meta => ({ ...meta, messages: [] })));
+      setActiveId(nextActive);
+      hydratedRef.current = true;
+
+      if (loadedSessionsRef.current.has(nextActive)) return;
+      const loadedMessages = migrateLegacyRoundLimit(await loadSessionMessages(login, nextActive));
+      if (cancelled) return;
+      loadedSessionsRef.current.add(nextActive);
+      setSessions(prev => prev.map(session => session.id === nextActive
+        ? {
+            ...session,
+            messages: loadedMessages,
+            title: session.titleSource === 'manual' ? session.title : deriveSessionTitle(loadedMessages),
+          }
+        : session));
+    })();
+    return () => { cancelled = true; };
+  }, [user?.login, legacyKey]);
+  useEffect(() => {
+    if (!hydratedRef.current || !user?.login) return;
+    const login = user.login;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const dirty = [...dirtySessionsRef.current];
+      dirtySessionsRef.current.clear();
+      const index: SessionIndex = {
+        sessions: sessions.slice(0, MAX_SESSIONS).map(session => toSessionMeta({ ...session, messages: [] })),
+        activeId,
+      };
+      void (async () => {
+        const indexResult = await saveSessionIndex(login, index);
+        let messagesOk = true;
+        let fallback = Boolean(indexResult.fallback);
+        for (const id of dirty) {
+          const session = sessions.find(item => item.id === id);
+          if (!session || !loadedSessionsRef.current.has(id)) continue;
+          const result = await saveSessionMessages(login, id, compactMessages(session.messages));
+          if (!result.ok) messagesOk = false;
+          if (result.fallback) fallback = true;
+        }
+        if (cancelled) return;
+        if (messagesOk) {
+          setStorageError(fallback ? i18n.t('存储受限，已使用兼容模式保存') : '');
+        } else {
+          setStorageError(indexResult.error || i18n.t('会话保存失败，可能存储空间不足'));
+        }
+      })();
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sessions, activeId, user?.login]);
+
+  useEffect(() => {
+    if (!user?.login || !activeId) {
+      setResumableSnapshot(null);
+      return;
+    }
+    void latestRunSnapshot(user.login, activeId).then(snapshot => setResumableSnapshot(snapshot));
+  }, [user?.login, activeId]);
+
+  useEffect(() => {
+    return () => {
+      approvalResolverRef.current?.(false);
+      approvalResolverRef.current = null;
+      abortRef.current?.abort();
+      if (streamFlushTimerRef.current !== null) window.clearTimeout(streamFlushTimerRef.current);
+    };
+  }, []);
+
+  const scrollToBottom = useCallback((force = false) => {
+    if (!force && !stickToBottomRef.current) return;
+    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: 'end' }));
+    setShowScrollButton(false);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, streaming, scrollToBottom]);
+
+  // 虚拟列表高度测量后补一次底部对齐，避免流式输出时被"截断"在中间
+  const virtualTotalSize = virtualizer.getTotalSize();
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const frame = requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: 'end' }));
+    return () => cancelAnimationFrame(frame);
+  }, [virtualTotalSize]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    stickToBottomRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  };
+
+  const requestApproval = useCallback((request: ApprovalRequest) => {
+    if (v2Settings.allowAllPermissions) return Promise.resolve(true);
+    return new Promise<boolean>(resolve => {
+      approvalResolverRef.current = resolve;
+      setApprovalRequest(request);
+    });
+  }, [v2Settings.allowAllPermissions]);
+
+  const resolveApproval = useCallback((approved: boolean) => {
+    approvalResolverRef.current?.(approved);
+    approvalResolverRef.current = null;
+    setApprovalRequest(null);
+  }, []);
+
+  const handleApplyDiff = useCallback((path: string, diff: string) => {
+    if (!repoContext || !token) {
+      toast.warning(i18n.t('请先选择仓库并登录，再应用补丁'));
+      return;
+    }
+    if (!path || path === '/dev/null') {
+      toast.warning(i18n.t('无法确定补丁目标文件'));
+      return;
+    }
+    setPatchRequest({ path: path.replace(/^\/+/, ''), diff });
+  }, [repoContext, token]);
+
+  const openArtifact = useCallback(async (meta: ArtifactMeta) => {
+    const result = await readArtifact(user?.login, meta.id, 0, 100000);
+    setArtifactMeta(meta);
+    setArtifactContent(result.content || i18n.t('无法读取 Artifact 内容'));
+    setArtifactDialogOpen(true);
+  }, [user?.login]);
+
+  useEffect(() => {
+    setApprovalDiff('');
+    setApprovalRemoteMissing(false);
+    if (!approvalRequest || approvalRequest.toolName !== 'github_write_file' || !repoContext || !token) {
+      setApprovalDiffLoading(false);
+      return;
+    }
+    const args = approvalRequest.arguments as Record<string, unknown>;
+    const path = String(args.path || '');
+    const branch = String(args.branch || repoContext.branch || repoContext.defaultBranch || 'main');
+    const nextContent = String(args.content || '');
+    if (!path) return;
+
+    let cancelled = false;
+    setApprovalDiffLoading(true);
+    const encodedPath = path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+    fetch(`https://api.github.com/repos/${repoContext.fullName}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    }).then(async response => {
+      if (cancelled) return;
+      if (response.status === 404) {
+        setApprovalRemoteMissing(true);
+        setApprovalDiff(buildUnifiedDiff('', nextContent));
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { content?: string; encoding?: string };
+      if (!data.content || data.encoding !== 'base64') throw new Error('无法读取远端文件');
+      const binary = atob(data.content.replace(/\s/g, ''));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const oldContent = new TextDecoder().decode(bytes);
+      setApprovalDiff(buildUnifiedDiff(oldContent, nextContent));
+    }).catch(error => {
+      if (!cancelled) setApprovalDiff(`无法生成 Diff：${(error as Error).message}`);
+    }).finally(() => {
+      if (!cancelled) setApprovalDiffLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [approvalRequest, repoContext, token]);
+
+  const updateActiveSession = useCallback((
+    updater: (session: V2Session) => V2Session,
+  ) => {
+    setSessions(prev => prev.map(session => session.id === activeId ? updater(session) : session));
+  }, [activeId]);
+
+  const setMessages = useCallback((
+    updater: UiChatMessage[] | ((previous: UiChatMessage[]) => UiChatMessage[]),
+  ) => {
+    if (activeId) dirtySessionsRef.current.add(activeId);
+    updateActiveSession(session => {
+      const nextMessages = typeof updater === 'function' ? updater(session.messages) : updater;
+      return {
+        ...session,
+        messages: nextMessages,
+        title: session.titleSource === 'manual' ? session.title : deriveSessionTitle(nextMessages),
+        titleSource: session.titleSource || 'auto',
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }, [updateActiveSession]);
+
+  const setRepoContext = useCallback((repo: RepoContext | null) => {
+    updateActiveSession(session => ({
+      ...session,
+      repo,
+      updatedAt: new Date().toISOString(),
+    }));
+  }, [updateActiveSession]);
+
+  const patchAssistant = useCallback((id: string, patch: Partial<UiChatMessage>) => {
+    setMessages(prev => prev.map(message => message.id === id ? { ...message, ...patch } : message));
+  }, [setMessages]);
+
+  const patchMetrics = useCallback((id: string, patch: NonNullable<UiChatMessage['metrics']>) => {
+    setMessages(prev => prev.map(message => message.id === id
+      ? { ...message, metrics: { ...message.metrics, ...patch } }
+      : message));
+  }, [setMessages]);
+
+  const flushStreamDelta = useCallback(() => {
+    if (streamFlushTimerRef.current !== null) {
+      window.clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    const pending = pendingStreamRef.current;
+    pendingStreamRef.current = null;
+    if (!pending) return;
+    setMessages(prev => prev.map(message => {
+      if (message.id !== pending.assistantId) return message;
+      let blocks = message.blocks;
+      if (pending.content) blocks = appendBlockDelta(blocks, 'text', pending.content);
+      if (pending.reasoning) blocks = appendBlockDelta(blocks, 'reasoning', pending.reasoning);
+      return {
+        ...message,
+        content: pending.content ? message.content + pending.content : message.content,
+        reasoning: pending.reasoning ? (message.reasoning || '') + pending.reasoning : message.reasoning,
+        blocks,
+      };
+    }));
+  }, [setMessages]);
+
+  const queueStreamDelta = useCallback((id: string, patch: { content?: string; reasoning?: string }) => {
+    if (pendingStreamRef.current && pendingStreamRef.current.assistantId !== id) {
+      flushStreamDelta();
+    }
+    const pending = pendingStreamRef.current || { assistantId: id, content: '', reasoning: '' };
+    pending.content += patch.content || '';
+    pending.reasoning += patch.reasoning || '';
+    pendingStreamRef.current = pending;
+    if (streamFlushTimerRef.current === null) {
+      streamFlushTimerRef.current = window.setTimeout(() => {
+        streamFlushTimerRef.current = null;
+        flushStreamDelta();
+      }, 80);
+    }
+  }, [flushStreamDelta]);
+
+  /** 运行结束时把仍在执行中的工具标成已停止，避免一直转圈 */
+  const settleRunningTools = useCallback((assistantId: string) => {
+    setMessages(prev => prev.map(message => {
+      if (message.id !== assistantId) return message;
+      const tools = message.tools || [];
+      if (!tools.some(tool => tool.status === 'running')) return message;
+      return {
+        ...message,
+        tools: tools.map(tool => (tool.status === 'running'
+          ? { ...tool, status: 'error' as const, content: tool.content || i18n.t('已停止'), endedAt: tool.endedAt || Date.now() }
+          : tool)),
+      };
+    }));
+  }, [setMessages]);
+
+  const patchTool = useCallback((assistantId: string, callId: string, patch: Partial<UiToolRun>) => {
+    setMessages(prev => prev.map(message => {
+      if (message.id !== assistantId) return message;
+      return {
+        ...message,
+        tools: (message.tools || []).map(tool => tool.id === callId ? { ...tool, ...patch } : tool),
+      };
+    }));
+  }, [setMessages]);
+
+  const handleAgentEvent = useCallback((assistantId: string, runId: string, event: AgentEvent) => {
+    appendRunEvent(user?.login, runId, event);
+    switch (event.type) {
+      case 'run_start':
+        runCapabilitiesRef.current = event.capabilities || [];
+        break;
+      case 'text_delta':
+        if (runMetricsRef.current?.runId === runId && !runMetricsRef.current.firstTokenAt) {
+          runMetricsRef.current.firstTokenAt = Date.now();
+          patchMetrics(assistantId, { firstTokenMs: runMetricsRef.current.firstTokenAt - runMetricsRef.current.startedAt });
+        }
+        queueStreamDelta(assistantId, { content: event.text });
+        break;
+      case 'reasoning_delta':
+        if (runMetricsRef.current?.runId === runId && !runMetricsRef.current.firstTokenAt) {
+          runMetricsRef.current.firstTokenAt = Date.now();
+          patchMetrics(assistantId, { firstTokenMs: runMetricsRef.current.firstTokenAt - runMetricsRef.current.startedAt });
+        }
+        queueStreamDelta(assistantId, { reasoning: event.text });
+        break;
+      case 'tool_start':
+        flushStreamDelta();
+        setMessages(prev => prev.map(message => message.id === assistantId
+          ? {
+              ...message,
+              tools: [
+                ...(message.tools || []),
+                {
+                  id: event.call.id,
+                  name: event.call.name,
+                  arguments: event.call.arguments,
+                  status: 'running' as const,
+                  startedAt: Date.now(),
+                },
+              ],
+              blocks: appendToolBlock(ensureBlocks(message), event.call.id),
+            }
+          : message));
+        break;
+      case 'tool_end':
+        flushStreamDelta();
+        patchTool(assistantId, event.call.id, {
+          status: event.ok ? 'done' : 'error',
+          content: event.content,
+          artifact: event.artifact,
+          endedAt: Date.now(),
+        });
+        break;
+      case 'usage':
+        patchMetrics(assistantId, {
+          promptTokens: event.usage.prompt_tokens,
+          completionTokens: event.usage.completion_tokens,
+          totalTokens: event.usage.total_tokens,
+        });
+        break;
+      case 'error':
+        flushStreamDelta();
+        patchAssistant(assistantId, {
+          content: event.message,
+          blocks: [{ id: makeId('blk'), type: 'text', text: event.message }],
+          streaming: false,
+          error: true,
+        });
+        if (runMetricsRef.current?.runId === runId) {
+          patchMetrics(assistantId, { durationMs: Date.now() - runMetricsRef.current.startedAt });
+        }
+        break;
+      case 'done':
+        flushStreamDelta();
+        patchAssistant(assistantId, { streaming: false });
+        if (runMetricsRef.current?.runId === runId) {
+          patchMetrics(assistantId, { durationMs: Date.now() - runMetricsRef.current.startedAt });
+        }
+        if (user?.login) void clearRunSnapshot(user.login, runId);
+        setResumableSnapshot(null);
+        break;
+      default:
+        break;
+    }
+  }, [flushStreamDelta, patchAssistant, patchMetrics, patchTool, queueStreamDelta, setMessages, user?.login]);
+
+  const persistRunSnapshot = useCallback((
+    runId: string,
+    assistantId: string,
+    sessionId: string,
+    title: string,
+  ) => (snapshot: { messages: V2ProviderMessage[]; steps: number }) => {
+    if (!user?.login) return;
+    void saveRunSnapshot(user.login, {
+      runId,
+      assistantId,
+      sessionId,
+      title,
+      messages: snapshot.messages,
+      steps: snapshot.steps,
+      capabilities: runCapabilitiesRef.current,
+      savedAt: new Date().toISOString(),
+    });
+  }, [user?.login]);
+
+  const addAttachment = useCallback((attachment: UiAttachment) => {
+    setPendingAttachments(prev => {
+      if (prev.length >= MAX_ATTACHMENTS) {
+        toast.warning(i18n.t('最多添加 {{count}} 个附件', { count: MAX_ATTACHMENTS }));
+        return prev;
+      }
+      const duplicate = prev.some(item => (item.path || item.name) === (attachment.path || attachment.name));
+      if (duplicate) {
+        toast.warning(i18n.t('该文件已经添加'));
+        return prev;
+      }
+      return [...prev, attachment];
+    });
+  }, []);
+
+  const handleLocalFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const candidates = Array.from(files).slice(0, MAX_ATTACHMENTS);
+    for (const file of candidates) {
+      if (file.type.startsWith('image/')) {
+        if (!modelCapabilities.supportsVision) {
+          toast.error(i18n.t('当前模型不支持图片，请切换到 Gemini 或 GPT-4o 等视觉模型'));
+          continue;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          toast.error(i18n.t('{{name}} 超过 5 MB', { name: file.name }));
+          continue;
+        }
+        try {
+          const prepared = await prepareImageAttachment(file);
+          const imageId = makeAttachmentId('image');
+          const stored = await putImageBlob(imageId, prepared.blob);
+          addAttachment({
+            id: imageId,
+            name: file.name,
+            source: 'local',
+            kind: 'image',
+            size: prepared.size,
+            content: '',
+            thumbDataUrl: prepared.thumbDataUrl,
+            imageBlobId: stored ? imageId : undefined,
+            // 存储不可用时退回 dataUrl，保证图片仍然能发送
+            dataUrl: stored ? undefined : await readFileAsDataUrl(prepared.blob),
+            width: prepared.width,
+            height: prepared.height,
+          });
+        } catch {
+          toast.error(i18n.t('图片处理失败：{{name}}', { name: file.name }));
+        }
+        continue;
+      }
+      if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+        if (file.size > MAX_PDF_BYTES) {
+          toast.error(i18n.t('{{name}} 超过 10 MB', { name: file.name }));
+          continue;
+        }
+        try {
+          const extracted = await extractPdfText(await file.arrayBuffer());
+          if (!extracted.trim()) {
+            toast.warning(i18n.t('{{name}} 没有可提取的文本（可能是扫描件）', { name: file.name }));
+            continue;
+          }
+          addAttachment({
+            id: makeAttachmentId('pdf'),
+            name: file.name,
+            source: 'local',
+            size: file.size,
+            content: `[PDF 文本提取]\n${extracted}`,
+          });
+        } catch {
+          toast.error(i18n.t('PDF 解析失败：{{name}}', { name: file.name }));
+        }
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(i18n.t('{{name}} 超过 200 KB', { name: file.name }));
+        continue;
+      }
+      const isText = file.type.startsWith('text/')
+        || ['application/json', 'application/xml', 'application/javascript'].includes(file.type)
+        || /\.(txt|md|markdown|json|jsonc|ya?ml|toml|ini|env|js|jsx|ts|tsx|mjs|cjs|css|scss|html?|xml|svg|vue|svelte|py|go|rs|java|kt|kts|gradle|c|h|cpp|hpp|cs|php|rb|sh|bash|sql|csv|log)$/i.test(file.name)
+        || /^\.env/.test(file.name)
+        || file.name === 'Dockerfile'
+        || file.name === 'Makefile';
+      if (!isText) {
+        toast.error(i18n.t('{{name}} 不是文本文件', { name: file.name }));
+        continue;
+      }
+      try {
+        const content = await file.text();
+        addAttachment({
+          id: makeAttachmentId('file'),
+          name: file.name,
+          source: 'local',
+          size: file.size,
+          content,
+        });
+      } catch {
+        toast.error(i18n.t('读取 {{name}} 失败', { name: file.name }));
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleSend = async () => {
+    const text = input.trim();
+    const attachments = pendingAttachments;
+    if ((!text && !attachments.length) || streaming) return;
+    if (attachments.some(item => item.kind === 'image') && !modelCapabilities.supportsVision) {
+      toast.error(i18n.t('当前模型不支持图片，请切换到视觉模型'));
+      return;
+    }
+    const userText = text || i18n.t('请查看附件');
+    // 图片正文存放在 IndexedDB，发送前再回填成 dataUrl
+    const hydratedAttachments = await hydrateAttachmentImages(attachments);
+    const modelContent = buildModelUserParts(userText, hydratedAttachments);
+    const displayText = text || `${i18n.t('请查看附件')}：${attachments.map(item => item.path || item.name).join('、')}`;
+    if (!token) {
+      toast.error(i18n.t('登录状态已失效，请重新登录'));
+      return;
+    }
+    if (!hasModelKey) {
+      navigate('/ai-settings/model');
+      toast.error(i18n.t('请先配置模型 API Key'));
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const userMessage: UiChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: displayText,
+      modelContent,
+      attachments: attachments.length ? attachments : undefined,
+      createdAt: now,
+    };
+    const assistantId = `a-${Date.now()}`;
+    const assistantMessage: UiChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      tools: [],
+      blocks: [],
+      streaming: true,
+      metrics: { model: effectiveConfig.model },
+      createdAt: now,
+    };
+
+    const historyMessages = await hydrateMessageImages(messages);
+    const previousHistory = toAgentHistory(historyMessages.map(message => ({
+      role: message.role,
+      content: message.content,
+      modelContent: message.modelContent,
+      attachments: message.attachments,
+    })));
+    const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    runCapabilitiesRef.current = [];
+    startRun({
+      login: user?.login,
+      id: runId,
+      sessionId: activeSession?.id,
+      title: text || `${i18n.t('附件')} ${attachments[0]?.name || ''}`,
+    });
+    setMessages(prev => [...prev, userMessage, assistantMessage]);
+    setInput('');
+    setPendingAttachments([]);
+    setStreaming(true);
+    stickToBottomRef.current = true;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    runMetricsRef.current = { runId, startedAt: Date.now() };
+
+    const onEvent = (event: AgentEvent) => handleAgentEvent(assistantId, runId, event);
+
+    const history = previousHistory;
+    let runStatus: 'done' | 'error' | 'stopped' = 'done';
+    let runError: string | undefined;
+
+    try {
+      await runGeneralAgent({
+        token,
+        userLogin: user?.login,
+        runId,
+        repo: repoContext || undefined,
+        config: effectiveConfig,
+        history,
+        currentUserContent: modelContent,
+        currentUserText: userText,
+        contextBudget: Math.min(v2Settings.contextBudget, modelCapabilities.contextWindow),
+        memoryEnabled: v2Settings.memoryEnabled,
+        persona: character.prompt,
+        signal: controller.signal,
+        requestApproval,
+        onSnapshot: persistRunSnapshot(runId, assistantId, activeSession?.id || '', text),
+        onEvent,
+      });
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        runStatus = 'stopped';
+        patchAssistant(assistantId, { streaming: false });
+      } else {
+        let message = (error as Error)?.message || String(error);
+
+        // OpenRouter 免费额度用尽：无仓库上下文时自动切到 Cloudflare Workers AI 免费额度。
+        if (isOpenRouterDailyLimit(message) && modelConfig.type === 'openrouter' && !repoContext) {
+          toast.info(i18n.t('OpenRouter 免费额度已用尽，正在切换 Cloudflare AI 重试'));
+          patchAssistant(assistantId, {
+            content: `> ${i18n.t('OpenRouter 免费额度已用尽，已切换到 Cloudflare AI 重试。')}\n\n`,
+            reasoning: '',
+            tools: [],
+            blocks: [],
+            streaming: true,
+            error: false,
+          });
+          try {
+            await runGeneralAgent({
+              token,
+              userLogin: user?.login,
+              runId,
+              config: CLOUDFLARE_FALLBACK_CONFIG,
+              history,
+              currentUserContent: modelContent,
+              currentUserText: userText,
+              contextBudget: Math.min(v2Settings.contextBudget, modelCapabilities.contextWindow),
+              memoryEnabled: v2Settings.memoryEnabled,
+              persona: character.prompt,
+              signal: controller.signal,
+              requestApproval,
+              onSnapshot: persistRunSnapshot(runId, assistantId, activeSession?.id || '', text),
+              onEvent,
+            });
+            message = '';
+          } catch (fallbackError) {
+            if ((fallbackError as Error)?.name === 'AbortError') {
+              runStatus = 'stopped';
+              patchAssistant(assistantId, { streaming: false });
+              message = '';
+            } else {
+              runStatus = 'error';
+              const fallbackMessage = (fallbackError as Error)?.message || String(fallbackError);
+              message = `${message}\n\nCloudflare AI 兜底也失败：${fallbackMessage}`;
+            }
+          }
+        }
+
+        if (message) {
+          runStatus = runStatus === 'stopped' ? 'stopped' : 'error';
+          runError = message;
+          const failureText = `${i18n.t('请求失败：')}${friendlyModelError(message)}`;
+          patchAssistant(assistantId, {
+            content: failureText,
+            blocks: [{ id: makeId('blk'), type: 'text', text: failureText }],
+            streaming: false,
+            error: true,
+          });
+          toast.error(friendlyModelError(message).slice(0, 160));
+        }
+      }
+    } finally {
+      flushStreamDelta();
+      settleRunningTools(assistantId);
+      finishRun(user?.login, runId, runStatus, runError);
+      if (runStatus !== 'done' && user?.login) {
+        void latestRunSnapshot(user.login, activeSession?.id).then(snapshot => setResumableSnapshot(snapshot));
+      }
+      setStreaming(false);
+      abortRef.current = null;
+      scrollToBottom(true);
+    }
+  };
+
+  const handleResume = async () => {
+    const snapshot = resumableSnapshot;
+    if (!snapshot || streaming || !token) return;
+    const assistantId = snapshot.assistantId;
+    const assistantExists = assistantId && messages.some(message => message.id === assistantId);
+    if (!assistantId || !assistantExists) {
+      if (user?.login) void clearRunSnapshot(user.login, snapshot.runId);
+      setResumableSnapshot(null);
+      toast.error(i18n.t('原会话消息已不存在，无法继续'));
+      return;
+    }
+
+    setResumableSnapshot(null);
+    setStreaming(true);
+    patchAssistant(assistantId, { streaming: true, error: false, metrics: { model: effectiveConfig.model } });
+    runCapabilitiesRef.current = snapshot.capabilities;
+    runMetricsRef.current = { runId: snapshot.runId, startedAt: Date.now() };
+    if (user?.login) resumeRun(user.login, snapshot.runId);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const onEvent = (event: AgentEvent) => handleAgentEvent(assistantId, snapshot.runId, event);
+    let runStatus: 'done' | 'error' | 'stopped' = 'done';
+    let runError: string | undefined;
+
+    try {
+      await runGeneralAgent({
+        token,
+        userLogin: user?.login,
+        runId: snapshot.runId,
+        repo: repoContext || undefined,
+        config: effectiveConfig,
+        history: [],
+        resumeMessages: snapshot.messages as V2ProviderMessage[],
+        resumeSteps: snapshot.steps,
+        contextBudget: Math.min(v2Settings.contextBudget, modelCapabilities.contextWindow),
+        memoryEnabled: v2Settings.memoryEnabled,
+        persona: character.prompt,
+        signal: controller.signal,
+        requestApproval,
+        onSnapshot: persistRunSnapshot(snapshot.runId, assistantId, snapshot.sessionId || activeSession?.id || '', snapshot.title),
+        onEvent,
+      });
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        runStatus = 'stopped';
+        patchAssistant(assistantId, { streaming: false });
+      } else {
+        runStatus = 'error';
+        const message = (error as Error)?.message || String(error);
+        runError = message;
+        const failureText = `${i18n.t('恢复失败：')}${friendlyModelError(message)}`;
+        patchAssistant(assistantId, {
+          content: failureText,
+          blocks: [{ id: makeId('blk'), type: 'text', text: failureText }],
+          streaming: false,
+          error: true,
+        });
+        toast.error(friendlyModelError(message).slice(0, 160));
+      }
+    } finally {
+      flushStreamDelta();
+      settleRunningTools(assistantId);
+      finishRun(user?.login, snapshot.runId, runStatus, runError);
+      if (runStatus !== 'done' && user?.login) {
+        void latestRunSnapshot(user.login, activeSession?.id).then(snapshot => setResumableSnapshot(snapshot));
+      }
+      setStreaming(false);
+      abortRef.current = null;
+      scrollToBottom(true);
+    }
+  };
+
+  const handleStop = () => {
+    flushStreamDelta();
+    approvalResolverRef.current?.(false);
+    approvalResolverRef.current = null;
+    setApprovalRequest(null);
+    abortRef.current?.abort();
+    setStreaming(false);
+  };
+
+  const handleNewSession = () => {
+    if (streaming) return;
+    if (activeSession && loadedSessionsRef.current.has(activeSession.id) && activeSession.messages.length === 0) {
+      setSessionDialogOpen(false);
+      requestAnimationFrame(() => scrollToBottom(true));
+      return;
+    }
+    const session = newSession();
+    loadedSessionsRef.current.add(session.id);
+    dirtySessionsRef.current.add(session.id);
+    const merged = [session, ...sessions];
+    const overflow = merged.slice(MAX_SESSIONS);
+    if (user?.login) {
+      for (const droppedSession of overflow) {
+        loadedSessionsRef.current.delete(droppedSession.id);
+        void deleteSessionMessages(user.login, droppedSession.id);
+      }
+    }
+    setSessions(merged.slice(0, MAX_SESSIONS));
+    setActiveId(session.id);
+    setInput('');
+    setPendingAttachments([]);
+    setSessionDialogOpen(false);
+    requestAnimationFrame(() => scrollToBottom(true));
+  };
+  const handleSelectSession = (id: string) => {
+    if (streaming) return;
+    setSessionDialogOpen(false);
+    setPendingAttachments([]);
+    stickToBottomRef.current = true;
+    if (id === activeId) {
+      requestAnimationFrame(() => scrollToBottom(true));
+      return;
+    }
+    setActiveId(id);
+    if (!user?.login || loadedSessionsRef.current.has(id)) {
+      requestAnimationFrame(() => scrollToBottom(true));
+      return;
+    }
+    const login = user.login;
+    setSessionLoading(true);
+    void loadSessionMessages(login, id)
+      .then(loaded => {
+        loadedSessionsRef.current.add(id);
+        const nextMessages = migrateLegacyRoundLimit(loaded);
+        setSessions(prev => prev.map(session => session.id === id
+          ? {
+              ...session,
+              messages: nextMessages,
+              title: session.titleSource === 'manual' ? session.title : deriveSessionTitle(nextMessages),
+            }
+          : session));
+      })
+      .finally(() => setSessionLoading(false));
+  };
+
+  const handleSelectModel = (type: string, model: string) => {
+    updateActiveSession(session => ({
+      ...session,
+      modelType: type,
+      model,
+      updatedAt: new Date().toISOString(),
+    }));
+    toast.success(i18n.t('已切换当前会话模型'));
+  };
+
+  const handleRenameSession = (id: string, title: string) => {
+    const nextTitle = title.trim().slice(0, 80);
+    if (!nextTitle) return;
+    setSessions(prev => prev.map(session => session.id === id
+      ? { ...session, title: nextTitle, titleSource: 'manual', updatedAt: new Date().toISOString() }
+      : session));
+    toast.success(i18n.t('对话已重命名'));
+  };
+
+  const handleDeleteSession = (id: string) => {
+    if (streaming) return;
+    const target = sessions.find(session => session.id === id);
+    if (!target) return;
+    if (!window.confirm(i18n.t('确定删除对话「{{title}}」？此操作不可恢复。', { title: target.title || i18n.t('新对话') }))) return;
+    if (user?.login) void clearRunSnapshots(user.login, id);
+    if (user?.login) void deleteSessionMessages(user.login, id);
+    loadedSessionsRef.current.delete(id);
+    dirtySessionsRef.current.delete(id);
+    const remaining = sessions.filter(session => session.id !== id);
+    if (remaining.length === 0) {
+      const session = newSession();
+      loadedSessionsRef.current.add(session.id);
+      setSessions([session]);
+      setActiveId(session.id);
+      return;
+    }
+    setSessions(remaining);
+    if (id === activeId) {
+      const nextId = remaining[0].id;
+      setActiveId(nextId);
+      if (user?.login && !loadedSessionsRef.current.has(nextId)) {
+        const login = user.login;
+        setSessionLoading(true);
+        void loadSessionMessages(login, nextId)
+          .then(loaded => {
+            loadedSessionsRef.current.add(nextId);
+            setSessions(prev => prev.map(session => session.id === nextId
+              ? { ...session, messages: migrateLegacyRoundLimit(loaded) }
+              : session));
+          })
+          .finally(() => setSessionLoading(false));
+      }
+    }
+  };
+
+  const handleClear = () => {
+    if (streaming) return;
+    if (hasConversation && !window.confirm(i18n.t('确定清空当前对话？'))) return;
+    setMessages([]);
+    setInput('');
+    setPendingAttachments([]);
+    if (user?.login && activeSession?.id) void clearRunSnapshots(user.login, activeSession.id);
+    setResumableSnapshot(null);
+  };
+
+  const handleSelectRepo = (repo: GitHubRepo) => {
+    setRepoContext({
+      fullName: repo.full_name,
+      defaultBranch: repo.default_branch,
+      branch: repo.default_branch,
+    });
+    setRepoDialogOpen(false);
+    toast.success(i18n.t('已选择仓库'));
+  };
+
+  const quickPrompts = repoContext
+    ? [
+        { label: i18n.t('总结仓库'), text: '请阅读当前仓库的 README 和主要目录，简要说明它是什么、技术栈和入口文件。' },
+        { label: i18n.t('找入口文件'), text: '请找出当前仓库最可能的入口文件，并说明理由。' },
+        { label: i18n.t('解释项目结构'), text: '请用 github_list_files 查看当前仓库目录结构，并解释主要目录的职责。' },
+      ]
+    : [
+        { label: i18n.t('解释代码'), text: '请解释这段代码的作用，并指出潜在问题：\n```\n\n```' },
+        { label: i18n.t('写一个工具函数'), text: '请用 TypeScript 写一个通用工具函数：安全地解析 JSON，失败时返回默认值。' },
+        { label: i18n.t('制定计划'), text: '帮我把一个模糊目标拆成可执行的小步骤，并指出第一步。' },
+      ];
+
+  return (
+    <div
+      className="flex min-h-0 w-full overflow-hidden bg-background"
+      style={{ height: `calc(100dvh - ${isAndroid ? 56 : 120}px)` }}
+    >
+      {/* 桌面端会话侧栏 */}
+      <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-muted/10 2xl:flex">
+        <div className="flex h-12 items-center justify-between border-b border-border px-3">
+          <span className="text-xs font-medium">{i18n.t('对话')}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleNewSession}
+            disabled={streaming}
+            title={i18n.t('新对话')}
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <SessionList
+            sessions={sessions}
+            activeId={activeSession?.id || ''}
+            streaming={streaming}
+            onSelect={handleSelectSession}
+            onRename={handleRenameSession}
+            onDelete={handleDeleteSession}
+          />
+        </div>
+      </aside>
+
+      {/* 主聊天列 */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border px-2 sm:px-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 2xl:hidden"
+            onClick={() => setSessionDialogOpen(true)}
+            title={i18n.t('会话列表')}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <h1 className="truncate text-sm font-semibold">{activeSession?.title || i18n.t('AI 助手')}</h1>
+            </div>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {repoContext ? `${repoContext.fullName} · ${repoContext.branch || repoContext.defaultBranch}` : i18n.t('通用模式 · 仓库可选')}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setContextDialogOpen(true)}
+            title={i18n.t('上下文')}
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            onClick={handleClear}
+            disabled={streaming || !hasConversation}
+            title={i18n.t('清空当前对话')}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </header>
+
+        {!hasModelKey && (
+          <button
+            type="button"
+            onClick={() => navigate('/ai-settings/model')}
+            className="mx-2 mt-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-xs text-amber-700 dark:text-amber-300 sm:mx-3"
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{i18n.t('还没有配置模型，点击选择 DeepSeek / OpenRouter / Gemini')}</span>
+            <ChevronRight className="h-4 w-4 shrink-0" />
+          </button>
+        )}
+        {storageError && (
+          <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive sm:mx-3">
+            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">{storageError}</span>
+            <button type="button" onClick={() => setStorageError('')} className="shrink-0 opacity-70 hover:opacity-100">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+        {resumableSnapshot && !streaming && (
+          <div className="mx-2 mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs sm:mx-3">
+            <Zap className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">
+              {i18n.t('上次运行中断于第 {{step}} 步', { step: resumableSnapshot.steps })}：{resumableSnapshot.title}
+            </span>
+            <Button type="button" size="sm" className="h-7 gap-1 px-2 text-[10px]" onClick={() => void handleResume()}>
+              {i18n.t('继续/重试')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[10px] text-muted-foreground"
+              onClick={() => {
+                if (user?.login) void clearRunSnapshot(user.login, resumableSnapshot.runId);
+                setResumableSnapshot(null);
+              }}
+            >
+              {i18n.t('忽略')}
+            </Button>
+          </div>
+        )}
+
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          <div className="mx-auto w-full max-w-3xl px-3 py-4 sm:px-5">
+            {sessionLoading ? (
+              <div className="flex min-h-[28vh] items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {i18n.t('正在加载对话…')}
+              </div>
+            ) : !hasConversation ? (
+              <div className="flex min-h-[28vh] flex-col items-center justify-center text-center">
+                <h2 className="text-base font-semibold">{i18n.t('开始一段对话')}</h2>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {quickPrompts.map(prompt => (
+                    <button
+                      key={prompt.label}
+                      type="button"
+                      onClick={() => setInput(prompt.text)}
+                      className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                    >
+                      {prompt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              (() => {
+                const virtualItems = virtualizer.getVirtualItems();
+                // 极端情况下（容器高度为 0、ResizeObserver 不可用）退化为只渲染最近几轮
+                if (!virtualItems.length) {
+                  const recent = turns.slice(-12);
+                  return (
+                    <div className="space-y-5">
+                      {recent.map((turn, index) => (
+                        <ConversationTurnView
+                          key={turn.id}
+                          turn={turn}
+                          index={turns.length - recent.length + index}
+                          onOpenArtifact={openArtifact}
+                          onApplyDiff={handleApplyDiff}
+                        />
+                      ))}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+                    {virtualItems.map(item => {
+                      const turn = turns[item.index];
+                      if (!turn) return null;
+                      return (
+                        <div
+                          key={turn.id}
+                          data-index={item.index}
+                          ref={virtualizer.measureElement}
+                          className="absolute left-0 top-0 w-full pb-5"
+                          style={{ transform: `translateY(${item.start}px)` }}
+                        >
+                          <ConversationTurnView
+                            turn={turn}
+                            index={item.index}
+                            onOpenArtifact={openArtifact}
+                            onApplyDiff={handleApplyDiff}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {showScrollButton && (
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="sticky bottom-3 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground shadow-lg backdrop-blur hover:text-foreground"
+              title={i18n.t('回到底部')}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-border bg-background/95 px-2 pb-2 pt-2 sm:px-3">
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="rounded-2xl border border-border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/40">
+              <div className="mb-1 flex flex-wrap items-center gap-1.5 px-1">
+                {repoContext ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary">
+                    <GitBranch className="h-3 w-3 shrink-0" />
+                    <button type="button" onClick={() => setBranchDialogOpen(true)} className="truncate hover:underline" title={i18n.t('切换分支')}>
+                      {repoContext.fullName} · {repoContext.branch || repoContext.defaultBranch}
+                    </button>
+                    <button type="button" onClick={() => setRepoContext(null)} className="rounded-full p-0.5 hover:bg-primary/10">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRepoDialogOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {i18n.t('选择仓库')}
+                  </button>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md,.markdown,.json,.jsonc,.yaml,.yml,.toml,.ini,.env,.js,.jsx,.ts,.tsx,.mjs,.cjs,.css,.scss,.html,.htm,.xml,.svg,.vue,.svelte,.py,.go,.rs,.java,.kt,.kts,.gradle,.c,.h,.cpp,.hpp,.cs,.php,.rb,.sh,.bash,.sql,.csv,.log,.pdf,.png,.jpg,.jpeg,.webp,.gif,Dockerfile,Makefile"
+                className="hidden"
+                onChange={event => void handleLocalFiles(event.target.files)}
+              />
+              {pendingAttachments.length > 0 && (
+                <div className="mb-1.5 flex flex-wrap gap-1 px-1">
+                  {pendingAttachments.map(attachment => (
+                    <span
+                      key={attachment.id}
+                      className="inline-flex max-w-full items-center gap-1 rounded-lg border border-border bg-muted/40 px-2 py-1 text-[10px]"
+                      title={attachment.path || attachment.name}
+                    >
+                      {attachment.kind === 'image' && (attachment.thumbDataUrl || attachment.dataUrl) ? (
+                        <img src={attachment.thumbDataUrl || attachment.dataUrl} alt={attachment.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+                      ) : attachment.source === 'repo' ? <AtSign className="h-3 w-3 shrink-0 text-primary" /> : <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                      <span className="max-w-[160px] truncate">{attachment.path || attachment.name}</span>
+                      <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingAttachments(prev => prev.filter(item => item.id !== attachment.id))}
+                        className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Textarea
+                value={input}
+                onChange={event => {
+                  const next = event.target.value;
+                  setInput(next);
+                  if (next.endsWith('@') && repoContext && !repoFileDialogOpen) setRepoFileDialogOpen(true);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                placeholder={i18n.t('输入消息… Enter 发送，Shift+Enter 换行')}
+                rows={1}
+                disabled={streaming}
+                className="max-h-44 min-h-[40px] resize-none border-0 bg-transparent px-2 py-1.5 text-sm shadow-none focus-visible:ring-0"
+              />
+
+              <div className="flex items-center gap-1 px-1 pt-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-muted-foreground"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={streaming}
+                  title={i18n.t('添加文本附件')}
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-muted-foreground"
+                  onClick={() => {
+                    if (!repoContext) {
+                      toast.warning(i18n.t('请先选择仓库，再引用仓库文件'));
+                      return;
+                    }
+                    setRepoFileDialogOpen(true);
+                  }}
+                  disabled={streaming}
+                  title={i18n.t('@ 引用仓库文件')}
+                >
+                  <AtSign className="h-3.5 w-3.5" />
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setModelDialogOpen(true)}
+                  className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <ModelAvatar modelDef={modelDef} size="sm" />
+                  <span className="max-w-[110px] truncate">{modelLabel}</span>
+                  <ChevronDown className="h-3 w-3 shrink-0" />
+                </button>
+                <Button
+                  type="button"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-lg ml-auto"
+                  onClick={streaming ? handleStop : handleSend}
+                  disabled={!streaming && ((!input.trim() && pendingAttachments.length === 0) || !token)}
+                  title={streaming ? i18n.t('停止生成') : i18n.t('发送')}
+                >
+                  {streaming ? <Square className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      {/* 大屏上下文档 */}
+      <aside className="hidden w-72 shrink-0 flex-col border-l border-border bg-muted/10 2xl:flex">
+        <div className="flex h-12 items-center border-b border-border px-3">
+          <span className="text-xs font-medium">{i18n.t('会话上下文')}</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <ContextContent
+            repo={repoContext}
+            modelLabel={modelLabel}
+            characterLabel={character.name}
+            onAddRepo={() => setRepoDialogOpen(true)}
+            onRemoveRepo={() => setRepoContext(null)}
+            onSwitchBranch={() => setBranchDialogOpen(true)}
+          />
+        </div>
+      </aside>
+
+      <Dialog
+        open={Boolean(approvalRequest)}
+        onOpenChange={open => {
+          if (!open) resolveApproval(false);
+        }}
+      >
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ShieldAlert className="h-4 w-4 text-amber-500" />
+              {i18n.t('需要确认写操作')}
+            </DialogTitle>
+          </DialogHeader>
+          {approvalRequest && (() => {
+const args = approvalRequest.arguments as Record<string, unknown>;
+             const content = String(args.content || '');
+             const files = Array.isArray(args.files)
+               ? args.files as Array<{ path?: unknown; content?: unknown }>
+               : [];
+             const previewContent = content || String(files[0]?.content || '');
+             const isSingleWrite = approvalRequest.toolName === 'github_write_file';
+            return (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+                  {i18n.t('该工具会修改仓库。确认后才会执行，本次允许仅对当前调用有效。')}
+                </div>
+                <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                  <p className="flex items-center gap-1.5 font-mono font-medium"><Wrench className="h-3.5 w-3.5" />{approvalRequest.toolName}</p>
+                  <p className="text-[11px] leading-5 text-muted-foreground">{approvalRequest.description}</p>
+{args.path !== undefined && <p><span className="text-muted-foreground">{i18n.t('路径')}：</span><span className="font-mono">{String(args.path)}</span></p>}
+                   {args.branch !== undefined && <p><span className="text-muted-foreground">{i18n.t('分支')}：</span><span className="font-mono">{String(args.branch)}</span></p>}
+                   {args.base_branch !== undefined && <p><span className="text-muted-foreground">{i18n.t('基础分支')}：</span><span className="font-mono">{String(args.base_branch)}</span></p>}
+                   {args.message !== undefined && <p><span className="text-muted-foreground">{i18n.t('提交信息')}：</span>{String(args.message)}</p>}
+                   {args.title !== undefined && <p><span className="text-muted-foreground">{i18n.t('标题')}：</span>{String(args.title)}</p>}
+                   {args.head !== undefined && <p><span className="text-muted-foreground">{i18n.t('来源分支')}：</span><span className="font-mono">{String(args.head)}</span></p>}
+                   {args.base !== undefined && <p><span className="text-muted-foreground">{i18n.t('目标分支')}：</span><span className="font-mono">{String(args.base)}</span></p>}
+                   {args.number !== undefined && <p><span className="text-muted-foreground">{i18n.t('PR 编号')}：</span>#{String(args.number)}</p>}
+                   {args.merge_method !== undefined && <p><span className="text-muted-foreground">{i18n.t('合并方式')}：</span>{String(args.merge_method)}</p>}
+                   {files.length > 0 && (
+                     <div>
+                       <p className="mb-1 text-[10px] text-muted-foreground">{i18n.t('批量文件')} · {files.length} {i18n.t('个')}</p>
+                       <div className="max-h-28 space-y-0.5 overflow-auto rounded bg-background/70 p-2 font-mono text-[10px]">
+                         {files.map((file, index) => (
+                           <p key={`${String(file.path)}-${index}`} className="truncate">
+                             {String(file.path)} <span className="text-muted-foreground">({String(file.content || '').length})</span>
+                           </p>
+                         ))}
+                       </div>
+                     </div>
+                   )}
+                   {isSingleWrite && (
+                     <div>
+                       <p className="mb-1 text-[10px] text-muted-foreground">
+                         {i18n.t('变更预览')} {approvalRemoteMissing && `· ${i18n.t('新建文件')}`}
+                       </p>
+                       {approvalDiffLoading ? (
+                         <div className="flex items-center gap-2 py-2 text-[11px] text-muted-foreground">
+                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                           {i18n.t('正在生成 Diff…')}
+                         </div>
+                       ) : (
+                         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/70 p-2 font-mono text-[10px] leading-4">{approvalDiff || i18n.t('无法读取远端版本，仅显示新内容预览。')}</pre>
+                       )}
+                     </div>
+                   )}
+                   {previewContent && (
+                     <div>
+                       <p className="mb-1 text-[10px] text-muted-foreground">{files.length > 0 ? i18n.t('首个文件内容') : i18n.t('内容预览')} · {previewContent.length} {i18n.t('字符')}</p>
+                       <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-background/70 p-2 font-mono text-[10px]">{previewContent.slice(0, 2000)}</pre>
+                     </div>
+                   )}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => resolveApproval(false)}>
+                    <X className="h-3.5 w-3.5" />
+                    {i18n.t('拒绝')}
+                  </Button>
+                  <Button type="button" size="sm" className="h-8 gap-1 text-xs" onClick={() => resolveApproval(true)}>
+                    <Check className="h-3.5 w-3.5" />
+                    {i18n.t('允许一次')}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={artifactDialogOpen} onOpenChange={setArtifactDialogOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4 text-primary" />
+              {artifactMeta?.title || i18n.t('工具结果')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <Badge variant="secondary" className="text-[9px]">{artifactMeta?.mime || 'text/plain'}</Badge>
+            <span>{artifactMeta?.size.toLocaleString()} {i18n.t('字符')}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-7 gap-1 px-2 text-[10px]"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(artifactContent);
+                  toast.success(i18n.t('已复制 Artifact'));
+                } catch {
+                  toast.error(i18n.t('复制失败'));
+                }
+              }}
+            >
+              <Copy className="h-3 w-3" />
+              {i18n.t('复制')}
+            </Button>
+          </div>
+          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/25 p-3 font-mono text-[11px] leading-5">{artifactContent}</pre>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={repoDialogOpen} onOpenChange={setRepoDialogOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">{i18n.t('选择仓库')}</DialogTitle>
+          </DialogHeader>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            {i18n.t('仓库是可选的。选择后会加载只读 GitHub 工具。')}
+          </p>
+          <RepoSelector onSelect={handleSelectRepo} />
+        </DialogContent>
+      </Dialog>
+
+      <ModelPickerDialog
+        open={modelDialogOpen}
+        onOpenChange={setModelDialogOpen}
+        providers={MODEL_DEFS}
+        currentType={sessionType}
+        currentModel={sessionModel}
+        capabilities={modelCapabilities}
+        onSelect={handleSelectModel}
+        onOpenSettings={() => {
+          setModelDialogOpen(false);
+          navigate('/ai-settings/model');
+        }}
+      />
+
+      <BranchPickerDialog
+        open={branchDialogOpen}
+        onOpenChange={setBranchDialogOpen}
+        repo={repoContext}
+        token={token || ''}
+        onSelect={branch => {
+          if (!repoContext) return;
+          setRepoContext({ ...repoContext, branch });
+          toast.success(i18n.t('已切换到分支 {{branch}}', { branch }));
+        }}
+      />
+
+      <RepoFilePicker
+        open={repoFileDialogOpen}
+        onOpenChange={setRepoFileDialogOpen}
+        repo={repoContext}
+        token={token || ''}
+        onSelect={attachment => {
+          addAttachment(attachment);
+          setInput(prev => {
+            const base = prev.endsWith('@') ? prev.slice(0, -1) : prev;
+            const separator = base && !/\s$/.test(base) ? ' ' : '';
+            return `${base}${separator}@${attachment.path || attachment.name} `;
+          });
+        }}
+      />
+
+      <ApplyPatchDialog
+        request={patchRequest}
+        repo={repoContext}
+        token={token || ''}
+        onClose={() => setPatchRequest(null)}
+      />
+
+      <Sheet open={sessionDialogOpen} onOpenChange={setSessionDialogOpen}>
+        <SheetContent side="left" className="flex w-[86vw] max-w-sm flex-col gap-0 p-0">
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3 pr-9">
+            <SheetTitle className="text-sm font-semibold">{i18n.t('对话历史')}</SheetTitle>
+            <Button type="button" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={handleNewSession} disabled={streaming}>
+              <Plus className="h-3.5 w-3.5" />
+              {i18n.t('新对话')}
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <SessionList
+              sessions={sessions}
+              activeId={activeSession?.id || ''}
+              streaming={streaming}
+              onSelect={handleSelectSession}
+              onRename={handleRenameSession}
+              onDelete={handleDeleteSession}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base">{i18n.t('会话上下文')}</DialogTitle>
+          </DialogHeader>
+          <ContextContent
+            repo={repoContext}
+            modelLabel={modelLabel}
+            characterLabel={character.name}
+            onAddRepo={() => {
+              setContextDialogOpen(false);
+              setRepoDialogOpen(true);
+            }}
+            onRemoveRepo={() => setRepoContext(null)}
+            onSwitchBranch={() => {
+              setContextDialogOpen(false);
+              setBranchDialogOpen(true);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
