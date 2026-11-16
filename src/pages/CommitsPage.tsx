@@ -1,34 +1,18 @@
+// 提交历史页
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Clock,
   ChevronRight,
   GitCommit,
-  Plus,
-  Minus,
   ExternalLink,
   GitBranch,
-
-  Scissors,
-  ChevronDown,} from 'lucide-react';
+  Undo2,
+  RotateCcw,
+  Loader2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
@@ -39,86 +23,74 @@ import {
 } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  getCommits,
-  getCommit,
-  getBranches,
-  getRepo,
-  formatRelativeTime,
-  pruneCommitHistory,
-  clearApiCache,
-} from '@/services/github';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { getCommits, getAllBranches, getRepo, formatRelativeTime, revertCommit, rollbackBranchToCommit } from '@/services/github';
 import type { GitHubCommit, GitHubBranch } from '@/types/types';
+import { UserLink } from '@/components/common/UserLink';
 import { toast } from 'sonner';
 import { pageCache } from '@/lib/page-cache';
 import i18n from "@/i18n";
-import { useRepoPermissions } from '@/hooks/use-repo-permissions';
-import PullToRefresh from '@/components/common/PullToRefresh';
 
 export default function CommitsPage() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>();
-  const { canPush } = useRepoPermissions(owner, repo);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const branchParam = searchParams.get('branch') || '';
+  const pathFilter = searchParams.get('path') || '';
   const [commits, setCommits] = useState<GitHubCommit[]>([]);
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
+  const [defaultBranch, setDefaultBranch] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [loading, setLoading] = useState(true);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [page, setPage] = useState(1);
-  const [selectedCommit, setSelectedCommit] = useState<GitHubCommit | null>(null);
-  const [commitDetailLoading, setCommitDetailLoading] = useState(false);
-  const [pruneOpen, setPruneOpen] = useState(false);
-  const [keepCount, setKeepCount] = useState(0);
-  const [pruning, setPruning] = useState(false);
+  const [actionCommit, setActionCommit] = useState<GitHubCommit | null>(null);
+  const [actionKind, setActionKind] = useState<'revert' | 'rollback' | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   useEffect(() => {
     if (!owner || !repo) return;
-    
-    // 核心修复 1：强制加上 fresh: true 穿透缓存
-    Promise.all([
-      getBranches(owner, repo),
-      getRepo(owner, repo, { fresh: true }).catch(() => null),
-    ])
-      .then(([branchResult, repoData]) => {
-        let branchList = branchResult.data;
-        const defaultBranch = repoData?.default_branch || '';
-
-        // 核心修复 2：如果因为分页导致默认分支不在列表里，强行插到最前面
-        if (defaultBranch && !branchList.some((b) => b.name === defaultBranch)) {
-          branchList = [{ name: defaultBranch, commit: { sha: '' } } as any, ...branchList];
-        }
-        
-        setBranches(branchList);
-        const names = branchList.map((b) => b.name);
-
-        let initial = '';
-        // 核心修复 3：绝对优先相信 API 返回的默认分支
-        if (defaultBranch && names.includes(defaultBranch)) {
-          initial = defaultBranch;
-        } else if (names.includes('main')) {
-          initial = 'main';
-        } else if (names.includes('master')) {
-          initial = 'master';
-        } else if (names.length > 0) {
-          initial = names[0];
-        }
-        
-        setSelectedBranch(initial);
+    let cancelled = false;
+    Promise.all([getRepo(owner, repo), getAllBranches(owner, repo)])
+      .then(([repoInfo, allBranches]) => {
+        if (cancelled) return;
+        const preferredBranch = repoInfo.default_branch || allBranches[0]?.name || '';
+        const ordered = [...allBranches].sort((a, b) => {
+          if (a.name === preferredBranch) return -1;
+          if (b.name === preferredBranch) return 1;
+          return 0;
+        });
+        setBranches(ordered);
+        setDefaultBranch(preferredBranch);
       })
       .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
   }, [owner, repo]);
+
+  // 默认使用仓库默认分支；URL 指定有效分支时才覆盖。
+  useEffect(() => {
+    if (branches.length === 0) return;
+    const preferred = branchParam && branches.some((branch) => branch.name === branchParam)
+      ? branchParam
+      : defaultBranch || branches[0]?.name || '';
+    setSelectedBranch(preferred);
+  }, [branchParam, branches, defaultBranch]);
 
   const loadCommits = useCallback(async (pageNum = 1, append = false, force = false) => {
     if (!owner || !repo || !selectedBranch) return;
-    if (force) { clearApiCache(); pageCache.invalidate('commits:'); }
     if (pageNum === 1) setLoading(true);
 
-    const cacheKey = `commits:${owner}/${repo}:${selectedBranch}:p1`;
+    const cacheKey = `commits:${owner}/${repo}:${selectedBranch}:${pathFilter}:p1`;
     if (pageNum === 1 && !append && !force) {
       const cached = pageCache.get<{ commits: GitHubCommit[]; hasNextPage: boolean }>(cacheKey);
       if (cached) {
@@ -135,7 +107,8 @@ export default function CommitsPage() {
         sha: selectedBranch,
         per_page: 30,
         page: pageNum,
-      }, { fresh: force });
+        path: pathFilter || undefined,
+      });
       if (append) {
         setCommits((prev) => [...prev, ...result.data]);
       } else {
@@ -150,49 +123,41 @@ export default function CommitsPage() {
     } finally {
       setLoading(false);
     }
-  }, [owner, repo, selectedBranch]);
+  }, [owner, repo, selectedBranch, pathFilter]);
 
-  const handlePrune = async () => {
-    if (!owner || !repo || !selectedBranch || keepCount < 1) return;
-    if (commits.length < keepCount) {
-      toast.error(i18n.t('该分支不足') + ` ${keepCount} ` + i18n.t('个 commit'));
-      return;
-    }
-    setPruning(true);
+  useEffect(() => {
+    if (selectedBranch) loadCommits(1);
+  }, [loadCommits, selectedBranch]);
+
+  const handleViewCommit = (sha: string) => {
+    if (!owner || !repo) return;
+    navigate(`/repos/${owner}/${repo}/commits/${sha}`);
+  };
+
+  const handleConfirmAction = async () => {
+    if (!owner || !repo || !actionCommit || !actionKind || !selectedBranch) return;
+    setActionBusy(true);
     try {
-      await pruneCommitHistory(owner, repo, selectedBranch, commits, keepCount);
-      toast.success(i18n.t('已保留最近') + ` ${keepCount} ` + i18n.t('个 commit'));
-      setPruneOpen(false);
-      pageCache.invalidate(`commits:${owner}/${repo}:${selectedBranch}:`);
+      if (actionKind === 'revert') {
+        const result = await revertCommit(owner, repo, selectedBranch, actionCommit.sha);
+        toast.success(`已创建撤销提交 ${result.sha.substring(0, 7)}`);
+      } else {
+        await rollbackBranchToCommit(owner, repo, selectedBranch, actionCommit.sha);
+        toast.success(`分支 ${selectedBranch} 已回滚到 ${actionCommit.sha.substring(0, 7)}`);
+      }
+      setActionCommit(null);
+      setActionKind(null);
       await loadCommits(1, false, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('操作失败'));
     } finally {
-      setPruning(false);
-    }
-  };
-
-  useEffect(() => {
-    if (selectedBranch) loadCommits(1, false, true);
-  }, [loadCommits, selectedBranch]);
-
-  const handleViewCommit = async (sha: string) => {
-    if (!owner || !repo) return;
-    setCommitDetailLoading(true);
-    try {
-      const detail = await getCommit(owner, repo, sha);
-      setSelectedCommit(detail);
-    } catch (err) {
-      toast.error(i18n.t('加载提交详情失败'));
-      console.error(err);
-    } finally {
-      setCommitDetailLoading(false);
+      setActionBusy(false);
     }
   };
 
   return (
-    <PullToRefresh onRefresh={() => loadCommits(1, false, true)}>
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
+      {/* 面包屑 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
         <ChevronRight className="w-3 h-3" />
@@ -201,58 +166,31 @@ export default function CommitsPage() {
         <span className="text-foreground">{i18n.t('提交历史')}</span>
       </div>
 
-      <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-        <GitCommit className="w-5 h-5 text-primary" />
-        {i18n.t('提交历史')}
-      </h1>
-
       <div className="flex items-center justify-between flex-wrap gap-3">
-        {canPush && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-9 px-3 border border-border text-muted-foreground hover:bg-secondary justify-center"
-                disabled={commits.length === 0}
-              >
-                <Scissors className="w-3.5 h-3.5 mr-1.5" />
-                {i18n.t('清理历史')}
-                <ChevronDown className="w-3.5 h-3.5 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-popover border-border">
-              {[1, 3, 5, 10, 20].map((n) => (
-                <DropdownMenuItem
-                  key={n}
-                  className="text-foreground cursor-pointer"
-                  disabled={commits.length < n}
-                  onClick={() => { setKeepCount(n); setPruneOpen(true); }}
-                >
-                  {i18n.t('保留最近')} {n} {i18n.t('个 commit')}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-        </DropdownMenu>
-        )}
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <GitCommit className="w-5 h-5 text-primary" />
+            {i18n.t('提交历史')}</h1>
+          {pathFilter && (
+            <p className="text-xs text-muted-foreground font-mono mt-1 break-all">{pathFilter}</p>
+          )}
+        </div>
         <Select
           value={selectedBranch}
-          onValueChange={(v) => {
-            setSelectedBranch(v);
-            try { localStorage.setItem(`commits_branch:${owner}/${repo}`, v); } catch {}
+          onValueChange={(value) => {
+            setSelectedBranch(value);
+            const next = new URLSearchParams(searchParams);
+            next.set('branch', value);
+            setSearchParams(next, { replace: true });
           }}
         >
-          <SelectTrigger className="border border-border text-foreground hover:bg-secondary w-32 h-9 justify-center">
+          <SelectTrigger className="bg-secondary border-border text-foreground w-40 h-9">
             <GitBranch className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
             <SelectValue placeholder={i18n.t('选择分支')} />
           </SelectTrigger>
-          <SelectContent className="bg-popover border-border max-h-60 min-w-[16rem] max-w-[calc(100vw-3rem)]">
+          <SelectContent className="bg-popover border-border max-h-48">
             {branches.map((branch) => (
-              <SelectItem
-                key={branch.name}
-                value={branch.name}
-                className="text-foreground font-mono text-sm"
-              >
+              <SelectItem key={branch.name} value={branch.name} className="text-foreground font-mono text-sm">
                 {branch.name}
               </SelectItem>
             ))}
@@ -260,35 +198,48 @@ export default function CommitsPage() {
         </Select>
       </div>
 
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
+      {/* 提交列表 */}
+      <div className="space-y-2">
         {loading ? (
-          <div className="divide-y divide-border">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="p-4 flex items-center gap-3">
-                <Skeleton className="w-8 h-8 rounded-full bg-muted" />
+          <>
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+                <Skeleton className="w-8 h-8 rounded-full bg-muted shrink-0" />
                 <div className="flex-1">
                   <Skeleton className="h-5 w-2/3 bg-muted mb-1.5" />
                   <Skeleton className="h-4 w-1/3 bg-muted" />
                 </div>
               </div>
             ))}
-          </div>
+          </>
         ) : commits.length === 0 ? (
-          <div className="py-16 text-center text-muted-foreground">{i18n.t('暂无提交记录')}</div>
+          <div className="bg-card border border-border rounded-xl py-16 text-center text-muted-foreground">
+            {i18n.t('暂无提交记录')}
+          </div>
         ) : (
-          <div className="divide-y divide-border">
-            {commits.map((commit) => (
-              <div
-                key={commit.sha}
-                className="cv-auto p-4 hover:bg-secondary/50 transition-colors group"
-              >
+          commits.map((commit) => (
+            <div
+              key={commit.sha}
+              className="bg-card border border-border rounded-xl overflow-hidden group"
+            >
+              <div className="px-4 pt-3 pb-2.5 min-w-0">
                 <div className="flex items-start gap-3">
-                  <Avatar className="w-8 h-8 shrink-0">
-                    <AvatarImage src={commit.author?.avatar_url} loading="lazy" />
-                    <AvatarFallback className="bg-secondary text-xs">
-                      {commit.commit.author.name.substring(0, 1)}
-                    </AvatarFallback>
-                  </Avatar>
+                  {commit.author ? (
+                    <UserLink login={commit.author.login} className="shrink-0">
+                      <Avatar className="w-8 h-8 shrink-0">
+                        <AvatarImage src={commit.author.avatar_url} />
+                        <AvatarFallback className="bg-secondary text-xs">
+                          {commit.commit.author.name.substring(0, 1)}
+                        </AvatarFallback>
+                      </Avatar>
+                    </UserLink>
+                  ) : (
+                    <Avatar className="w-8 h-8 shrink-0">
+                      <AvatarFallback className="bg-secondary text-xs">
+                        {commit.commit.author.name.substring(0, 1)}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                   <div className="flex-1 min-w-0">
                     <button
                       type="button"
@@ -305,31 +256,55 @@ export default function CommitsPage() {
                         <Clock className="w-3 h-3" />
                         {formatRelativeTime(commit.commit.author.date)}
                       </span>
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {commit.sha.substring(0, 7)}
+                      </span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      className="text-xs bg-secondary border border-border px-2 py-1 rounded font-mono text-accent hover:bg-secondary/80 transition-colors"
-                      onClick={() => handleViewCommit(commit.sha)}
-                    >
-                      {commit.sha.substring(0, 7)}
-                    </button>
-                    <a
-                      href={commit.html_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-secondary">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </Button>
-                    </a>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="flex items-center justify-end gap-1 px-3 py-2 border-t border-border bg-secondary/20">
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  title={i18n.t('查看提交详情')}
+                  onClick={() => handleViewCommit(commit.sha)}
+                >
+                  <GitCommit className="w-3.5 h-3.5" />{i18n.t('详情')}
+                </Button>
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
+                  title={i18n.t('撤销提交（创建反向提交）')}
+                  onClick={() => { setActionCommit(commit); setActionKind('revert'); }}
+                >
+                  <Undo2 className="w-3.5 h-3.5" />{i18n.t('撤销')}
+                </Button>
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  title={i18n.t('回滚分支到此提交（会移动分支）')}
+                  onClick={() => { setActionCommit(commit); setActionKind('rollback'); }}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />{i18n.t('回滚')}
+                </Button>
+                <a
+                  href={commit.html_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Button
+                    variant="ghost" size="sm"
+                    className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    title={i18n.t('在 GitHub 打开')}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />{i18n.t('打开')}
+                  </Button>
+                </a>
+              </div>
+            </div>
+          ))
         )}
       </div>
 
@@ -344,115 +319,36 @@ export default function CommitsPage() {
         </div>
       )}
 
-      <Dialog open={!!selectedCommit} onOpenChange={() => setSelectedCommit(null)}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl bg-card border-border max-h-[90dvh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-foreground text-base font-medium">
-              {i18n.t('提交详情')}</DialogTitle>
-          </DialogHeader>
-          {commitDetailLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-6 w-full bg-muted" />
-              <Skeleton className="h-4 w-2/3 bg-muted" />
-            </div>
-          ) : selectedCommit ? (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium text-foreground">{selectedCommit.commit.message}</p>
-                <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                  <span>{selectedCommit.commit.author.name}</span>
-                  <span>{formatRelativeTime(selectedCommit.commit.author.date)}</span>
-                  <code className="font-mono text-accent">{selectedCommit.sha.substring(0, 12)}</code>
-                </div>
-              </div>
-              {selectedCommit.stats && (
-                <div className="flex items-center gap-3 text-sm bg-secondary rounded-lg px-3 py-2">
-                  <span className="text-muted-foreground">{selectedCommit.stats.total} {i18n.t('个改动')}</span>
-                  <span className="text-primary flex items-center gap-1"><Plus className="w-3.5 h-3.5" />{selectedCommit.stats.additions}</span>
-                  <span className="text-destructive flex items-center gap-1"><Minus className="w-3.5 h-3.5" />{selectedCommit.stats.deletions}</span>
-                </div>
-              )}
-              {selectedCommit.files && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-foreground">{i18n.t('变更文件 (')}{selectedCommit.files.length})</p>
-                  <div className="space-y-2">
-                    {selectedCommit.files.map((file) => (
-                      <div key={file.filename} className="bg-secondary border border-border rounded-md">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-                          <code className="text-xs font-mono text-foreground flex-1 min-w-0 truncate">{file.filename}</code>
-                          <span className="text-xs text-primary shrink-0">+{file.additions}</span>
-                          <span className="text-xs text-destructive shrink-0">-{file.deletions}</span>
-                        </div>
-                        {file.patch && (
-                          <div className="text-xs pl-3 pr-2 py-2 font-mono max-h-40 overflow-y-auto leading-relaxed bg-card">
-                            {file.patch.split('\n').slice(0, 20).map((line, i) => {
-                              const colorClass = line.startsWith('+')
-                                ? 'text-primary'
-                                : line.startsWith('-')
-                                ? 'text-destructive'
-                                : line.startsWith('@@')
-                                ? 'text-accent'
-                                : 'text-muted-foreground';
-                              return (
-                                <div
-                                  key={i}
-                                  className={`whitespace-pre-wrap break-all ${colorClass}`}
-                                >
-                                  {line || ' '}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-      <AlertDialog open={pruneOpen} onOpenChange={setPruneOpen}>
-        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
+
+
+      <AlertDialog open={!!actionCommit && !!actionKind} onOpenChange={(open) => { if (!open && !actionBusy) { setActionCommit(null); setActionKind(null); } }}>
+        <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground flex items-center gap-2">
-              <Scissors className="w-4 h-4 text-destructive" />
-              {i18n.t('清理提交历史')}
+            <AlertDialogTitle className="text-foreground">
+              {actionKind === 'revert' ? i18n.t('撤销这个提交？') : i18n.t('回滚分支到这个提交？')}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground space-y-2">
-              <span className="block">
-                {i18n.t('将保留')} <span className="text-foreground font-semibold">{selectedBranch}</span> {i18n.t('分支上最近的')}{' '}
-                <span className="text-foreground font-semibold">{keepCount}</span> {i18n.t('个 commit，丢弃更早的提交。')}
-              </span>
-              {commits[keepCount - 1] && (
-                <span className="block text-xs">
-                  {i18n.t('保留的最新 commit：')}
-                  <code className="block mt-1 font-mono text-foreground bg-secondary px-2 py-1.5 rounded break-all">
-                    {commits[keepCount - 1].sha.substring(0, 12)} · {commits[keepCount - 1].commit.message.split('\n')[0]}
-                  </code>
-                </span>
-              )}
-              <span className="block text-destructive text-xs font-medium">
-                ⚠️ {i18n.t('此操作会重写分支历史，丢弃的 commit 不可恢复。协作者会受影响，CI 与 PR 也可能异常。')}
+              <span className="block font-mono text-xs break-all">{actionCommit?.sha}</span>
+              <span className="block">{actionCommit?.commit.message.split('\n')[0]}</span>
+              <span className="block text-xs">
+                {actionKind === 'revert'
+                  ? i18n.t('将创建一个新的反向提交，保留提交历史。')
+                  : i18n.t('会强制移动分支指针并丢失此提交之后的提交，操作不可撤销。')}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0">
-            <AlertDialogCancel className="min-w-[80px] px-4 border-border hover:bg-secondary" disabled={pruning}>
-              {i18n.t('取消')}
-            </AlertDialogCancel>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionBusy}>{i18n.t('取消')}</AlertDialogCancel>
             <AlertDialogAction
-              className="min-w-[100px] px-6 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(e) => { e.preventDefault(); handlePrune(); }}
-              disabled={pruning}
+              disabled={actionBusy}
+              className={actionKind === 'rollback' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
+              onClick={(e) => { e.preventDefault(); void handleConfirmAction(); }}
             >
-              {pruning ? i18n.t('处理中...') : i18n.t('确认清理')}
+              {actionBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : actionKind === 'revert' ? i18n.t('确认撤销') : i18n.t('确认回滚')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
-    </PullToRefresh>
   );
 }
