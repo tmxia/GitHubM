@@ -36,9 +36,14 @@ export default defineConfig({
     alias: [
       // lite 构建时把 AI 页面替换成 stub，真实文件不进依赖图
       ...(aiEnabled ? [] : [
-        { find: /^@\/pages\/AiAssistantPage$/, replacement: AI_STUB },
-        { find: /^@\/components\/ai\/AiSettingsSection$/, replacement: path.resolve(__dirname, "./src/components/ai/_AiSettingsStub.tsx") },
-      ]),
+            // 核心修复：精准拦截 V2 页面，强制指向空壳组件，彻底切断依赖链
+            { find: /^@\/pages\/AiAssistantV2Page$/, replacement: AI_STUB },
+            { find: /^@\/pages\/AiSettingsPage$/, replacement: AI_STUB },
+            { find: /^@\/pages\/AiAssistantPage$/, replacement: AI_STUB },
+            { find: /^@\/components\/ai\/AiSettingsSection$/, replacement: path.resolve(__dirname, "./src/components/ai/_AiSettingsStub.tsx") },
+            // 防止漏网之鱼：Lite 版直接拦截所有 ai-v2 深层依赖
+            { find: /^@\/ai-v2\/.*$/, replacement: AI_STUB },
+          ]),
       { find: "@", replacement: path.resolve(__dirname, "./src") },
     ],
   },
