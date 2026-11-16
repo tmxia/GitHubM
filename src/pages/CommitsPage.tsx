@@ -244,7 +244,7 @@ export default function CommitsPage() {
                     <button
                       type="button"
                       className="text-sm font-medium text-foreground group-hover:text-accent transition-colors text-left line-clamp-2 text-balance w-full"
-                      onClick={() => handleViewCommit(commit.sha)}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleViewCommit(commit.sha); }}
                     >
                       {commit.commit.message.split('\n')[0]}
                     </button>
@@ -268,7 +268,7 @@ export default function CommitsPage() {
                   variant="ghost" size="sm"
                   className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
                   title={i18n.t('查看提交详情')}
-                  onClick={() => handleViewCommit(commit.sha)}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleViewCommit(commit.sha); }}
                 >
                   <GitCommit className="w-3.5 h-3.5" />{i18n.t('详情')}
                 </Button>
@@ -276,7 +276,7 @@ export default function CommitsPage() {
                   variant="ghost" size="sm"
                   className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
                   title={i18n.t('撤销提交（创建反向提交）')}
-                  onClick={() => { setActionCommit(commit); setActionKind('revert'); }}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('revert'); }}
                 >
                   <Undo2 className="w-3.5 h-3.5" />{i18n.t('撤销')}
                 </Button>
@@ -284,24 +284,21 @@ export default function CommitsPage() {
                   variant="ghost" size="sm"
                   className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title={i18n.t('回滚分支到此提交（会移动分支）')}
-                  onClick={() => { setActionCommit(commit); setActionKind('rollback'); }}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('rollback'); }}
                 >
                   <RotateCcw className="w-3.5 h-3.5" />{i18n.t('回滚')}
                 </Button>
-                <a
-                  href={commit.html_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
+                  title={i18n.t('在 GitHub 打开')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(commit.html_url, '_blank', 'noopener,noreferrer');
+                  }}
                 >
-                  <Button
-                    variant="ghost" size="sm"
-                    className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    title={i18n.t('在 GitHub 打开')}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />{i18n.t('打开')}
-                  </Button>
-                </a>
+                  <ExternalLink className="w-3.5 h-3.5" />{i18n.t('打开')}
+                </Button>
               </div>
             </div>
           ))
