@@ -720,65 +720,69 @@ export default function DashboardPage() {
 
   const restoredRef = useRef(false);
 
-  // 移动端 iOS 级精准恢复：锚点优先 + 像素兜底 + 触摸防抖
   useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+
     const isReturning = sessionStorage.getItem('dashboard_is_returning') === '1';
 
-    // 正常首次进入，强制置顶
-    if (!isReturning && !restoredRef.current) {
+    if (!isReturning) {
       window.scrollTo(0, 0);
-      restoredRef.current = true;
+      clearListScroll(DASHBOARD_SCROLL_KEY);
       return;
     }
 
-    // 如果是返回，等数据彻底加载完再操作
-    if (isReturning && !loading && compileStatus.length > 0) {
-      const anchorId = sessionStorage.getItem('dash_anchor_id');
-      const exactY = sessionStorage.getItem('dash_exact_y');
+    // 优先读取精准备份的锚点 ID
+    const anchorId = sessionStorage.getItem('dash_anchor_id');
+    sessionStorage.removeItem('dashboard_is_returning');
+    sessionStorage.removeItem('dash_anchor_id');
 
-      if (anchorId || exactY) {
-        let isUserTouching = false;
-        
-        // 移动端核心：手指一碰屏幕，立刻交出控制权
-        const handleTouch = () => { isUserTouching = true; };
-        window.addEventListener('touchstart', handleTouch, { passive: true });
-        window.addEventListener('touchmove', handleTouch, { passive: true });
+    if (anchorId) {
+      let attempts = 0;
+      let isUserScrolling = false;
+      
+      const handleTouch = () => { isUserScrolling = true; };
+      window.addEventListener('touchstart', handleTouch, { passive: true });
+      window.addEventListener('touchmove', handleTouch, { passive: true });
 
-        let attempts = 0;
-        
-        const restorePosition = () => {
-          // 用户滑动了，或者等待超时（约 2 秒），清理环境
-          if (isUserTouching || attempts > 120) {
-            sessionStorage.removeItem('dashboard_is_returning');
-            sessionStorage.removeItem('dash_anchor_id');
-            sessionStorage.removeItem('dash_exact_y');
-            clearListScroll(DASHBOARD_SCROLL_KEY);
-            window.removeEventListener('touchstart', handleTouch);
-            window.removeEventListener('touchmove', handleTouch);
-            return;
-          }
+      const tryScrollToAnchor = () => {
+        if (isUserScrolling || attempts > 120) {
+          window.removeEventListener('touchstart', handleTouch);
+          window.removeEventListener('touchmove', handleTouch);
+          return;
+        }
 
-          // 策略 1：如果卡片已经渲染出来，使用锚点强制定位
-          const el = document.getElementById(`anchor-${anchorId}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'instant', block: 'center' });
-          } 
-          // 策略 2：如果卡片还没出来，先用绝对像素兜底
-          else if (exactY) {
-            window.scrollTo({ top: parseInt(exactY, 10), behavior: 'instant' });
-          }
-
+        const el = document.getElementById(anchorId);
+        if (el) {
+          // 找到元素了！强行让它滚到屏幕正中间
+          el.scrollIntoView({ behavior: 'instant', block: 'center' });
+          clearListScroll(DASHBOARD_SCROLL_KEY);
+          window.removeEventListener('touchstart', handleTouch);
+          window.removeEventListener('touchmove', handleTouch);
+        } else {
+          // 如果元素还没渲染出来（比如在卡片底部），下一帧继续找
           attempts++;
-          requestAnimationFrame(restorePosition);
+          requestAnimationFrame(tryScrollToAnchor);
+        }
+      };
+      requestAnimationFrame(tryScrollToAnchor);
+    } else {
+      // 降级兜底：如果没有锚点记录，退回到旧的像素恢复逻辑
+      const y = readListScroll(DASHBOARD_SCROLL_KEY);
+      if (y > 0) {
+        let attempts = 0;
+        const tryScroll = () => {
+          window.scrollTo(0, y);
+          const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+          if (Math.abs(actual - y) > 2 && attempts < 60) {
+            attempts++;
+            requestAnimationFrame(tryScroll);
+          }
         };
-
-        // 延迟一帧启动，让 React 完成首次 DOM 挂载
-        setTimeout(() => {
-          requestAnimationFrame(restorePosition);
-        }, 50);
+        requestAnimationFrame(tryScroll);
       }
     }
-  }, [loading, compileStatus]);
+  }, [loading, compileStatus]); // 依然依赖这两个状态，等数据加载完再找
 
   useEffect(() => {
     if (!compileEnabled) return;
@@ -967,7 +971,7 @@ export default function DashboardPage() {
               ].map((stat) => {
                 const Icon = stat.icon;
                 return (
-                  <button key={stat.label} type="button" className="text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:bg-secondary/40 active:scale-[0.98] transition-all group" onClick={() => navigate(stat.to)}>
+                  <button key={stat.label} type="button" className="text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:bg-secondary/40 active:scale-[0.98] transition-all group" id={`anchor-stat-${stat.label}`} onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-stat-${stat.label}`); navigate(stat.to); }}>
                     <div className="flex items-center gap-2 mb-2"><Icon className={`w-4 h-4 ${stat.color}`} /><span className="text-xs text-muted-foreground">{stat.label}</span></div>
                     {stat.value === null ? <p className="text-2xl font-bold text-transparent mt-1 select-none" aria-hidden="true">0</p> : <p className="text-2xl font-bold text-foreground">{formatNumber(stat.value)}</p>}
                     <p className="text-xs text-muted-foreground mt-1 transition-colors">{i18n.t('点击查看 →')}</p>
@@ -1159,7 +1163,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="divide-y divide-border">
                     {repos.slice(0, repoLimit).map((repo) => (
-                      <button key={repo.id} type="button" className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(`/repos/${repo?.full_name}`); }}>
+                      <button id={`anchor-repo-${repo.full_name}`} key={repo.id} type="button" className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-repo-${repo.full_name}`); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(`/repos/${repo?.full_name}`); }}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -1201,7 +1205,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="pb-4 space-y-0">
                     {events.slice(0, activityLimit).map((event, index) => (
-                      <button key={event.id} type="button" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(getEventTargetPath(event)); }} className="w-full flex gap-3 py-3 px-4 border-b border-border last:border-0 text-left hover:bg-secondary/30 transition-colors">
+                      <button id={`anchor-event-${event.id}`} key={event.id} type="button" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-event-${event.id}`); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(getEventTargetPath(event)); }} className="w-full flex gap-3 py-3 px-4 border-b border-border last:border-0 text-left hover:bg-secondary/30 transition-colors">
                         <div className="w-1 shrink-0 relative">
                           <div className={`w-2 h-2 rounded-full bg-primary mt-1 -ml-0.5 ${index === 0 ? 'ring-2 ring-primary/20' : ''}`} />
                           {index < events.length - 1 && <div className="absolute top-3 left-0.5 w-px h-full bg-border" />}
