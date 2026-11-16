@@ -100,13 +100,30 @@ jobs:
           fi
           export NODE_OPTIONS="--max_old_space_size=6144"
 
-          # 正常版（含 AI 助手）
-          pnpm exec vite build
-          mv dist dist-full
+                      # 正常版（含 AI 助手）
+            pnpm exec vite build
+            mv dist dist-full
 
-          # 精简版（不含 AI 助手）
-          VITE_AI_ENABLED=false pnpm exec vite build
-          mv dist dist-lite
+            # ============ 下面是精简版（Lite）的专属瘦身操作 ============
+            # 核心修复：在构建 Lite 版前，物理切掉 AI V2 巨大的依赖目录
+            rm -rf src/ai-v2
+            
+            # 把 AI 页面替换成一个空的占位组件，彻底切断对 jszip/pdfjs 等大库的引用
+            echo "export default function AiAssistantV2Page() { return null; }" > src/pages/AiAssistantV2Page.tsx
+
+            # 精简版（不含 AI 助手）
+            # 核心修复：在编译前，将路由里的 AI 页面替换为一个空占位组件，彻底剔除体积
+            cp src/routes.tsx src/routes.tsx.bak
+            sed -i "s|import('@/pages/AiAssistantV2Page')|import('@/pages/_AiStub')|g" src/routes.tsx
+            
+            VITE_AI_ENABLED=false pnpm exec vite build
+            mv dist dist-lite
+            
+            # 恢复原版路由
+            mv src/routes.tsx.bak src/routes.tsx
+
+            # 恢复被修改和删除的文件，保证后续 Job（如 Tauri）不受影响
+            git checkout -- src/ai-v2 src/pages/AiAssistantV2Page.tsx
 
           echo "✅ 两份构建完成：dist-full / dist-lite"
 
@@ -170,6 +187,8 @@ jobs:
 
       - name: 将 Web 资源复制到 Android assets
         run: |
+          # 核心修复：先清空原有的 assets 目录，防止旧版本大体积文件残留导致两个 APK 一样大
+          rm -rf android/app/src/main/assets
           mkdir -p android/app/src/main/assets
           cp -r dist/. android/app/src/main/assets/
           # lite 版放 marker，Android 原生层据此隐藏 AI 入口
