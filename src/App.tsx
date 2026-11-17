@@ -1,4 +1,4 @@
-import React, { useEffect, Suspense } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -9,6 +9,9 @@ import { routes } from './routes';
 import { recordVisit } from '@/lib/visitStats';
 import { startPolling } from '@/lib/compilePoller';
 import RouteScrollManager from '@/components/system/RouteScrollManager';
+
+// 提交详情页：routes.tsx 中以动态参数结尾的深层路由单独注册，避免污染菜单列表
+const CommitDetailPage = lazy(() => import('./pages/CommitDetailPage'));
 
 function RouteGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -96,6 +99,18 @@ function AppContent() {
               }
             />
           ))}
+
+        {/* 提交详情：/repos/:owner/:repo/commits/:sha（CommitsPage 的「详情」入口） */}
+        <Route
+          path="/repos/:owner/:repo/commits/:sha"
+          element={
+            <RouteGuard>
+              <MainLayout>
+                <CommitDetailPage />
+              </MainLayout>
+            </RouteGuard>
+          }
+        />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
