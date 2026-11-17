@@ -1,0 +1,33 @@
+/* 登录页主题色对齐
+ * ──────────────────────────────────────────────────────────────
+ * index.css 里登录页的蓝色是写死的，不随「主题色」（accent scheme）变化：
+ *   1. .login-cta 的 background: #1677FF
+ *   2. --login-cta-shadow: rgba(22, 119, 255, .6) / .45（浅/深色各一份）
+ *   3. .login-card .login-underline 的 caret-color: #1677FF !important
+ * 所以把主题切成紫罗兰等配色后，登录页仍然是蓝的。
+ *
+ * 这里统一改为由 --primary 派生。--primary 由 ThemeContext 的
+ * applyAccentScheme() 内联写到 <html> 上，而 --login-cta-shadow 内部再
+ * 引用 var(--primary)，因此浅色/深色、以及切换任意主题色都会自动同步。
+ *
+ * 引入位置：main.tsx 中紧跟 "./index.css" 之后。
+ *   - .login-cta / .login-underline 不在 @layer 内，靠「同特异性 + 后出现」覆盖；
+ *   - :root / .dark 的 token 在 @layer base 内，本文件不加 @layer，天然压过。
+ */
+
+.login-cta {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+:root,
+.dark {
+  /* 原值：浅色 rgba(22, 119, 255, 0.60) / 深色 rgba(22, 119, 255, 0.45) */
+  --login-cta-shadow: 0 10px 20px -14px hsl(var(--primary) / 0.6);
+}
+
+/* 原规则是 .login-card .login-underline { caret-color: #1677FF !important }，
+   需保持相同特异性并继续用 !important 才能覆盖。 */
+.login-card .login-underline {
+  caret-color: hsl(var(--primary)) !important;
+}

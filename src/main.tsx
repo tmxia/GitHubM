@@ -18,6 +18,8 @@ if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
 
 import { createRoot } from "react-dom/client";
 import "./index.css";
+// 登录页主题色对齐：必须紧跟 index.css，靠后置覆盖把写死的蓝色换成 --primary。
+import "./styles/login-theme.css";
 import "./i18n";
 // 补齐 i18n 缺失词条（只补缺失 key，不覆盖 src/i18n.ts 里已有的翻译）。
 // 必须在首屏渲染前引入，否则首屏仍会显示中文 key 原文。
