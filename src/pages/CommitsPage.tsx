@@ -254,9 +254,15 @@ export default function CommitsPage() {
                       {commit.commit.message.split('\n')[0]}
                     </button>
                     <div className="flex items-center gap-3 mt-1 flex-wrap">
-                      <span className="text-xs text-muted-foreground">
-                        {commit.commit.author.name}
-                      </span>
+                      {commit.author ? (
+                        <UserLink login={commit.author.login} className="text-xs text-muted-foreground">
+                          {commit.commit.author.name}
+                        </UserLink>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {commit.commit.author.name}
+                        </span>
+                      )}
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
                         {formatRelativeTime(commit.commit.author.date)}
@@ -360,3 +366,4 @@ export default function CommitsPage() {
     </PullToRefresh>
   );
 }
+
