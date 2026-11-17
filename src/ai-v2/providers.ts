@@ -34,10 +34,11 @@ export function getProviderEndpoint(config: ModelConfig): string {
 function getRequestUrl(
   config: ModelConfig,
 ): { url: string; proxy: boolean; upstream?: string } {
+  // 用户可能填根地址、.../v1 或完整的 .../v1/chat/completions，统一折叠到代理固定路由
   const proxyChatUrl = normalizeProxyChatEndpoint(config.proxy_url);
   if (proxyChatUrl) {
-    // 代理模式下 Worker 会原样 POST 到 x-llm-upstream，因此这里必须是完整的 chat 地址；
-    // 用户只填了 .../v1 这类前缀时在此补全，否则 Worker 会打到前缀上返回 404。
+    // Worker 会原样 POST 到 x-llm-upstream，因此 custom 必须传完整的 chat 地址，
+    // 否则用户只填 .../v1 时会打到前缀上返回 404。
     const upstream = config.type === 'custom' ? normalizeChatEndpoint(config.endpoint) : '';
     return { url: proxyChatUrl, proxy: true, upstream };
   }
@@ -64,11 +65,11 @@ export function buildProviderRequest(
 ): { url: string; headers: Record<string, string>; body: Record<string, unknown> } {
   const { url, proxy, upstream } = getRequestUrl(config);
   if (!url) throw new Error('请先在模型设置中填写接口地址');
-  if (!config.api_key?.trim()) throw new Error('请先在模型设置中填写 API Key');
-  // 代理模式下缺上游地址只会换来 Worker 的 400，提前给出可读提示
   if (proxy && config.type === 'custom' && !upstream) {
+    // 代理模式下缺上游地址只会换来 Worker 的 400，这里提前给出可读提示
     throw new Error('请先在模型设置中填写接口地址');
   }
+  if (!config.api_key?.trim()) throw new Error('请先在模型设置中填写 API Key');
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
