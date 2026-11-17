@@ -1,5 +1,5 @@
 // AI Assistant V2 — OpenAI 兼容 Provider 层
-import { normalizeChatEndpoint } from '@/lib/ai-endpoint';
+import { normalizeChatEndpoint, normalizeProxyChatEndpoint } from '@/lib/ai-endpoint';
 import type { ModelConfig } from '@/components/ai/aiTypes';
 import { getModelCapabilities } from './modelCapabilities';
 import type {
@@ -31,14 +31,21 @@ export function getProviderEndpoint(config: ModelConfig): string {
   }
 }
 
-function getRequestUrl(config: ModelConfig): { url: string; proxy: boolean } {
-  const explicitProxy = config.proxy_url?.trim().replace(/\/+$/, '');
-  if (explicitProxy) return { url: `${explicitProxy}/v1/chat/completions`, proxy: true };
+function getRequestUrl(
+  config: ModelConfig,
+): { url: string; proxy: boolean; upstream?: string } {
+  const proxyChatUrl = normalizeProxyChatEndpoint(config.proxy_url);
+  if (proxyChatUrl) {
+    // 代理模式下 Worker 会原样 POST 到 x-llm-upstream，因此这里必须是完整的 chat 地址；
+    // 用户只填了 .../v1 这类前缀时在此补全，否则 Worker 会打到前缀上返回 404。
+    const upstream = config.type === 'custom' ? normalizeChatEndpoint(config.endpoint) : '';
+    return { url: proxyChatUrl, proxy: true, upstream };
+  }
   // OpenRouter / 自定义接口支持浏览器 CORS，默认直连；其余走项目内置无状态代理。
   if (config.type === 'openrouter' || config.type === 'custom') {
     return { url: getProviderEndpoint(config), proxy: false };
   }
-  return { url: `${DEFAULT_PROXY}/v1/chat/completions`, proxy: true };
+  return { url: normalizeProxyChatEndpoint(DEFAULT_PROXY), proxy: true };
 }
 
 /** 部分供应商（DeepSeek）禁止回传 reasoning_content，发送前统一剔除 */
@@ -55,9 +62,13 @@ export function buildProviderRequest(
   messages: V2ProviderMessage[],
   tools: V2ToolDefinition[],
 ): { url: string; headers: Record<string, string>; body: Record<string, unknown> } {
-  const { url, proxy } = getRequestUrl(config);
+  const { url, proxy, upstream } = getRequestUrl(config);
   if (!url) throw new Error('请先在模型设置中填写接口地址');
   if (!config.api_key?.trim()) throw new Error('请先在模型设置中填写 API Key');
+  // 代理模式下缺上游地址只会换来 Worker 的 400，提前给出可读提示
+  if (proxy && config.type === 'custom' && !upstream) {
+    throw new Error('请先在模型设置中填写接口地址');
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -65,7 +76,7 @@ export function buildProviderRequest(
   };
   if (proxy) {
     headers['x-llm-provider'] = config.type;
-    if (config.type === 'custom' && config.endpoint) headers['x-llm-upstream'] = config.endpoint;
+    if (upstream) headers['x-llm-upstream'] = upstream;
   }
   if (config.type === 'openrouter') {
     headers['HTTP-Referer'] = 'https://githubm-web.pages.dev';
