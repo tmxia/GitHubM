@@ -1,0 +1,57 @@
+# 临时诊断工作流：抽取 TS 报错上下文
+# 原因：src/services/github.ts 达 86KB、AiAssistantV2Page.tsx 更大，读取工具会截断到 30KB；
+#       job 日志下载返回 401，无法直接读日志。
+# 产物：diagnostic-ts.txt（读取完毕后连同本文件一起清理）
+name: Extract TS Context
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_extract-ts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dump:
+    name: Dump TS error context
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 抽取关键片段到文件
+        run: |
+          set +e
+          OUT=diagnostic-ts.txt
+          G=src/services/github.ts
+          A=src/pages/AiAssistantV2Page.tsx
+          {
+            echo "=== LINE COUNTS ==="
+            wc -l "$G" "$A"
+            echo
+            echo "=== github.ts symbol hits ==="
+            grep -n "getCommitDetail\|GitTreeEntry\|getCommitFiles\|getCommitStats" "$G" | head -60
+            echo
+            echo "=== github.ts 2680-2890 (absolute line numbers) ==="
+            awk 'NR>=2680 && NR<=2890 {printf "%d| %s\n", NR, $0}' "$G"
+            echo
+            echo "=== AiAssistantV2Page.tsx 2450-2525 ==="
+            awk 'NR>=2450 && NR<=2525 {printf "%d| %s\n", NR, $0}' "$A"
+            echo
+            echo "=== KeyboardInsetState refs ==="
+            grep -rn "KeyboardInsetState" src/ | head -40
+            echo
+            echo "=== d.ts files under src ==="
+            find src -name "*.d.ts" -maxdepth 3
+          } > "$OUT"
+          wc -c "$OUT"
+
+      - name: 提交抽取结果
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostic-ts.txt
+          git commit -m "chore(diag): 抽取 TS 报错上下文 [skip ci]"
+          git push
