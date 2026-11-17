@@ -13,6 +13,7 @@
 //
 // 本模块在被 import 时自动安装全局兜底（幂等），因此历史代码里的
 // window.open(..., 'noopener,noreferrer') 与 <a target="_blank"> 无需逐个改写。
+// 注意：必须由入口文件（main.tsx）在首屏渲染前 import，否则补丁不会生效。
 
 const SAFE_PROTOCOL = /^(https?:\/\/|mailto:|tel:)/i;
 
@@ -103,9 +104,9 @@ let installed = false;
  */
 export function installExternalLinkFix(): void {
   if (installed || typeof window === 'undefined' || typeof document === 'undefined') return;
-  installed = true;
-
+  // 桥未注入时不要置位 installed，否则后续重试会被永久跳过
   if (!isNativeWebView() || !rawWindowOpen) return;
+  installed = true;
 
   const patchedOpen = ((url?: string | URL, target?: string, features?: string): Window | null => {
     const href = typeof url === 'string' ? url.trim() : url ? String(url).trim() : '';
