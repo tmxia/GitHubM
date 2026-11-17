@@ -1,4 +1,3 @@
-
 // 提交详情页
 //
 // 路由：/repos/:owner/:repo/commits/:sha
@@ -220,10 +219,12 @@ export default function CommitDetailPage() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {commit.author ? (
             <>
-              <Avatar className="w-5 h-5">
-                <AvatarImage src={commit.author.avatar_url} alt={commit.author.login} />
-                <AvatarFallback>{commit.author.login?.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
+              <UserLink login={commit.author.login} className="inline-flex shrink-0 items-center">
+                <Avatar className="w-5 h-5">
+                  <AvatarImage src={commit.author.avatar_url} alt={commit.author.login} />
+                  <AvatarFallback>{commit.author.login?.charAt(0).toUpperCase()}</AvatarFallback>
+                </Avatar>
+              </UserLink>
               <UserLink login={commit.author.login} className="text-xs">
                 {commit.author.login}
               </UserLink>
