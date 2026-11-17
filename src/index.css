@@ -9,147 +9,103 @@
 
 
   /* 浅色模式（默认/跟随系统时若系统为浅色） */
-  :root {
-    --radius: 0.5rem;
-
-    /* 背景层 */
-    --background: 250 30% 98%;        /* #F9F8FD 浅紫白 */
-    --foreground: 240 15% 12%;        /* #1A1A2E 深蓝黑 */
-
-    /* 卡片/面板 */
-    --card: 0 0% 100%;                /* 纯白卡片 */
-    --card-foreground: 240 15% 12%;
-
-    /* 弹出层 */
+    :root {
+    --radius: 0.75rem;
+    /* App-Search 风格：浅灰底 + 纯白卡片 + 蓝色强调 */
+    --background: 220 14% 96%;        /* #F4F5F7 */
+    --foreground: 0 0% 10%;           /* #1A1A1A */
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 15% 12%;
-
-    /* 主色 - 紫罗兰 #7c3aed */
-    --primary: 263 70% 58%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 211 100% 54%;          /* #1677FF */
     --primary-foreground: 0 0% 100%;
-
-    /* 次要色 */
-    --secondary: 250 20% 93%;         /* 浅紫灰 */
-    --secondary-foreground: 240 15% 20%;
-
-    /* 静音色 */
-    --muted: 250 20% 93%;
-    --muted-foreground: 240 8% 50%;   /* 中灰 ≥4.5:1 */
-
-    /* 强调色 - 亮紫蓝 */
-    --accent: 258 88% 66%;            /* #8B5CF6 */
+    --secondary: 220 9% 96%;          /* #F2F3F5 */
+    --secondary-foreground: 0 0% 10%;
+    --muted: 220 9% 96%;
+    --muted-foreground: 0 0% 42%;     /* #6B6B6B */
+    --accent: 211 100% 54%;           /* 与主色一致的蓝色，保证链接对比度 */
     --accent-foreground: 0 0% 100%;
-
-    /* 危险色 */
-    --destructive: 0 72% 51%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-
-    /* 边框/输入 */
-    --border: 250 15% 87%;
-    --input: 250 15% 87%;
-    --ring: 263 70% 58%;
-
-    /* 图表 */
-    --chart-1: 263 70% 58%;           /* 紫 */
-    --chart-2: 196 80% 48%;           /* 青 */
-    --chart-3: 27 90% 56%;            /* 橙 */
-    --chart-4: 142 65% 42%;           /* 绿 */
-    --chart-5: 0 72% 51%;             /* 红 */
-
-    /* 侧边栏 - 浅色模式使用浅紫白背景 */
-    --sidebar: 258 35% 97%;
-    --sidebar-background: 258 35% 97%;
-    --sidebar-foreground: 258 35% 18%;
-    --sidebar-primary: 263 70% 52%;
+    --border: 0 0% 91%;               /* #E8E8E8 */
+    --input: 0 0% 91%;
+    --ring: 211 100% 54%;
+    /* 轻量阴影：只做层次，不做拟态浮雕 */
+    --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+    --shadow-soft-md: 0 4px 16px rgba(15, 23, 42, 0.06);
+    --shadow-primary: 0 2px 8px rgba(22, 119, 255, 0.18);
+    --chart-1: 211 100% 54%;
+    --chart-2: 196 80% 48%;
+    --chart-3: 43 95% 52%;
+    --chart-4: 152 100% 36%;
+    --chart-5: 0 84% 60%;
+    --sidebar: 0 0% 100%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 10%;
+    --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 258 30% 91%;
-    --sidebar-accent-foreground: 258 35% 16%;
-    --sidebar-border: 258 20% 87%;
-    --sidebar-ring: 263 70% 58%;
-
-    /* 状态色 */
-    --success: 142 65% 42%;
+    --sidebar-accent: 211 100% 96%;   /* #EAF2FF */
+    --sidebar-accent-foreground: 211 100% 40%;
+    --sidebar-border: 0 0% 91%;
+    --sidebar-ring: 211 100% 54%;
+    --success: 152 100% 36%;
     --success-foreground: 0 0% 100%;
-    --warning: 35 91% 55%;
+    --warning: 0 84% 60%;
     --warning-foreground: 0 0% 100%;
-    --info: 196 80% 48%;
+    --info: 211 100% 54%;
     --info-foreground: 0 0% 100%;
-
-    /* 代码 */
-    --code-bg: 250 25% 95%;
-    --code-border: 250 15% 87%;
+    --code-bg: 220 14% 96%;
+    --code-border: 0 0% 91%;
   }
 
   /* 深色模式 */
-  .dark {
-    --radius: 0.5rem;
-
-    /* 背景层 */
-    --background: 240 14% 8%;         /* #0D0D16 极深紫黑 */
-    --foreground: 240 20% 92%;        /* #E8E8F0 浅蓝白 */
-
-    /* 卡片/面板 */
-    --card: 240 12% 12%;              /* #181821 */
-    --card-foreground: 240 20% 92%;
-
-    /* 弹出层 */
-    --popover: 240 12% 15%;           /* #1D1D2B */
-    --popover-foreground: 240 20% 92%;
-
-    /* 主色 - 紫罗兰（深色稍亮） */
-    --primary: 263 72% 62%;           /* #8B4CF8 */
+    .dark {
+    --radius: 0.75rem;
+    --background: 0 0% 8%;            /* #141414 */
+    --foreground: 0 0% 95%;
+    --card: 0 0% 12%;                 /* #1F1F1F */
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 211 100% 62%;          /* #3D9BFF */
     --primary-foreground: 0 0% 100%;
-
-    /* 次要色 */
-    --secondary: 240 12% 18%;         /* #252535 */
-    --secondary-foreground: 240 20% 88%;
-
-    /* 静音色 */
-    --muted: 240 10% 18%;
-    --muted-foreground: 240 10% 62%;  /* #9292A8 ≥4.5:1 */
-
-    /* 强调色 */
-    --accent: 258 88% 70%;            /* #9B77F9 */
+    --secondary: 0 0% 16%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 62%;
+    --accent: 211 100% 62%;
     --accent-foreground: 0 0% 100%;
-
-    /* 危险色 */
-    --destructive: 0 72% 56%;
+    --destructive: 0 84% 62%;
     --destructive-foreground: 0 0% 100%;
-
-    /* 边框/输入 */
-    --border: 240 10% 24%;            /* #343448 */
-    --input: 240 10% 22%;
-    --ring: 263 72% 62%;
-
-    /* 图表 */
-    --chart-1: 263 72% 62%;
+    --border: 0 0% 20%;               /* #333333 */
+    --input: 0 0% 20%;
+    --ring: 211 100% 62%;
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.50);
+    --shadow-soft-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-primary: 0 2px 10px rgba(61, 155, 255, 0.22);
+    --chart-1: 211 100% 62%;
     --chart-2: 196 80% 55%;
-    --chart-3: 27 90% 62%;
-    --chart-4: 142 65% 48%;
-    --chart-5: 0 72% 56%;
-
-    /* 侧边栏 - 更深紫黑 */
-    --sidebar: 240 14% 6%;
-    --sidebar-background: 240 14% 6%;
-    --sidebar-foreground: 240 20% 88%;
-    --sidebar-primary: 263 72% 65%;
+    --chart-3: 43 95% 58%;
+    --chart-4: 152 100% 42%;
+    --chart-5: 0 84% 62%;
+    --sidebar: 0 0% 10%;
+    --sidebar-background: 0 0% 10%;
+    --sidebar-foreground: 0 0% 92%;
+    --sidebar-primary: 211 100% 66%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 12% 14%;
-    --sidebar-accent-foreground: 240 20% 92%;
-    --sidebar-border: 240 10% 16%;
-    --sidebar-ring: 263 72% 62%;
-
-    /* 状态色 */
-    --success: 142 65% 48%;
+    --sidebar-accent: 211 40% 18%;
+    --sidebar-accent-foreground: 211 100% 80%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 211 100% 62%;
+    --success: 152 100% 42%;
     --success-foreground: 0 0% 100%;
-    --warning: 35 91% 58%;
+    --warning: 0 84% 62%;
     --warning-foreground: 0 0% 100%;
-    --info: 196 80% 55%;
+    --info: 211 100% 62%;
     --info-foreground: 0 0% 100%;
-
-    /* 代码 */
-    --code-bg: 240 14% 8%;
-    --code-border: 240 10% 24%;
+    --code-bg: 0 0% 9%;
+    --code-border: 0 0% 20%;
   }
 }
 
@@ -225,12 +181,118 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   }
 
+  /* 移动端安全边界：禁止超长文件名/URL/分支名把整页撑出视口 */
+  html, body, #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  /*
+   * 移动端 flex/grid 子项默认允许收缩（min-width:auto 会让长内容拒绝收缩）。
+   * 仅在小屏生效，避免影响桌面端布局。
+   */
+  @media (max-width: 768px) {
+    .flex > *,
+    .grid > * {
+      min-width: 0;
+    }
+  }
+
   code, pre, .font-mono {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
   }
 }
 
 @layer utilities {
+  /*
+   * 长文本收缩工具：
+   * Tailwind 的 truncate 只设置 overflow/ellipsis，不会把 flex 子项的 min-width:auto
+   * 改成 0。移动端遇到超长文件名（尤其无空格）时，元素仍会按内容宽度撑开，
+   * 最终把整行/整页推出视口。这里统一允许截断元素收缩。
+   */
+  .truncate {
+    min-width: 0;
+  }
+
+  /* 允许任意位置换行：用于错误信息、URL、Token、路径等无空格长串 */
+  .break-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /*
+   * App-Search 风格：白卡片 + 细边框 + 轻阴影。
+   * 不使用浮雕/内凹，只在需要层次的地方给极轻投影。
+   */
+  .surface-card {
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-soft);
+  }
+
+  .surface-elevated {
+    box-shadow: var(--shadow-soft-md);
+  }
+
+  [class~='bg-card'][class~='border-border'] {
+    border-color: hsl(var(--border));
+  }
+
+  [class~='bg-card'][class~='border-border'][class~='rounded-lg'],
+  [class~='bg-card'][class~='border-border'][class~='rounded-xl'],
+  [class~='bg-card'][class~='border-border'][class~='rounded-2xl'] {
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* 输入类控件统一「线条描边」：白底、细边框，不做填充/内凹 */
+  input[class~='bg-secondary'],
+  textarea[class~='bg-secondary'],
+  select[class~='bg-secondary'] {
+    border-color: hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: none;
+  }
+
+  /* 所有输入框：聚焦不做任何高亮，保持普通描边 */
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible,
+  select:focus,
+  select:focus-visible,
+  [role='combobox']:focus,
+  [role='combobox']:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: hsl(var(--border)) !important;
+  }
+/* Tabs：浅灰轨道 + 白色选中项 */
+  [role='tablist'] {
+    border-color: hsl(var(--border)) !important;
+    background: hsl(var(--secondary));
+    box-shadow: none;
+  }
+
+  [role='tablist'] [role='tab'][data-state='active'] {
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* 搜索框：只保留线条描边，不填充底色；避免 WebView autofill 覆盖 */
+  .search-input {
+    background: transparent !important;
+    border: 1px solid hsl(var(--border)) !important;
+    box-shadow: none !important;
+  }
+
+  .search-input:focus,
+  .search-input:focus-visible {
+    border-color: hsl(var(--border)) !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+
   .gradient-text {
     @apply bg-clip-text text-transparent;
     background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
@@ -240,6 +302,9 @@
   .markdown-body {
     color: hsl(var(--foreground));
     line-height: 1.6;
+    /* README 里的长 URL / 长路径不应撑破移动端视口 */
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .markdown-body h1,
@@ -279,6 +344,7 @@
     padding: 0.2em 0.4em;
     font-size: 0.85em;
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    overflow-wrap: anywhere;
   }
 
   .markdown-body pre {
@@ -313,68 +379,29 @@
     margin: 1rem 0;
   }
 
-  /* 表格横向滚动容器 */
-  .markdown-body .md-table-wrapper {
-    overflow-x: auto;
-    overflow-y: hidden;
-    margin-bottom: 1rem;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-    border: 1px solid hsl(var(--border));
-    border-radius: 6px;
-    scrollbar-width: thin;
-  }
-
   .markdown-body table {
     width: 100%;
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
     border-collapse: collapse;
-    font-size: 0.8rem;
-    min-width: max-content;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
   }
 
   .markdown-body th, .markdown-body td {
-    border-right: 1px solid hsl(var(--border));
-    border-bottom: 1px solid hsl(var(--border));
-    padding: 0.4rem 0.6rem;
+    border: 1px solid hsl(var(--border));
+    padding: 0.5rem 1rem;
     text-align: left;
-    white-space: nowrap;
-  }
-
-  /* 最后一列/行去掉重复边框 */
-  .markdown-body tr:last-child td {
-    border-bottom: none;
-  }
-  .markdown-body tr th:last-child,
-  .markdown-body tr td:last-child {
-    border-right: none;
   }
 
   .markdown-body th {
     background: hsl(var(--secondary));
     font-weight: 600;
-    position: sticky;
-    top: 0;
   }
 
   .markdown-body tr:nth-child(even) {
     background: hsl(var(--secondary) / 0.5);
-  }
-
-  /* 移动端：更小字号 + 更紧凑 */
-  @media (max-width: 640px) {
-    .markdown-body table {
-      font-size: 0.75rem;
-    }
-    .markdown-body th, .markdown-body td {
-      padding: 0.3rem 0.5rem;
-    }
-    .markdown-body h1 { font-size: 1.25rem; }
-    .markdown-body h2 { font-size: 1.1rem; }
-    .markdown-body h3 { font-size: 1rem; }
-    .markdown-body pre {
-      padding: 0.75rem;
-      font-size: 0.75rem;
-    }
   }
 
   .markdown-body img {
@@ -441,35 +468,140 @@ html.theme-transitioning *::after {
   }
 }
 
-/* 长列表渲染优化：浏览器跳过屏外项的渲染 */
-@layer utilities {
-  .cv-auto {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 92px;
-  }
+/* ── 登录页：柔和浮雕质感（软阴影替代硬边框，主色仍是应用蓝） ─────────── */
+.login-bg {
+  background:
+    radial-gradient(120% 80% at 50% -12%, hsl(var(--primary) / 0.12) 0%, transparent 62%),
+    radial-gradient(90% 60% at 104% 108%, hsl(190 90% 50% / 0.10) 0%, transparent 66%),
+    hsl(var(--background));
 }
 
-/* 全局触控反馈：轻微背景变化 + 按压变暗，不影响布局 */
-@layer base {
-  button,
-  [role="button"],
-  a[href],
-  summary {
-    -webkit-tap-highlight-color: transparent;
-    transition: background-color 100ms ease, opacity 100ms ease;
-    user-select: none;
-    -webkit-user-select: none;
-  }
+.dark .login-bg {
+  background:
+    radial-gradient(120% 80% at 50% -12%, hsl(var(--primary) / 0.20) 0%, transparent 60%),
+    radial-gradient(90% 60% at 104% 108%, hsl(190 90% 50% / 0.10) 0%, transparent 66%),
+    hsl(var(--background));
+}
 
-  button:not(:disabled):active,
-  [role="button"]:not([aria-disabled="true"]):active,
-  a[href]:active,
-  summary:active {
-    opacity: 0.7;
-  }
+.login-card {
+  background: hsl(var(--card));
+  border-radius: 26px;
+  box-shadow:
+    0 26px 60px -30px rgba(15, 23, 42, 0.30),
+    0 2px 10px -4px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
 
-  button:disabled,
-  [aria-disabled="true"] {
-    opacity: 0.5;
+.dark .login-card {
+  box-shadow:
+    0 26px 60px -28px rgba(0, 0, 0, 0.80),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.login-tip-card {
+  background: hsl(var(--card) / 0.72);
+  border-radius: 22px;
+  backdrop-filter: blur(8px);
+  box-shadow:
+    0 16px 40px -26px rgba(15, 23, 42, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.dark .login-tip-card {
+  box-shadow:
+    0 16px 40px -24px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.login-logo-tile {
+  background: linear-gradient(160deg, #ffffff 0%, hsl(220 20% 96%) 100%);
+  border-radius: 24px;
+  box-shadow:
+    0 16px 32px -16px rgba(15, 23, 42, 0.35),
+    inset 0 1px 0 #ffffff;
+}
+
+.dark .login-logo-tile {
+  background: linear-gradient(160deg, hsl(220 10% 20%) 0%, hsl(220 10% 13%) 100%);
+  box-shadow:
+    0 16px 32px -14px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* 输入框：内凹，聚焦时微微抬起（需 !important 覆盖全局输入框取消阴影的规则） */
+.login-card .login-field {
+  background: hsl(var(--secondary)) !important;
+  border: 1px solid transparent !important;
+  box-shadow: inset 0 2px 6px rgba(15, 23, 42, 0.09) !important;
+  transition: background 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.login-card .login-field:focus,
+.login-card .login-field:focus-visible {
+  background: hsl(var(--card)) !important;
+  border-color: hsl(var(--primary) / 0.55) !important;
+  box-shadow:
+    0 0 0 4px hsl(var(--primary) / 0.12),
+    inset 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+  outline: none !important;
+}
+
+.dark .login-card .login-field {
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55) !important;
+}
+
+.dark .login-card .login-field:focus {
+  box-shadow:
+    0 0 0 4px hsl(var(--primary) / 0.18),
+    inset 0 1px 2px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 主按钮：渐变 + 投影，按下有回落感 */
+.login-cta {
+  background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(211 100% 46%) 100%);
+  color: hsl(var(--primary-foreground));
+  box-shadow:
+    0 14px 28px -14px hsl(var(--primary) / 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.login-cta:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.login-cta:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    0 8px 18px -14px hsl(var(--primary) / 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.login-cta:disabled {
+  box-shadow: none;
+  filter: saturate(0.6);
+}
+
+/* 登录卡片入场：轻微上浮，尊重「减少动态效果」设置 */
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.login-card,
+.login-tip-card {
+  animation: login-rise 0.45s cubic-bezier(0.22, 0.82, 0.24, 1) both;
+}
+
+.login-tip-card {
+  animation-delay: 0.06s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card,
+  .login-tip-card {
+    animation: none;
   }
 }
