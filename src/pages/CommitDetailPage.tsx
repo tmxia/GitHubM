@@ -2,10 +2,14 @@
 //
 // 路由：/repos/:owner/:repo/commits/:sha
 // 数据：GET /repos/:owner/:repo/commits/:sha（含 stats 与 files[].patch）
+//
+// 复制 SHA 注意：App 内 WebView 加载的是 file:// 页面（非安全上下文），
+// navigator.clipboard 为 undefined，必须走统一入口 copyToClipboard()，
+// 它内部优先调用原生桥 AndroidBridge.writeClipboard。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Copy, ExternalLink, FileText, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Check, Copy, ExternalLink, FileText, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { UserLink } from '@/components/common/UserLink';
 import { getCommit, formatRelativeTime } from '@/services/github';
 import { openExternalUrl } from '@/lib/open-external';
+import { copyToClipboard } from '@/lib/utils';
 import type { GitHubCommit, GitHubFile } from '@/types/types';
 import { toast } from 'sonner';
 import i18n from '@/i18n';
@@ -79,6 +84,8 @@ export default function CommitDetailPage() {
   const [commit, setCommit] = useState<GitHubCommit | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     if (!owner || !repo || !sha) {
@@ -103,6 +110,15 @@ export default function CommitDetailPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const messageParts = useMemo(() => {
     const message = commit?.commit?.message || '';
     const [subject, ...rest] = message.split('\n');
@@ -117,15 +133,22 @@ export default function CommitDetailPage() {
     return { additions, deletions, files: files.length };
   }, [commit]);
 
-  const handleCopySha = async () => {
-    if (!commit?.sha) return;
-    try {
-      await navigator.clipboard.writeText(commit.sha);
-      toast.success(i18n.t('已复制 SHA'));
-    } catch {
+  const handleCopySha = useCallback(async () => {
+    const value = commit?.sha;
+    if (!value) return;
+    const ok = await copyToClipboard(value);
+    if (!ok) {
       toast.error(i18n.t('复制失败'));
+      return;
     }
-  };
+    toast.success(i18n.t('已复制 SHA'));
+    setCopied(true);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null;
+      setCopied(false);
+    }, 1500);
+  }, [commit?.sha]);
 
   const handleBack = () => {
     if (owner && repo) {
@@ -208,12 +231,20 @@ export default function CommitDetailPage() {
         <button
           type="button"
           onClick={handleCopySha}
-          className="inline-flex items-center gap-1.5 font-mono text-xs text-primary hover:underline"
           title={commit.sha}
+          aria-label={i18n.t('点击复制提交 SHA')}
+          className="inline-flex items-center gap-1.5 self-start rounded-lg bg-secondary/60 px-2.5 py-1 font-mono text-xs text-primary transition-colors active:bg-secondary"
         >
           {shortSha(commit.sha)}
-          <Copy className="w-3 h-3" />
+          {copied ? (
+            <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <Copy className="w-3 h-3" />
+          )}
         </button>
+        {copied ? (
+          <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{i18n.t('已复制')}</span>
+        ) : null}
 
         {totals ? (
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
