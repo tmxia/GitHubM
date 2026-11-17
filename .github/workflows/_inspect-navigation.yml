@@ -1,0 +1,45 @@
+# 临时诊断工作流：抽取 MainActivity.kt 中与外部链接打开相关的实现片段
+# 用途：MainActivity.kt 约 95KB，读取工具会截断，无法确认
+#   shouldOverrideUrlLoading / onCreateWindow / openExternal 是否存在
+# 完成后可删除本文件。
+name: Inspect Navigation
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_inspect-navigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    name: Dump navigation-related code
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 抽取关键片段
+        run: |
+          F=android/app/src/main/java/com/github/manager/MainActivity.kt
+          echo "### total lines: $(wc -l < "$F")"
+          echo
+          echo "### shouldOverrideUrlLoading"
+          grep -n -A 45 "shouldOverrideUrlLoading" "$F" || echo "<<<NOT FOUND>>>"
+          echo
+          echo "### onCreateWindow"
+          grep -n -A 30 "onCreateWindow" "$F" || echo "<<<NOT FOUND>>>"
+          echo
+          echo "### openExternal"
+          grep -n -A 15 "openExternal" "$F" || echo "<<<NOT FOUND>>>"
+          echo
+          echo "### WebChromeClient / WebViewClient 声明"
+          grep -n "WebChromeClient\|WebViewClient" "$F" || echo "<<<NOT FOUND>>>"
+          echo
+          echo "### addJavascriptInterface 注册名"
+          grep -n -B 3 -A 6 "addJavascriptInterface" "$F" || echo "<<<NOT FOUND>>>"
+          echo
+          echo "### window.open / target=_blank 相关 JS 注入"
+          grep -n "window.open\|_blank" "$F" || echo "<<<NOT FOUND>>>"
