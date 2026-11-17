@@ -1,4 +1,5 @@
 // AI Assistant V2 — OpenAI 兼容 Provider 层
+import { normalizeChatEndpoint } from '@/lib/ai-endpoint';
 import type { ModelConfig } from '@/components/ai/aiTypes';
 import { getModelCapabilities } from './modelCapabilities';
 import type {
@@ -24,7 +25,7 @@ export function getProviderEndpoint(config: ModelConfig): string {
     case 'openrouter':
       return 'https://openrouter.ai/api/v1/chat/completions';
     case 'custom':
-      return config.endpoint?.trim() || '';
+      return normalizeChatEndpoint(config.endpoint);
     default:
       return '';
   }

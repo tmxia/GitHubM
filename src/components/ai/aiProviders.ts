@@ -5,6 +5,7 @@
 // 所有请求均由浏览器直接发出，API Key 仅保存在本机 localStorage。
 import type { ModelType } from './aiTypes';
 import i18n from "@/i18n";
+import { normalizeBaseEndpoint } from '@/lib/ai-endpoint';
 
 // ── 各平台 OpenAI 兼容 Chat Completions 端点 ──────────────────────────────
 export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
@@ -15,7 +16,11 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
     case 'openai':   return 'https://api.openai.com/v1/chat/completions';
     case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
     case 'cloudflare': return 'https://llm.callact.xyz/v1/chat/completions';
-    case 'custom':   return endpoint || '';
+    case 'custom': {
+      // 既支持只填基础地址（如 http://127.0.0.1:17890/v1），也支持完整的 /chat/completions
+      const base = normalizeBaseEndpoint(endpoint);
+      return base ? `${base}/chat/completions` : '';
+    }
     case 'wenxin':   // 平台内置免费通道已随后端移除，不再支持
       return '';
   }
@@ -30,7 +35,10 @@ export function getProviderModelsUrl(type: ModelType, endpoint?: string): string
     case 'openai':   return 'https://api.openai.com/v1/models';
     case 'openrouter': return 'https://openrouter.ai/api/v1/models';
     case 'cloudflare': return '';
-    case 'custom':   return (endpoint || '').replace(/\/chat\/completions$/, '') + '/models';
+    case 'custom': {
+      const base = normalizeBaseEndpoint(endpoint);
+      return base ? `${base}/models` : '';
+    }
     case 'wenxin':   return '';
   }
 }
@@ -85,7 +93,13 @@ export async function fetchModelsFromAPI(
   const url = getProviderModelsUrl(type, endpoint);
   if (!url) throw new Error(i18n.t('该平台不支持模型列表查询'));
 
-  const res = await fetch(url, { headers: authHeaders(apiKey) });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: authHeaders(apiKey) });
+  } catch {
+    // 浏览器只给出笼统的 “Failed to fetch”：明文 HTTP 被系统拦截、跨域被拒、地址不可达都走这里
+    throw new Error(i18n.t('无法连接到接口地址：请确认地址可访问；Android 上如果是 http:// 明文地址，该地址需在白名单内且服务端允许跨域'));
+  }
   if (!res.ok) {
     let msg = '';
     try {
