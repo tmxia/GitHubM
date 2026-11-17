@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -11,6 +10,7 @@ import {
   X,
   Check,
   Tag,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,6 +118,8 @@ export default function IssueDetailPage() {
     );
   }
 
+  const issueHtmlUrl = `https://github.com/${owner}/${repo}/issues/${issue.number}`;
+
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
@@ -152,6 +154,16 @@ export default function IssueDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={issueHtmlUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={issueHtmlUrl}
+              className="inline-flex items-center h-8 px-3 rounded-md border border-border text-sm text-foreground hover:bg-secondary transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5 mr-1" />
+              {i18n.t('在 GitHub 打开')}
+            </a>
             <Button
               variant="outline"
               size="sm"
