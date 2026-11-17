@@ -19,6 +19,9 @@ if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./i18n";
+// 安装外部链接全局兜底（window.open / a[target=_blank]）。
+// 必须在首屏渲染前引入，否则「打开」按钮在进入过详情页之前无效。
+import "@/lib/open-external";
 import App from "./App.tsx";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
 import { ThemeProvider } from "./contexts/ThemeContext.tsx";
