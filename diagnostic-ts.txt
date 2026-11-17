@@ -1,0 +1,269 @@
+=== LINE COUNTS ===
+  2848 src/services/github.ts
+  2873 src/pages/AiAssistantV2Page.tsx
+  5721 total
+
+=== github.ts symbol hits ===
+2749:  const target = await getCommitDetail(owner, repo, sha);
+2754:  const current = await getCommitDetail(owner, repo, (await getBranch(owner, repo, branch)).commit.sha);
+2755:  const parent = await getCommitDetail(owner, repo, parentSha);
+2759:  const changes = new Map<string, GitTreeEntry>();
+
+=== github.ts 2680-2890 (absolute line numbers) ===
+2680| ): Promise<GitHubReleaseAsset> {
+2681|   const url = `https://uploads.github.com/repos/${owner}/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(file.name)}`;
+2682| 
+2683|   return new Promise((resolve, reject) => {
+2684|     const xhr = new XMLHttpRequest();
+2685|     xhr.open('POST', url);
+2686|     xhr.setRequestHeader('Authorization', `Bearer ${authToken ?? ''}`);
+2687|     xhr.setRequestHeader('Accept', 'application/vnd.github+json');
+2688|     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+2689|     if (onProgress) {
+2690|       xhr.upload.onprogress = (e) => {
+2691|         if (e.lengthComputable) onProgress(e.loaded, e.total);
+2692|       };
+2693|     }
+2694|     xhr.onload = () => {
+2695|       if (xhr.status >= 200 && xhr.status < 300) {
+2696|         try { resolve(JSON.parse(xhr.responseText)); }
+2697|         catch { reject(new Error('响应解析失败')); }
+2698|       } else {
+2699|         reject(new Error(`上传失败 HTTP ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
+2700|       }
+2701|     };
+2702|     xhr.onerror = () => reject(new Error('网络错误'));
+2703|     xhr.send(file);
+2704|   });
+2705| }
+2706| 
+2707| export async function getWorkflowRunById(
+2708|   owner: string, repo: string, runId: number
+2709| ): Promise<{ id: number; status: string; conclusion: string | null; html_url: string }> {
+2710|   const t = Date.now();
+2711|   return request<{ id: number; status: string; conclusion: string | null; html_url: string }>(
+2712|     `/repos/${owner}/${repo}/actions/runs/${runId}?_t=${t}`
+2713|   );
+2714| }
+2715| 
+2716| export async function getWorkflowRunStatus(
+2717|   owner: string, repo: string, workflowId: string
+2718| ): Promise<{ id: number; conclusion: string | null; status: string; html_url: string } | null> {
+2719|   try {
+2720| 
+2721|     const t = Date.now();
+2722|     const data = await request<{
+2723|       workflow_runs: Array<{ id: number; conclusion: string | null; status: string; html_url: string }>;
+2724|     }>(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowId)}/runs?per_page=1&_t=${t}`);
+2725|     return data.workflow_runs?.[0] || null;
+2726|   } catch {
+2727|     return null;
+2728|   }
+2729| }
+2730| 
+2731| export async function getReceivedEvents(username: string, perPage = 30): Promise<any[]> {
+2732|   try {
+2733|     const res = await request<any[]>(`/users/${username}/received_events?per_page=${perPage}`);
+2734|     return Array.isArray(res) ? res : [];
+2735|   } catch {
+2736|     return [];
+2737|   }
+2738| }
+2739| 
+2740| 
+2741| // ========== 自动从上游补齐的新版 API ==========
+2742| 
+2743| export async function revertCommit(
+2744|   owner: string,
+2745|   repo: string,
+2746|   branch: string,
+2747|   sha: string,
+2748| ): Promise<{ sha: string }> {
+2749|   const target = await getCommitDetail(owner, repo, sha);
+2750|   const parentSha = target.commit.parents[0]?.sha;
+2751|   if (!parentSha) throw new Error('根提交没有父提交，无法撤销');
+2752|   if (!target.files?.length) throw new Error('该提交没有可撤销的文件变更');
+2753| 
+2754|   const current = await getCommitDetail(owner, repo, (await getBranch(owner, repo, branch)).commit.sha);
+2755|   const parent = await getCommitDetail(owner, repo, parentSha);
+2756|   const parentTree = await getGitTree(owner, repo, parent.commit.tree.sha, true);
+2757|   if (parentTree.truncated) throw new Error('仓库文件树过大，GitHub 返回了截断结果，暂无法安全撤销');
+2758|   const parentMap = new Map(parentTree.tree.map(item => [item.path, item]));
+2759|   const changes = new Map<string, GitTreeEntry>();
+2760| 
+2761|   const restore = (path: string) => {
+2762|     const entry = parentMap.get(path);
+2763|     if (!entry) throw new Error(`父提交中找不到文件：${path}`);
+2764|     changes.set(path, { path, mode: entry.mode, type: entry.type, sha: entry.sha });
+2765|   };
+2766|   const remove = (path: string) => {
+2767|     changes.set(path, { path, mode: '100644', type: 'blob', sha: null });
+2768|   };
+2769| 
+2770|   for (const file of target.files) {
+2771|     const oldPath = file.previous_filename || file.filename;
+2772|     if (file.status !== 'added') restore(oldPath);
+2773|     if (file.status === 'added' || oldPath !== file.filename) remove(file.filename);
+2774|   }
+2775| 
+2776|   const treeEntries = [...changes.values()];
+2777|   if (!treeEntries.length) throw new Error('该提交没有可撤销的文件变更');
+2778|   const newTree = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/trees`, {
+2779|     method: 'POST',
+2780|     headers: { 'Content-Type': 'application/json' },
+2781|     body: JSON.stringify({ base_tree: current.commit.tree.sha, tree: treeEntries }),
+2782|   });
+2783|   const message = `Revert "${target.commit.message.split('\n')[0]}"`;
+2784|   const newCommit = await request<{ sha: string }>(`/repos/${owner}/${repo}/git/commits`, {
+2785|     method: 'POST',
+2786|     headers: { 'Content-Type': 'application/json' },
+2787|     body: JSON.stringify({ message, tree: newTree.sha, parents: [current.sha] }),
+2788|   });
+2789|   await request(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+2790|     method: 'PATCH',
+2791|     headers: { 'Content-Type': 'application/json' },
+2792|     body: JSON.stringify({ sha: newCommit.sha, force: false }),
+2793|   });
+2794|   return { sha: newCommit.sha };
+2795| }
+2796| 
+2797| /** 回滚分支到指定提交（force update，历史会被移动） */
+2798| 
+2799| export async function getAllBranches(
+2800|   owner: string,
+2801|   repo: string
+2802| ): Promise<GitHubBranch[]> {
+2803|   const all: GitHubBranch[] = [];
+2804|   const seen = new Set<string>();
+2805|   for (let page = 1; page <= 20; page += 1) {
+2806|     const result = await getBranches(owner, repo, page, 100);
+2807|     for (const branch of result.data) {
+2808|       if (seen.has(branch.name)) continue;
+2809|       seen.add(branch.name);
+2810|       all.push(branch);
+2811|     }
+2812|     if (!result.hasNextPage || result.data.length === 0) break;
+2813|   }
+2814|   return all;
+2815| }
+2816| 
+2817| // ===== Actions Secrets / Variables API =====
+2818| 
+2819| export interface GitHubActionsSecretInfo {
+2820|   name: string;
+2821|   created_at: string;
+2822|   updated_at: string;
+2823| }
+2824| 
+2825| export interface GitHubActionsVariableInfo {
+2826|   name: string;
+2827|   value: string;
+2828|   created_at: string;
+2829|   updated_at: string;
+2830| }
+2831| 
+2832| export interface GitHubActionsPublicKey {
+2833|   key_id: string;
+2834|   key: string;
+2835| }
+2836| 
+2837| export async function rollbackBranchToCommit(
+2838|   owner: string,
+2839|   repo: string,
+2840|   branch: string,
+2841|   sha: string,
+2842| ): Promise<void> {
+2843|   await request(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+2844|     method: 'PATCH',
+2845|     headers: { 'Content-Type': 'application/json' },
+2846|     body: JSON.stringify({ sha, force: true }),
+2847|   });
+2848| }
+
+=== AiAssistantV2Page.tsx 2450-2525 ===
+2450|                           onApplyDiff={handleApplyDiff}
+2451|                         />
+2452|                       ))}
+2453|                     </div>
+2454|                   );
+2455|                 }
+2456|                 return (
+2457|                   <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+2458|                     {virtualItems.map(item => {
+2459|                       const turn = turns[item.index];
+2460|                       if (!turn) return null;
+2461|                       return (
+2462|                         <div
+2463|                           key={turn.id}
+2464|                           data-index={item.index}
+2465|                           ref={virtualizer.measureElement}
+2466|                           className="absolute left-0 top-0 w-full pb-5"
+2467|                           style={{ transform: `translateY(${item.start}px)` }}
+2468|                         >
+2469|                           <ConversationTurnView
+2470|                             turn={turn}
+2471|                             index={item.index}
+2472|                             onOpenArtifact={openArtifact}
+2473|                             onApplyDiff={handleApplyDiff}
+2474|                           />
+2475|                         </div>
+2476|                       );
+2477|                     })}
+2478|                   </div>
+2479|                 );
+2480|               })()
+2481|             )}
+2482|             <div ref={bottomRef} />
+2483|           </div>
+2484| 
+2485|           {showScrollButton && (
+2486|             <button
+2487|               type="button"
+2488|               onClick={() => scrollToBottom(true)}
+2489|               className="sticky bottom-3 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground shadow-lg backdrop-blur hover:text-foreground"
+2490|               title={i18n.t('回到底部')}
+2491|             >
+2492|               <ArrowDown className="h-4 w-4" />
+2493|             </button>
+2494|           )}
+2495|         </div>
+2496| 
+2497|         <div
+2498|           className="shrink-0 border-t border-border bg-background/95 px-2 pt-2 sm:px-3"
+2499|           // 键盘弹出时整条输入区上移，避免被输入法遮住（pb 由 style 动态给出）
+2500|           style={{ paddingBottom: keyboardInset > 0 ? keyboardInset + 8 : 8 }}
+2501|         >
+2502|           <div className="mx-auto w-full max-w-3xl">
+2503|             <div className="rounded-2xl border border-border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/40">
+2504|               <div className="mb-1 flex flex-wrap items-center gap-1.5 px-1">
+2505|                 {repoContext ? (
+2506|                   <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary">
+2507|                     <GitBranch className="h-3 w-3 shrink-0" />
+2508|                     <button type="button" onClick={() => setBranchDialogOpen(true)} className="truncate hover:underline" title={i18n.t('切换分支')}>
+2509|                       {repoContext.fullName} · {repoContext.branch || repoContext.defaultBranch}
+2510|                     </button>
+2511|                     <button type="button" onClick={() => setRepoContext(null)} className="rounded-full p-0.5 hover:bg-primary/10">
+2512|                       <X className="h-2.5 w-2.5" />
+2513|                     </button>
+2514|                   </span>
+2515|                 ) : (
+2516|                   <button
+2517|                     type="button"
+2518|                     onClick={() => setRepoDialogOpen(true)}
+2519|                     className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/40 hover:text-foreground"
+2520|                   >
+2521|                     <Plus className="h-3 w-3" />
+2522|                     {i18n.t('选择仓库')}
+2523|                   </button>
+2524|                 )}
+2525|               </div>
+
+=== KeyboardInsetState refs ===
+src/hooks/use-keyboard-inset.ts:12:export interface KeyboardInsetState {
+src/hooks/use-keyboard-inset.ts:28:export function useKeyboardInset(): KeyboardInsetState {
+
+=== d.ts files under src ===
+src/lib/js-yaml.d.ts
+src/svg.d.ts
+src/global.d.ts
+src/vite-env.d.ts
