@@ -4,10 +4,13 @@
     <!-- ── 网络（GitHub API 请求） ────────────────────────────────── -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- ── 前台服务（下载保活） ───────────────────────────────────── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- API 34+ 需声明 foregroundServiceType，此处使用 dataSync（网络下载场景） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- CPU 唤醒锁：防止屏幕关闭后 CPU 休眠导致下载暂停 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- WiFi 唤醒锁：防止屏幕关闭后 WiFi 断联导致下载中断 -->
@@ -31,18 +34,6 @@
 
     <!-- ── 查询其他 App（文件选择器 / 打开下载文件） ─────────────── -->
     <queries>
-
-        <!-- 声明需要查询和交互的 GitHub 官方 App -->
-        <package android:name="com.github.android" />
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="https" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="github" />
-        </intent>
-
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="content" />
@@ -55,7 +46,6 @@
         </intent>
     </queries>
 
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -64,7 +54,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.GitHubManager"
         android:hardwareAccelerated="true"
-        android:usesCleartextTraffic="false">
+        android:largeHeap="true"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config">
         <!--
           requestLegacyExternalStorage 在 API 30+ 无效，已移除。
           下载文件使用 DownloadManager 写入 Downloads 目录，API 29+ 无需此标志。
@@ -74,11 +66,15 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|uiMode"
-            android:windowSoftInputMode="adjustPan">
+            android:launchMode="singleTask"
+            android:alwaysRetainTaskState="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|uiMode|smallestScreenSize|density|fontScale|layoutDirection|locale"
+            android:windowSoftInputMode="adjustResize">
             <!--
-              adjustPan：Android 15 强制边到边后，adjustResize 不再可靠，
-              改用 adjustPan 保持键盘弹出时 WebView 平移而非重排布局。
+              输入法避让：边到边（setDecorFitsSystemWindows(false)）之后系统不会自动缩小 WebView，
+              单靠 adjustPan 只会平移窗口，底部固定输入框（AI 助手等）仍会被键盘盖住。
+              因此改回 adjustResize，并在 MainActivity 将 IME inset 补给 WebView 的底部 padding，
+              等效于「缩小页面可视区」，让输入框始终浮在键盘上方。
             -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -89,6 +85,11 @@
         <!-- ── 后台下载前台服务 ──────────────────────────────────── -->
         <service
             android:name=".DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <!-- ── AI 任务后台保活服务 ───────────────────────────────── -->
+        <service
+            android:name=".AgentForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
