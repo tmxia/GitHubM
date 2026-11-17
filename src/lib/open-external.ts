@@ -1,19 +1,23 @@
 // 外部链接统一打开入口（普通浏览器 / Android WebView 兼容）
 //
-// 背景：项目内「打开」类操作此前直接使用 window.open(url, '_blank', 'noopener,noreferrer')。
-// - Android WebView 中 target="_blank" / window.open 依赖 WebChromeClient.onCreateWindow，
-//   未实现该回调时点击会被静默丢弃，表现就是「点了没反应」。
-// - 'noopener' 在规范上会让 window.open 一律返回 null，所以不能用返回值判断浏览器里是否成功。
+// ── 修复记录（避免以后再踩同样的坑）─────────────────────────────
+// 1) 历史写法 window.open(url, '_blank', 'noopener,noreferrer') 在 App 内本来就是有效的，
+//    任何重构都必须先复现这条路径，而不是用「返回值是否为 null」猜成功与否。
+// 2) 曾经把 window.open 存成变量后裸调用：
+//        const raw = window.open; raw(url, '_blank');
+//    window.open 是 WebIDL 方法，脱离 window 调用会抛 TypeError: Illegal invocation。
+//    异常被 catch 吞掉 → 代码退化成 location.href → WebView 拦截顶层跳转 → 表现为「点了没反应」。
+//    → 必须用 rawWindowOpen.call(window, ...) 或 bind(window) 之后再调用。
+// 3) 'noopener' 按规范会让 window.open 恒返回 null，所以返回值不能作为成功判据，
+//    只能用「调用是否抛异常」判断，否则会把成功的打开误判为失败并触发错误的降级。
 //
-// 策略：
-// 1) 原生桥提供 openExternal 时优先调用（直接跳系统浏览器）。
-// 2) 普通浏览器：保留原生新标签页行为，不做任何干预。
-// 3) Android WebView：window.open 返回 null 时退化为 location 导航，
-//    交给 WebViewClient.shouldOverrideUrlLoading 处理（未实现时至少能内嵌打开）。
+// ── 策略 ───────────────────────────────────────────────────
+// 1) 原生桥暴露 openExternal 时优先调用（直接跳系统浏览器）。
+// 2) 其余情况一律走 window.open(url, '_blank', 'noopener,noreferrer')，与历史行为一致。
+// 3) 仅当调用本身抛异常（或环境不存在 window.open）时，才退化为 location.href 导航。
 //
-// 本模块在被 import 时自动安装全局兜底（幂等），因此历史代码里的
-// window.open(..., 'noopener,noreferrer') 与 <a target="_blank"> 无需逐个改写。
-// 注意：必须由入口文件（main.tsx）在首屏渲染前 import，否则补丁不会生效。
+// 本模块被 import 时自动安装全局兜底（幂等）。注意：必须由入口文件（main.tsx）
+// 在首屏渲染前 import，否则历史代码里的 <a target="_blank"> 兜底不会生效。
 
 const SAFE_PROTOCOL = /^(https?:\/\/|mailto:|tel:)/i;
 
@@ -39,21 +43,20 @@ export function isNativeWebView(): boolean {
 const rawWindowOpen: typeof window.open | undefined =
   typeof window !== 'undefined' && typeof window.open === 'function' ? window.open : undefined;
 
-function openInNewTab(url: string): Window | null {
-  if (!rawWindowOpen) return null;
+/**
+ * 以正确的 receiver 调用原生 window.open。
+ *
+ * 返回值只表示「调用是否成功发出」，不表示窗口真的开了 ——
+ * 带 'noopener' 时规范要求返回 null，WebView 未实现 onCreateWindow 时同样返回 null。
+ */
+function callWindowOpen(url: string, target = '_blank', features?: string): boolean {
+  if (!rawWindowOpen) return false;
   try {
-    return rawWindowOpen(url, '_blank');
-  } catch {
-    return null;
-  }
-}
-
-function clearOpener(win: Window | null): void {
-  if (!win) return;
-  try {
-    win.opener = null;
-  } catch {
-    // 跨域窗口设置 opener 可能抛错，忽略
+    rawWindowOpen.call(window, url, target, features);
+    return true;
+  } catch (err) {
+    console.warn('[open-external] window.open 调用失败', err);
+    return false;
   }
 }
 
@@ -65,32 +68,21 @@ export function openExternalUrl(rawUrl?: string | null): void {
   const url = (rawUrl || '').trim();
   if (!url || !isSafeUrl(url)) return;
 
+  // 1) 原生桥：直接交给系统浏览器（需要 MainActivity 侧实现 openExternal）
   const bridge = getBridge();
-  if (bridge?.openExternal) {
+  if (typeof bridge?.openExternal === 'function') {
     try {
       bridge.openExternal(url);
       return;
     } catch (err) {
-      console.warn('[openExternalUrl] 原生桥打开失败，降级处理', err);
+      console.warn('[open-external] 原生桥打开失败，降级为 window.open', err);
     }
   }
 
-  if (!isNativeWebView()) {
-    const win = openInNewTab(url);
-    if (win) {
-      clearOpener(win);
-      return;
-    }
-    window.location.href = url;
-    return;
-  }
+  // 2) 与历史行为保持一致：window.open 新窗口 / 新标签页
+  if (callWindowOpen(url, '_blank', 'noopener,noreferrer')) return;
 
-  // Android WebView：onCreateWindow 未实现时 window.open 返回 null，退化为导航
-  const win = openInNewTab(url);
-  if (win) {
-    clearOpener(win);
-    return;
-  }
+  // 3) 仅在调用本身失败时退化（浏览器 window.open 缺失、被改写抛错等）
   window.location.href = url;
 }
 
@@ -98,9 +90,9 @@ let installed = false;
 
 /**
  * 安装全局兜底（幂等）：
- * 1) WebView 中 window.open 返回 null 时退化为 location 导航。
- * 2) 捕获阶段拦截 <a target="_blank"> 点击，避免被 WebView 静默丢弃。
- * 普通浏览器中不做任何改写，保持原生新标签页行为。
+ * 1) 代理 window.open，保留原生行为，仅在调用抛错时退化为导航。
+ * 2) 捕获阶段拦截 <a target="_blank"> 点击，交给 openExternalUrl 统一处理。
+ * 普通浏览器中同样只做等价转发，不改变原生新标签页语义。
  */
 export function installExternalLinkFix(): void {
   if (installed || typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -110,12 +102,16 @@ export function installExternalLinkFix(): void {
 
   const patchedOpen = ((url?: string | URL, target?: string, features?: string): Window | null => {
     const href = typeof url === 'string' ? url.trim() : url ? String(url).trim() : '';
-    const win = rawWindowOpen(url as string, target, features);
-    if (win) return win;
-    if (href && isSafeUrl(href)) {
-      window.location.href = href;
+    try {
+      // 必须带 receiver，否则 Illegal invocation
+      return rawWindowOpen.call(window, url as string, target, features);
+    } catch (err) {
+      console.warn('[open-external] 代理 window.open 调用失败，降级导航', err);
+      if (href && isSafeUrl(href)) {
+        window.location.href = href;
+      }
+      return null;
     }
-    return null;
   }) as typeof window.open;
 
   try {
