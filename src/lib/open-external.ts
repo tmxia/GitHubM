@@ -23,15 +23,15 @@
 //    而 WebView 静默失败时返回值同样不可信。判断依据只能是「环境 + 是否抛异常」。
 // 3) 原生桥 AndroidBridge 目前**没有** openExternal 方法（MainActivity 侧未实现），
 //    所以桥优先分支在现版本不会命中，仅作为将来扩展的预留通路。
+// 4) 本模块靠 import 的副作用安装兜底（main.tsx 里 `import "@/lib/open-external"`）。
+//    重构时若删掉文件末尾的自动安装调用，window.open 代理与 a[target=_blank]
+//    拦截会静默失效 —— 且没有任何报错。
 //
 // ── 策略（按优先级）────────────────────────────────────────
 // 1) 原生桥暴露 openExternal → 直接调用（将来实现后最稳）。
 // 2) 运行在 Android WebView 容器内 → location.href 导航（唯一可靠路径）。
 // 3) 普通浏览器 → window.open(url, '_blank', 'noopener,noreferrer')，保持历史语义。
 // 4) window.open 调用抛异常（浏览器改写等）→ 退化为 location.href。
-//
-// 本模块被 import 时自动安装全局兜底（幂等）。注意：必须由入口文件（main.tsx）
-// 在首屏渲染前 import，否则 <a target="_blank"> 与第三方 window.open 的兜底不会生效。
 
 const SAFE_PROTOCOL = /^(https?:\/\/|mailto:|tel:)/i;
 
@@ -180,4 +180,28 @@ export function installExternalLinkFix(): void {
     },
     true,
   );
+}
+
+// ── 副作用式自动安装 ──────────────────────────────────────────
+// main.tsx 通过 `import "@/lib/open-external"` 引入本模块，依赖这里的自动执行。
+// AndroidBridge 在页面脚本执行前已注入，正常情况下首次就装好；
+// 保险起见对「桥注入较晚」的场景做有限次重试，并在 DOM 就绪时再补一次。
+installExternalLinkFix();
+
+if (typeof window !== 'undefined' && !installed) {
+  let attempts = 0;
+  const retry = () => {
+    installExternalLinkFix();
+    if (installed || ++attempts >= 10) return;
+    setTimeout(retry, 300);
+  };
+  setTimeout(retry, 300);
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => installExternalLinkFix(), { once: true });
+    } else {
+      installExternalLinkFix();
+    }
+  }
 }
