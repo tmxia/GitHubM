@@ -1,0 +1,218 @@
+FILE: android/app/src/main/java/com/github/manager/MainActivity.kt
+LINES: 1949
+
+=========== shouldOverrideUrlLoading ===========
+1200:            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+1201-                val url = request?.url?.toString() ?: return false
+1202-                
+1203-                // 如果非本地资源，直接交给系统
+1204-                if (!url.startsWith("http://localhost") && !url.contains("appassets.androidplatform.net")) {
+1205-                    
+1206-                    // 特殊处理：如果是 GitHub 链接，转换为 github:// 协议
+1207-                    if (url.contains("github.com")) {
+1208-                        try {
+1209-                            // 大部分情况下 github:// 能直接唤醒 App
+1210-                            val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+1211-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+1212-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1213-                            startActivity(intent)
+1214-                            return true
+1215-                        } catch (e: Exception) {
+1216-                            // 如果 scheme 失败，回退到普通的 https 链接（让系统自己选）
+1217-                            try {
+1218-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+1219-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1220-                                startActivity(intent)
+1221-                            } catch (e2: Exception) {}
+1222-                            return true
+1223-                        }
+1224-                    } else {
+1225-                        // 其他外链
+1226-                        try {
+1227-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+1228-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1229-                            startActivity(intent)
+1230-                        } catch (e: Exception) {}
+1231-                        return true
+1232-                    }
+1233-                }
+1234-                return false
+1235-            }
+1236-            
+1237-            // 拦截外部链接，强制丢给 Android 系统
+1238-            
+1239-
+1240-
+1241-            override fun shouldInterceptRequest(
+1242-                view: WebView?,
+1243-                request: android.webkit.WebResourceRequest?,
+1244-            ): WebResourceResponse? {
+1245-                val url = request?.url ?: return null
+--
+1700:             * 统一交给系统浏览器处理，与 shouldOverrideUrlLoading 的策略一致，
+1701-             * 避免外部页面破坏 React 应用的历史栈。
+1702-             */
+1703-            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
+1704-                val transport = resultMsg?.obj as? WebView.WebViewTransport
+1705-                val url = view?.hitTestResult?.extra
+1706-                
+1707-                if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+1708-                    
+1709-                            val isGithub = url.contains("github.com")
+1710-                            if (isGithub) {
+1711-                                // 策略1：强行转换为 github:// Scheme
+1712-                                try {
+1713-                                    val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+1714-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+1715-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1716-                                    startActivity(intent)
+1717-                                    android.util.Log.d("WebViewJump", "唤起成功: github:// scheme")
+1718-                                    return true
+1719-                                } catch (e: Exception) {
+1720-                                    android.util.Log.e("WebViewJump", "github:// 唤起失败", e)
+1721-                                }
+1722-                                // 策略2：强行用 https + 包名唤起
+1723-                                try {
+1724-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+1725-                                    intent.setPackage("com.github.android")
+1726-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1727-                                    startActivity(intent)
+1728-                                    android.util.Log.d("WebViewJump", "唤起成功: https + setPackage")
+1729-                                    return true
+1730-                                } catch (e: Exception) {
+1731-                                    android.util.Log.e("WebViewJump", "setPackage 唤起失败", e)
+1732-                                }
+1733-                            }
+1734-                            
+1735-                            // 策略3：普通链接或 GitHub 唤起失败，走浏览器
+1736-                            try {
+1737-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+1738-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1739-                                startActivity(intent)
+1740-                            } catch (e: Exception) {}
+1741-                            return true
+1742-
+1743-                }
+1744-                transport?.webView = null
+1745-                resultMsg?.sendToTarget()
+
+=========== onCreateWindow ===========
+1176:            // window.open / target=_blank 由 WebChromeClient.onCreateWindow 接管，
+1177-            // 否则 JS window.open 在 WebView 中静默失效（PC 可用、Android 无反应）
+1178-            setSupportMultipleWindows(true)
+1179-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+1180-                isAlgorithmicDarkeningAllowed = true
+1181-            } else {
+1182-                @Suppress("DEPRECATION")
+1183-                androidx.webkit.WebSettingsCompat.setForceDark(
+1184-                    this,
+1185-                    androidx.webkit.WebSettingsCompat.FORCE_DARK_ON,
+1186-                )
+1187-            }
+1188-        }
+1189-
+1190-    }
+1191-
+1192-    private val assetLoader by lazy {
+1193-        WebViewAssetLoader.Builder()
+1194-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+1195-            .build()
+1196-    }
+1197-
+1198-    private fun setupWebViewClient() {
+1199-        webView.webViewClient = object : WebViewClient() {
+1200-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+1201-                val url = request?.url?.toString() ?: return false
+1202-                
+1203-                // 如果非本地资源，直接交给系统
+1204-                if (!url.startsWith("http://localhost") && !url.contains("appassets.androidplatform.net")) {
+1205-                    
+1206-                    // 特殊处理：如果是 GitHub 链接，转换为 github:// 协议
+--
+1703:            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
+1704-                val transport = resultMsg?.obj as? WebView.WebViewTransport
+1705-                val url = view?.hitTestResult?.extra
+1706-                
+1707-                if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+1708-                    
+1709-                            val isGithub = url.contains("github.com")
+1710-                            if (isGithub) {
+1711-                                // 策略1：强行转换为 github:// Scheme
+1712-                                try {
+1713-                                    val schemeUrl = url.replace("https://github.com", "github://github.com").replace("http://github.com", "github://github.com")
+1714-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl))
+1715-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1716-                                    startActivity(intent)
+1717-                                    android.util.Log.d("WebViewJump", "唤起成功: github:// scheme")
+1718-                                    return true
+1719-                                } catch (e: Exception) {
+1720-                                    android.util.Log.e("WebViewJump", "github:// 唤起失败", e)
+1721-                                }
+1722-                                // 策略2：强行用 https + 包名唤起
+1723-                                try {
+1724-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+1725-                                    intent.setPackage("com.github.android")
+1726-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+1727-                                    startActivity(intent)
+1728-                                    android.util.Log.d("WebViewJump", "唤起成功: https + setPackage")
+1729-                                    return true
+1730-                                } catch (e: Exception) {
+1731-                                    android.util.Log.e("WebViewJump", "setPackage 唤起失败", e)
+1732-                                }
+1733-                            }
+
+=========== openExternal ===========
+<<<NOT FOUND>>>
+
+=========== WebChromeClient / WebViewClient ===========
+22:import android.webkit.WebChromeClient
+27:import android.webkit.WebViewClient
+134:    private var pendingFileChooserParams: WebChromeClient.FileChooserParams? = null
+1016:        setupWebViewClient()
+1017:        setupWebChromeClient()
+1176:            // window.open / target=_blank 由 WebChromeClient.onCreateWindow 接管，
+1198:    private fun setupWebViewClient() {
+1199:        webView.webViewClient = object : WebViewClient() {
+1694:    private fun setupWebChromeClient() {
+1695:        webView.webChromeClient = object : WebChromeClient() {
+1869:        fileChooserParams: WebChromeClient.FileChooserParams,
+1888:        fileChooserParams: WebChromeClient.FileChooserParams,
+
+=========== addJavascriptInterface ===========
+1015-        setupWebViewSettings()
+1016-        setupWebViewClient()
+1017-        setupWebChromeClient()
+1018-        setupDownloadListener()
+1019:        webView.addJavascriptInterface(WebAppBridge(), "AndroidBridge")
+1020:        webView.addJavascriptInterface(AndroidBatteryPlugin(), "AndroidBattery")
+1021-
+1022-        // WebView 最早时机开始加载，充分利用 3s 启动时间预热 React
+1023-        if (savedInstanceState != null) {
+1024-            webView.restoreState(savedInstanceState)
+
+=========== window.open / _blank ===========
+1176:            // window.open / target=_blank 由 WebChromeClient.onCreateWindow 接管，
+1177:            // 否则 JS window.open 在 WebView 中静默失效（PC 可用、Android 无反应）
+1698:             * window.open / target=_blank 兜底：WebView 默认不创建新窗口，
+1699:             * 导致 JS window.open 静默失效（PC 端可用、Android 端无反应的功能缺口）。
+
+=========== @JavascriptInterface method names ===========
+204-        fun getSystemTheme(): String {
+215-        fun writeClipboard(text: String) {
+224-        fun readClipboard(): String {
+235-        fun httpGetText(url: String, token: String): String {
+278-        fun httpGetRaw(url: String, authHeader: String, accept: String): String {
+325-        fun notifyReady() {
+337-        fun notifyTheme(isDark: Boolean) {
+346-        fun notifyThemeMode(mode: String) {
+381-        fun notifyAccent(primaryHex: String) {
+408-        fun notifyAccentIcon(primaryHex: String) {
+424-        fun downloadFile(url: String, fileName: String, token: String) {
+437-        fun checkUpdate() {
+449-        fun setDownloadNotify(enabled: Boolean) {
+454-        fun notifyCompileDone(runKey: String, title: String, body: String, deepLink: String) {
+475-        fun checkNotificationPermission(): Boolean {
+488-        fun requestNotificationPermission() {
+500-        fun openNotificationSettings() {
+518-        fun syncMonitorConfig(json: String) {
+544-        fun saveBlobData(fileName: String, mimeType: String, base64Content: String) {
