@@ -35,6 +35,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { getCommits, getAllBranches, getRepo, formatRelativeTime, revertCommit, rollbackBranchToCommit } from '@/services/github';
+import { openExternalUrl } from '@/lib/open-external';
 import type { GitHubCommit, GitHubBranch } from '@/types/types';
 import { UserLink } from '@/components/common/UserLink';
 import { toast } from 'sonner';
@@ -276,29 +277,34 @@ export default function CommitsPage() {
                 >
                   <GitCommit className="w-3.5 h-3.5" />{i18n.t('详情')}
                 </Button>
-                <Button
-                  variant="ghost" size="sm"
-                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
-                  title={i18n.t('撤销提交（创建反向提交）')}
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('revert'); }}
-                >
-                  <Undo2 className="w-3.5 h-3.5" />{i18n.t('撤销')}
-                </Button>
-                <Button
-                  variant="ghost" size="sm"
-                  className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  title={i18n.t('回滚分支到此提交（会移动分支）')}
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('rollback'); }}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />{i18n.t('回滚')}
-                </Button>
+                {/* 写入类操作按仓库权限显示：仅对可推送的仓库（自己的仓库/协作者）可见 */}
+                {canPush && (
+                  <>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
+                      title={i18n.t('撤销提交（创建反向提交）')}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('revert'); }}
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />{i18n.t('撤销')}
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      title={i18n.t('回滚分支到此提交（会移动分支）')}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setActionCommit(commit); setActionKind('rollback'); }}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />{i18n.t('回滚')}
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost" size="sm"
                   className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:bg-secondary hover:text-primary"
                   title={i18n.t('在 GitHub 打开')}
                   onClick={(e) => {
                     e.stopPropagation();
-                    window.open(commit.html_url, '_blank', 'noopener,noreferrer');
+                    openExternalUrl(commit.html_url);
                   }}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />{i18n.t('打开')}
