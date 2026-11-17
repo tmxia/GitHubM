@@ -3,12 +3,17 @@
 // 背景：此前大量页面把头像或用户名指向 github.com（或根本没有绑定点击），
 // 在 WebView APK 内会跳出应用或直接无响应，用户无法查看作者主页与其所有仓库。
 // 这里提供轻量组件，保证任意页面点击头像/用户名都走 React Router 内部路由。
+//
+// 修复记录：userProfilePath 曾返回 `/users/:login`，但 routes.tsx 中注册的用户主页
+// 是 `/users/:login/repos`（UserReposPage）。前者未命中任何路由，会落到 App.tsx 的
+// `path="*" → <Navigate to="/" replace />`，表现为「点他人头像跳回自己的首页」。
+// 因此路径必须带 `/repos` 段；routes.tsx 另注册了 `/users/:login` 的别名重定向兜底。
 import type { ReactNode, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
 export function userProfilePath(login: string): string {
-  return `/users/${encodeURIComponent(login)}`;
+  return `/users/${encodeURIComponent(login)}/repos`;
 }
 
 interface UserLinkProps {

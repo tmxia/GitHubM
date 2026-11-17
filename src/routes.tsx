@@ -1,4 +1,5 @@
 import { lazy, type ReactNode } from 'react';
+import { Navigate, useParams } from 'react-router-dom';
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ReposPage = lazy(() => import('./pages/ReposPage'));
@@ -53,6 +54,16 @@ export interface RouteConfig {
   public?: boolean;
 }
 
+/**
+ * 兼容别名：/users/:login 统一重定向到 /users/:login/repos。
+ * 历史上 UserLink 生成过不带 /repos 的路径，旧书签、旧版本留在 WebView 历史里的
+ * 链接、以及将来误写的地方都会命中这里，避免再被 `path="*"` 静默送回首页。
+ */
+function UserProfileRedirect() {
+  const { login } = useParams<{ login: string }>();
+  return <Navigate to={`/users/${encodeURIComponent(login ?? '')}/repos`} replace />;
+}
+
 export const routes: RouteConfig[] = [
   { name: i18n.t('登录'), path: '/login', element: <LoginPage />, public: true },
   { name: i18n.t('首页'), path: '/', element: <DashboardPage /> },
@@ -91,6 +102,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('Actions 设置'), path: '/repos/:owner/:repo/actions-settings', element: <RepoActionsSettingsPage /> },
   { name: i18n.t('机密和变量'), path: '/repos/:owner/:repo/secrets-variables', element: <RepoSecretsVariablesPage /> },
   { name: i18n.t('仓库设置'), path: '/repos/:owner/:repo/settings', element: <RepoSettingsPage /> },
+  { name: i18n.t('用户仓库'), path: '/users/:login', element: <UserProfileRedirect />, visible: false },
   { name: i18n.t('用户仓库'), path: '/users/:login/repos', element: <UserReposPage /> },
   { name: i18n.t('仓库收藏者'), path: '/repos/:owner/:repo/stargazers', element: <StargazersPage /> },
   { name: i18n.t('设置'), path: '/settings', element: <SettingsPage /> },
