@@ -10,16 +10,34 @@
 //    → 必须用 rawWindowOpen.call(window, ...) 或 bind(window) 之后再调用。
 // 3) 'noopener' 按规范会让 window.open 恒返回 null，所以返回值不能作为成功判据，
 //    只能用「调用是否抛异常」判断，否则会把成功的打开误判为失败并触发错误的降级。
+// 4) 【「提交历史」卡片「打开」按钮点击无反应 · 根因】
+//    MainActivity 设置了 setSupportMultipleWindows(true)，window.open 由
+//    WebChromeClient.onCreateWindow 接管，而它只能用 view.hitTestResult.extra 取目标 URL
+//    —— 只有「手指正好点在 <a> 链接上」时该值才非空。
+//    从 <button> 的 onClick 里发起的 programmatic window.open 取不到 URL，于是走进
+//        transport?.webView = null; resultMsg?.sendToTarget(); return true
+//    这条分支：弹出一个空窗口，既不抛异常也没打开任何页面 —— 本模块既无法感知失败，
+//    也就永远不会降级，最终表现就是「点了没反应」。
+//    另外原生桥 AndroidBridge 从未实现 openExternal，策略 1 一直是空转，问题因此被长期掩盖。
+//    → App 内 WebView 改为直接做主文档导航：WebViewClient.shouldOverrideUrlLoading 会把外链
+//      用 startActivity(ACTION_VIEW) 交给系统（github.com 还会转成 github:// 唤起 GitHub App），
+//      并 return true 表示已处理，WebView 不会真的离开当前页面。
 //
 // ── 策略 ───────────────────────────────────────────────────
-// 1) 原生桥暴露 openExternal 时优先调用（直接跳系统浏览器）。
-// 2) 其余情况一律走 window.open(url, '_blank', 'noopener,noreferrer')，与历史行为一致。
-// 3) 仅当调用本身抛异常（或环境不存在 window.open）时，才退化为 location.href 导航。
+// 1) Android WebView：优先 window.location.href 做主文档导航，交给原生 shouldOverrideUrlLoading。
+//    例外：目标指向 App 自身页面（appassets / localhost / file:）时不这么做，
+//    否则会把应用导航到开发服务器而无法返回。
+// 2) 原生桥若将来补上 openExternal 实现，则作为第二选择调用。
+// 3) 普通浏览器：window.open(url, '_blank', 'noopener,noreferrer')，与历史行为一致。
+// 4) 以上都不可用（含调用抛异常）时才退化为 location.href 导航。
 //
 // 本模块被 import 时自动安装全局兜底（幂等）。注意：必须由入口文件（main.tsx）
 // 在首屏渲染前 import，否则历史代码里的 <a target="_blank"> 兜底不会生效。
 
 const SAFE_PROTOCOL = /^(https?:\/\/|mailto:|tel:)/i;
+
+/** App 自身页面的特征：Capacitor appassets 虚拟域、本地端口、打包产物 file: */
+const APP_ORIGIN_HINTS = ['appassets.androidplatform.net', '://localhost', '://127.0.0.1', 'file:///'];
 
 interface NativeBridge {
   openExternal?: (url: string) => void;
@@ -32,6 +50,12 @@ function getBridge(): NativeBridge | null {
 
 function isSafeUrl(url: string): boolean {
   return SAFE_PROTOCOL.test(url);
+}
+
+/** 目标是否为 App 自身页面（这类 URL 不能用 location.href，会把应用导航走） */
+function targetsAppOrigin(url: string): boolean {
+  const lower = url.toLowerCase();
+  return APP_ORIGIN_HINTS.some((hint) => lower.includes(hint));
 }
 
 /** 是否运行在带原生桥的 Android WebView 容器中 */
@@ -68,7 +92,19 @@ export function openExternalUrl(rawUrl?: string | null): void {
   const url = (rawUrl || '').trim();
   if (!url || !isSafeUrl(url)) return;
 
-  // 1) 原生桥：直接交给系统浏览器（需要 MainActivity 侧实现 openExternal）
+  // 1) App 内 WebView：直接导航，由原生 shouldOverrideUrlLoading 交给系统浏览器/对应 App。
+  //    这里不要用 window.open —— 它走 onCreateWindow，从 <button> 触发时拿不到 URL，
+  //    只会得到一个静默的空窗口（见文件头修复记录 4）。
+  if (isNativeWebView() && !targetsAppOrigin(url)) {
+    try {
+      window.location.href = url;
+      return;
+    } catch (err) {
+      console.warn('[open-external] 主文档导航失败，降级为 window.open', err);
+    }
+  }
+
+  // 2) 原生桥：直接交给系统浏览器（需要 MainActivity 侧实现 openExternal，目前尚未实现）
   const bridge = getBridge();
   if (typeof bridge?.openExternal === 'function') {
     try {
@@ -79,10 +115,10 @@ export function openExternalUrl(rawUrl?: string | null): void {
     }
   }
 
-  // 2) 与历史行为保持一致：window.open 新窗口 / 新标签页
+  // 3) 与历史行为保持一致：window.open 新窗口 / 新标签页
   if (callWindowOpen(url, '_blank', 'noopener,noreferrer')) return;
 
-  // 3) 仅在调用本身失败时退化（浏览器 window.open 缺失、被改写抛错等）
+  // 4) 仅在调用本身失败时退化（浏览器 window.open 缺失、被改写抛错等）
   window.location.href = url;
 }
 
