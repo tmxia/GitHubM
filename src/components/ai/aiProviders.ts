@@ -5,7 +5,14 @@
 // 所有请求均由浏览器直接发出，API Key 仅保存在本机 localStorage。
 import type { ModelType } from './aiTypes';
 import i18n from "@/i18n";
-import { normalizeBaseEndpoint } from '@/lib/ai-endpoint';
+import {
+  normalizeChatEndpoint,
+  normalizeModelsEndpoint,
+  normalizeProxyChatEndpoint,
+} from '@/lib/ai-endpoint';
+
+/** 项目内置无状态 LLM 代理（Cloudflare Worker）根地址，路由固定为 /v1/chat/completions */
+const DEFAULT_PROXY = 'https://llm.callact.xyz';
 
 // ── 各平台 OpenAI 兼容 Chat Completions 端点 ──────────────────────────────
 export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
@@ -15,12 +22,9 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
     case 'qwen':     return 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
     case 'openai':   return 'https://api.openai.com/v1/chat/completions';
     case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
-    case 'cloudflare': return 'https://llm.callact.xyz/v1/chat/completions';
-    case 'custom': {
-      // 既支持只填基础地址（如 http://127.0.0.1:17890/v1），也支持完整的 /chat/completions
-      const base = normalizeBaseEndpoint(endpoint);
-      return base ? `${base}/chat/completions` : '';
-    }
+    case 'cloudflare': return normalizeProxyChatEndpoint(DEFAULT_PROXY);
+    // 既支持只填基础地址（如 http://127.0.0.1:17890/v1），也支持完整的 /chat/completions
+    case 'custom': return normalizeChatEndpoint(endpoint);
     case 'wenxin':   // 平台内置免费通道已随后端移除，不再支持
       return '';
   }
@@ -35,10 +39,7 @@ export function getProviderModelsUrl(type: ModelType, endpoint?: string): string
     case 'openai':   return 'https://api.openai.com/v1/models';
     case 'openrouter': return 'https://openrouter.ai/api/v1/models';
     case 'cloudflare': return '';
-    case 'custom': {
-      const base = normalizeBaseEndpoint(endpoint);
-      return base ? `${base}/models` : '';
-    }
+    case 'custom': return normalizeModelsEndpoint(endpoint);
     case 'wenxin':   return '';
   }
 }
@@ -137,16 +138,23 @@ export async function testProviderConnection(
   proxyUrl?: string,
 ): Promise<TestConnectionResult> {
   if (type === 'wenxin') return { success: false, error: i18n.t('该平台已不再支持') };
-  const proxyBase = proxyUrl?.trim().replace(/\/+$/, '') ||
-    (type !== 'custom' && type !== 'openrouter' ? 'https://llm.callact.xyz' : '');
-  const url = proxyBase
-    ? `${proxyBase}/v1/chat/completions`
-    : getProviderChatUrl(type, endpoint);
+  // 与真实对话共用同一套归一化：显式 proxyUrl 优先，其次内置代理（custom / openrouter 默认直连）
+  const proxyChatUrl = proxyUrl?.trim()
+    ? normalizeProxyChatEndpoint(proxyUrl)
+    : (type !== 'custom' && type !== 'openrouter'
+      ? normalizeProxyChatEndpoint(DEFAULT_PROXY)
+      : '');
+  // 代理模式下 Worker 会原样 POST 到 x-llm-upstream，必须是完整的 chat 地址
+  const upstream = type === 'custom' ? normalizeChatEndpoint(endpoint) : '';
+  if (proxyChatUrl && type === 'custom' && !upstream) {
+    return { success: false, error: i18n.t('接口地址为空，请先填写') };
+  }
+  const url = proxyChatUrl || getProviderChatUrl(type, endpoint);
   if (!url) return { success: false, error: i18n.t('接口地址为空，请先填写') };
   const headers: Record<string, string> = {
     ...authHeaders(apiKey),
-    ...(proxyBase ? { 'x-llm-provider': type } : {}),
-    ...(proxyBase && type === 'custom' && endpoint ? { 'x-llm-upstream': endpoint } : {}),
+    ...(proxyChatUrl ? { 'x-llm-provider': type } : {}),
+    ...(proxyChatUrl && upstream ? { 'x-llm-upstream': upstream } : {}),
   };
   const startedAt = Date.now();
   try {
