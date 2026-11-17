@@ -1,0 +1,59 @@
+2790|     method: 'PATCH',
+2791|     headers: { 'Content-Type': 'application/json' },
+2792|     body: JSON.stringify({ sha: newCommit.sha, force: false }),
+2793|   });
+2794|   return { sha: newCommit.sha };
+2795| }
+2796| 
+2797| /** 回滚分支到指定提交（force update，历史会被移动） */
+2798| 
+2799| export async function getAllBranches(
+2800|   owner: string,
+2801|   repo: string
+2802| ): Promise<GitHubBranch[]> {
+2803|   const all: GitHubBranch[] = [];
+2804|   const seen = new Set<string>();
+2805|   for (let page = 1; page <= 20; page += 1) {
+2806|     const result = await getBranches(owner, repo, page, 100);
+2807|     for (const branch of result.data) {
+2808|       if (seen.has(branch.name)) continue;
+2809|       seen.add(branch.name);
+2810|       all.push(branch);
+2811|     }
+2812|     if (!result.hasNextPage || result.data.length === 0) break;
+2813|   }
+2814|   return all;
+2815| }
+2816| 
+2817| // ===== Actions Secrets / Variables API =====
+2818| 
+2819| export interface GitHubActionsSecretInfo {
+2820|   name: string;
+2821|   created_at: string;
+2822|   updated_at: string;
+2823| }
+2824| 
+2825| export interface GitHubActionsVariableInfo {
+2826|   name: string;
+2827|   value: string;
+2828|   created_at: string;
+2829|   updated_at: string;
+2830| }
+2831| 
+2832| export interface GitHubActionsPublicKey {
+2833|   key_id: string;
+2834|   key: string;
+2835| }
+2836| 
+2837| export async function rollbackBranchToCommit(
+2838|   owner: string,
+2839|   repo: string,
+2840|   branch: string,
+2841|   sha: string,
+2842| ): Promise<void> {
+2843|   await request(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+2844|     method: 'PATCH',
+2845|     headers: { 'Content-Type': 'application/json' },
+2846|     body: JSON.stringify({ sha, force: true }),
+2847|   });
+2848| }

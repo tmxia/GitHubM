@@ -1,0 +1,3 @@
+== KeyboardInsetState refs ==
+src/hooks/use-keyboard-inset.ts:12:export interface KeyboardInsetState {
+src/hooks/use-keyboard-inset.ts:28:export function useKeyboardInset(): KeyboardInsetState {

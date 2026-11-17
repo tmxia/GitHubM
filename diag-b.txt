@@ -1,0 +1,41 @@
+2470|                             turn={turn}
+2471|                             index={item.index}
+2472|                             onOpenArtifact={openArtifact}
+2473|                             onApplyDiff={handleApplyDiff}
+2474|                           />
+2475|                         </div>
+2476|                       );
+2477|                     })}
+2478|                   </div>
+2479|                 );
+2480|               })()
+2481|             )}
+2482|             <div ref={bottomRef} />
+2483|           </div>
+2484| 
+2485|           {showScrollButton && (
+2486|             <button
+2487|               type="button"
+2488|               onClick={() => scrollToBottom(true)}
+2489|               className="sticky bottom-3 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground shadow-lg backdrop-blur hover:text-foreground"
+2490|               title={i18n.t('回到底部')}
+2491|             >
+2492|               <ArrowDown className="h-4 w-4" />
+2493|             </button>
+2494|           )}
+2495|         </div>
+2496| 
+2497|         <div
+2498|           className="shrink-0 border-t border-border bg-background/95 px-2 pt-2 sm:px-3"
+2499|           // 键盘弹出时整条输入区上移，避免被输入法遮住（pb 由 style 动态给出）
+2500|           style={{ paddingBottom: keyboardInset > 0 ? keyboardInset + 8 : 8 }}
+2501|         >
+2502|           <div className="mx-auto w-full max-w-3xl">
+2503|             <div className="rounded-2xl border border-border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/40">
+2504|               <div className="mb-1 flex flex-wrap items-center gap-1.5 px-1">
+2505|                 {repoContext ? (
+2506|                   <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary">
+2507|                     <GitBranch className="h-3 w-3 shrink-0" />
+2508|                     <button type="button" onClick={() => setBranchDialogOpen(true)} className="truncate hover:underline" title={i18n.t('切换分支')}>
+2509|                       {repoContext.fullName} · {repoContext.branch || repoContext.defaultBranch}
+2510|                     </button>

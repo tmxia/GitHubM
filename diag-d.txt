@@ -1,0 +1,7 @@
+== d.ts under src ==
+src/lib/js-yaml.d.ts
+src/svg.d.ts
+src/global.d.ts
+src/vite-env.d.ts
+== vite client ?url decl ==
+== pdfjs-dist exports ==
