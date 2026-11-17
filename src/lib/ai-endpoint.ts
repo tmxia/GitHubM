@@ -9,11 +9,10 @@
 
 const CHAT_SUFFIX = '/chat/completions';
 const MODELS_SUFFIX = '/models';
-/** 版本段，仅用于「LLM 代理」场景的折叠与补全 */
-const V1_SEGMENT = '/v1';
-/** 项目内置 LLM 代理（Cloudflare Worker）的固定 chat 路由 */
+/** 内置 LLM 代理（Cloudflare Worker）固定路由 */
 const PROXY_CHAT_SUFFIX = '/v1/chat/completions';
-/** 用于判断剥离 /v1 后是否仍保留合法的「协议://主机」前缀 */
+const V1_SEGMENT = '/v1';
+/** 校验剥离 /v1 后仍是合法的「协议://主机」前缀，避免主机名恰好为 v1 时把协议头剥掉 */
 const ORIGIN_PREFIX = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/i;
 
 function trimTrailingSlashes(value: string): string {
@@ -68,9 +67,9 @@ export function normalizeModelsEndpoint(endpoint?: string | null): string {
 }
 
 /**
- * 归一化为「LLM 代理」（Cloudflare Worker）的 chat 完整地址。
- * 代理 Worker 的路由固定为 /v1/chat/completions，上游地址由 Worker 自行解析，
- * 因此允许用户只填根地址，也兼容误填 .../v1、.../v1/chat/completions 或末尾斜杠。
+ * 归一化为「LLM 代理」的 chat 完整地址。
+ * 代理 Worker 的路由固定为 /v1/chat/completions，上游由 x-llm-upstream 指定，
+ * 所以这里允许用户只填根地址，也兼容误填 /v1、.../v1/chat/completions 或末尾斜杠。
  * 例：
  *   https://proxy.example.com                      -> https://proxy.example.com/v1/chat/completions
  *   https://proxy.example.com/v1                   -> https://proxy.example.com/v1/chat/completions
@@ -80,6 +79,7 @@ export function normalizeModelsEndpoint(endpoint?: string | null): string {
 export function normalizeProxyChatEndpoint(proxyUrl?: string | null): string {
   const base = normalizeBaseEndpoint(proxyUrl);
   if (!base) return '';
+
   const root = base.toLowerCase().endsWith(V1_SEGMENT)
     ? trimTrailingSlashes(base.slice(0, -V1_SEGMENT.length))
     : base;
