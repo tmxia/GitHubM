@@ -1,7 +1,6 @@
-# 临时诊断工作流：抽取 MainActivity.kt 中与外部链接打开相关的实现片段
-# 用途：MainActivity.kt 约 95KB，读取工具会截断，无法确认
-#   shouldOverrideUrlLoading / onCreateWindow / openExternal 是否存在
-# 完成后可删除本文件。
+# 临时诊断工作流：把 MainActivity.kt 中与外部链接打开相关的片段 dump 成仓库文件
+# 原因：MainActivity.kt 约 95KB，读取工具会截断；job 日志下载返回 401。
+# 产物：diagnostic-navigation.txt（读取完毕后可连同本文件一起删除）
 name: Inspect Navigation
 
 on:
@@ -11,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   dump:
@@ -21,25 +20,47 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 抽取关键片段
+      - name: 抽取关键片段到文件
         run: |
+          set +e
           F=android/app/src/main/java/com/github/manager/MainActivity.kt
-          echo "### total lines: $(wc -l < "$F")"
-          echo
-          echo "### shouldOverrideUrlLoading"
-          grep -n -A 45 "shouldOverrideUrlLoading" "$F" || echo "<<<NOT FOUND>>>"
-          echo
-          echo "### onCreateWindow"
-          grep -n -A 30 "onCreateWindow" "$F" || echo "<<<NOT FOUND>>>"
-          echo
-          echo "### openExternal"
-          grep -n -A 15 "openExternal" "$F" || echo "<<<NOT FOUND>>>"
-          echo
-          echo "### WebChromeClient / WebViewClient 声明"
-          grep -n "WebChromeClient\|WebViewClient" "$F" || echo "<<<NOT FOUND>>>"
-          echo
-          echo "### addJavascriptInterface 注册名"
-          grep -n -B 3 -A 6 "addJavascriptInterface" "$F" || echo "<<<NOT FOUND>>>"
-          echo
-          echo "### window.open / target=_blank 相关 JS 注入"
-          grep -n "window.open\|_blank" "$F" || echo "<<<NOT FOUND>>>"
+          OUT=diagnostic-navigation.txt
+          {
+            echo "FILE: $F"
+            echo "LINES: $(wc -l < "$F")"
+            echo
+            echo "=========== shouldOverrideUrlLoading ==========="
+            grep -n -A 45 "shouldOverrideUrlLoading" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== onCreateWindow ==========="
+            grep -n -A 30 "onCreateWindow" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== openExternal ==========="
+            grep -n -A 15 "openExternal" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== WebChromeClient / WebViewClient ==========="
+            grep -n "WebChromeClient\|WebViewClient" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== addJavascriptInterface ==========="
+            grep -n -B 4 -A 4 "addJavascriptInterface" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== window.open / _blank ==========="
+            grep -n "window.open\|_blank" "$F" || echo "<<<NOT FOUND>>>"
+            echo
+            echo "=========== @JavascriptInterface method names ==========="
+            grep -n -A 1 "@JavascriptInterface" "$F" | grep -i "fun " || echo "<<<NOT FOUND>>>"
+          } > "$OUT"
+          echo "--- output size ---"
+          wc -c "$OUT"
+
+      - name: 提交结果（跳过 CI）
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add diagnostic-navigation.txt
+          if git diff --cached --quiet; then
+            echo "无变化，无需提交"
+          else
+            git commit -m "chore: dump navigation diagnostics [skip ci]"
+            git push
+          fi
