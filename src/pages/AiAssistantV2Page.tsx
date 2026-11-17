@@ -112,8 +112,10 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_USER_MESSAGE_CHARS = 4000;
 const USER_MESSAGE_PREVIEW_CHARS = 2000;
 const STREAMING_PLAIN_LIMIT = 400_000;
-/** 流式增量合并窗口（毫秒）：只做渲染合批，不做速度限制 */
-const STREAM_FLUSH_MS = 24;
+/** 单帧最多补进的字符数：上游一次性回整段时也能逐字落屏 */
+const STREAM_REVEAL_CHARS = 40;
+/** 补字间隔（毫秒） */
+const STREAM_REVEAL_MS = 24;
 
 function readFileAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -518,117 +520,69 @@ function buildTurns(messages: UiChatMessage[]): ConversationTurn[] {
   return turns;
 }
 
-/** 助手头像：应用 logo，浅色圆底 */
-function AssistantAvatar() {
-  return (
-    <img
-      src={`${import.meta.env.BASE_URL}assets/logo.svg`}
-      alt=""
-      aria-hidden
-      className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary/10 p-1"
-    />
-  );
-}
-
-/** 用户头像：有 GitHub 头像用头像，否则用首字母 */
-function UserAvatar({ avatarUrl, login }: { avatarUrl?: string; login?: string }) {
-  const initial = (login || 'U').slice(0, 1).toUpperCase();
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt=""
-        aria-hidden
-        className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-border/60"
-      />
-    );
-  }
-  return (
-    <span
-      aria-hidden
-      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground ring-1 ring-border/60"
-    >
-      {initial}
-    </span>
-  );
-}
-
 function ConversationTurnView({ turn, onOpenArtifact, onApplyDiff }: {
   turn: ConversationTurn;
   index: number;
   onOpenArtifact: (meta: ArtifactMeta) => void;
   onApplyDiff: (path: string, diff: string) => void;
 }) {
-  const { user: authUser } = useAuth();
   const [userExpanded, setUserExpanded] = useState(false);
   const userContent = turn.user?.content || '';
   const userIsLong = userContent.length > MAX_USER_MESSAGE_CHARS;
   const shownUserContent = userIsLong && !userExpanded
-    ? `${userContent.slice(0, USER_MESSAGE_PREVIEW_CHARS)}
-
-…`
+    ? `${userContent.slice(0, USER_MESSAGE_PREVIEW_CHARS)}\n\n…`
     : userContent;
 
   return (
     <section className="flex min-w-0 flex-col gap-3">
       {turn.user && (
-        <div className="flex min-w-0 items-start gap-2.5">
-          {/* 左侧固定占位：与助手头像列同宽，用户内容不进入该区域 */}
-          <div className="w-7 shrink-0" aria-hidden />
-          <div className="flex min-w-0 flex-1 flex-col items-end gap-1.5">
-            <div className="max-w-full min-w-0 rounded-2xl rounded-br-md bg-muted px-3.5 py-2.5 text-[15px] leading-7 text-foreground">
-              <span className="whitespace-pre-wrap break-words">{shownUserContent}</span>
-              {userIsLong && (
-                <button
-                  type="button"
-                  onClick={() => setUserExpanded(value => !value)}
-                  className="mt-1 block text-[10px] text-primary underline-offset-2 hover:underline"
-                >
-                  {userExpanded
-                    ? i18n.t('收起内容')
-                    : i18n.t('展开全部（共 {{count}} 字）', { count: userContent.length })}
-                </button>
-              )}
-            </div>
-            {turn.user.attachments && turn.user.attachments.length > 0 && (
-              <div className="flex max-w-full flex-wrap justify-end gap-1">
-                {turn.user.attachments.map(attachment => (
-                  <span
-                    key={attachment.id}
-                    className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[9px] text-muted-foreground"
-                    title={attachment.path || attachment.name}
-                  >
-                    {attachment.kind === 'image' && (attachment.thumbDataUrl || attachment.dataUrl) ? (
-                      <img src={attachment.thumbDataUrl || attachment.dataUrl} alt={attachment.name} className="h-5 w-5 shrink-0 rounded object-cover" />
-                    ) : attachment.source === 'repo' ? <AtSign className="h-2.5 w-2.5 shrink-0 text-primary" /> : <Paperclip className="h-2.5 w-2.5 shrink-0" />}
-                    <span className="truncate">{attachment.path || attachment.name}</span>
-                    <span className="shrink-0 opacity-70">{formatFileSize(attachment.size)}</span>
-                  </span>
-                ))}
-              </div>
+        <div className="flex min-w-0 flex-col items-end gap-1.5">
+          <div className="max-w-[86%] min-w-0 rounded-2xl rounded-br-md bg-muted px-3.5 py-2.5 text-[15px] leading-7 text-foreground">
+            <span className="whitespace-pre-wrap break-words">{shownUserContent}</span>
+            {userIsLong && (
+              <button
+                type="button"
+                onClick={() => setUserExpanded(value => !value)}
+                className="mt-1 block text-[10px] text-primary underline-offset-2 hover:underline"
+              >
+                {userExpanded
+                  ? i18n.t('收起内容')
+                  : i18n.t('展开全部（共 {{count}} 字）', { count: userContent.length })}
+              </button>
             )}
           </div>
-          <UserAvatar avatarUrl={authUser?.avatar_url} login={authUser?.login} />
+          {turn.user.attachments && turn.user.attachments.length > 0 && (
+            <div className="flex max-w-[94%] flex-wrap justify-end gap-1">
+              {turn.user.attachments.map(attachment => (
+                <span
+                  key={attachment.id}
+                  className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[9px] text-muted-foreground"
+                  title={attachment.path || attachment.name}
+                >
+                  {attachment.kind === 'image' && (attachment.thumbDataUrl || attachment.dataUrl) ? (
+                    <img src={attachment.thumbDataUrl || attachment.dataUrl} alt={attachment.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+                  ) : attachment.source === 'repo' ? <AtSign className="h-2.5 w-2.5 shrink-0 text-primary" /> : <Paperclip className="h-2.5 w-2.5 shrink-0" />}
+                  <span className="truncate">{attachment.path || attachment.name}</span>
+                  <span className="shrink-0 opacity-70">{formatFileSize(attachment.size)}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="flex min-w-0 items-start gap-2.5">
-        <AssistantAvatar />
-        <div className="min-w-0 flex-1">
-          {turn.assistants.length > 0 ? (
-            <div className="min-w-0 space-y-4">
-              {turn.assistants.map(message => (
-                <div key={message.id} className="min-w-0">
-                  <AssistantTurn message={message} onOpenArtifact={onOpenArtifact} onApplyDiff={onApplyDiff} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <WaitingDots />
-          )}
-        </div>
-        {/* 右侧固定占位：与用户头像列同宽，助手内容不进入该区域 */}
-        <div className="w-7 shrink-0" aria-hidden />
+      <div className="min-w-0">
+        {turn.assistants.length > 0 ? (
+          <div className="min-w-0 space-y-4">
+            {turn.assistants.map(message => (
+              <div key={message.id} className="min-w-0">
+                <AssistantTurn message={message} onOpenArtifact={onOpenArtifact} onApplyDiff={onApplyDiff} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <WaitingDots />
+        )}
       </div>
     </section>
   );
@@ -720,7 +674,7 @@ function ApplyPatchDialog({
 
   return (
     <Dialog open={Boolean(request)} onOpenChange={open => { if (!open) onClose(); }}>
-      <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-xl">
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <GitBranch className="h-4 w-4 text-primary" />
@@ -783,7 +737,7 @@ function ModelPickerDialog({
   const currentProvider = providers.find(item => item.type === currentType) || providers[0];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-md">
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <ModelAvatar modelDef={currentProvider} size="sm" />
@@ -891,7 +845,7 @@ function BranchPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-md">
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <GitBranch className="h-4 w-4 text-primary" />
@@ -1050,7 +1004,7 @@ function RepoFilePicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-xl">
+      <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <AtSign className="h-4 w-4 text-primary" />
@@ -1064,10 +1018,10 @@ function RepoFilePicker({
             onChange={event => setQuery(event.target.value)}
             placeholder={i18n.t('搜索文件路径')}
             autoFocus
-            className="h-9 w-full min-w-0 rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:border-primary/50"
+            className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none focus:border-primary/50"
           />
         </div>
-        <div className="min-h-[140px] max-h-[38dvh] overflow-y-auto rounded-lg border border-border md:max-h-[320px]">
+        <div className="min-h-[180px] max-h-[50vh] overflow-y-auto rounded-lg border border-border">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1366,21 +1320,9 @@ export default function AiAssistantV2Page() {
   const runMetricsRef = useRef<{ runId: string; startedAt: number; firstTokenAt?: number } | null>(null);
   const pendingStreamRef = useRef<{ assistantId: string; content: string; reasoning: string } | null>(null);
   const streamFlushTimerRef = useRef<number | null>(null);
+  const pendingDoneRef = useRef<{ assistantId: string; runId: string } | null>(null);
   const approvalResolverRef = useRef<((approved: boolean) => void) | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [viewportHeight, setViewportHeight] = useState(() => (
-    typeof window === 'undefined' ? 800 : window.innerHeight
-  ));
-  useEffect(() => {
-    const sync = () => setViewportHeight(window.innerHeight);
-    sync();
-    window.addEventListener('resize', sync);
-    window.visualViewport?.addEventListener('resize', sync);
-    return () => {
-      window.removeEventListener('resize', sync);
-      window.visualViewport?.removeEventListener('resize', sync);
-    };
-  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -1556,11 +1498,6 @@ export default function AiAssistantV2Page() {
     scrollToBottom();
   }, [messages, streaming, scrollToBottom]);
 
-  // 键盘开合改变可视高度时，若原本贴底就继续保持贴底
-  useEffect(() => {
-    scrollToBottom();
-  }, [viewportHeight, scrollToBottom]);
-
   // 虚拟列表高度测量后补一次底部对齐，避免流式输出时被"截断"在中间
   const virtualTotalSize = virtualizer.getTotalSize();
   useEffect(() => {
@@ -1698,31 +1635,70 @@ export default function AiAssistantV2Page() {
       : message));
   }, [setMessages]);
 
-  const flushStreamDelta = useCallback(() => {
+  /** 缓冲区排空且已收到 done 时，才真正结束流式状态 */
+  const finalizeStreamIfDone = useCallback(() => {
+    const done = pendingDoneRef.current;
+    if (!done || pendingStreamRef.current) return;
+    pendingDoneRef.current = null;
+    patchAssistant(done.assistantId, { streaming: false });
+    if (runMetricsRef.current?.runId === done.runId) {
+      patchMetrics(done.assistantId, { durationMs: Date.now() - runMetricsRef.current.startedAt });
+    }
+    if (user?.login) void clearRunSnapshot(user.login, done.runId);
+    setResumableSnapshot(null);
+  }, [patchAssistant, patchMetrics, user?.login]);
+
+  /**
+   * 把缓冲区内容分帧写入消息。
+   * force=true 用于工具切换/报错/停止，必须立刻对齐顺序；
+   * 普通流式与收尾则按 STREAM_REVEAL_CHARS 逐帧补字，
+   * 避免上游一次吐整段时“说完才全部出现”。
+   */
+  const flushStreamDelta = useCallback((force = false) => {
     if (streamFlushTimerRef.current !== null) {
       window.clearTimeout(streamFlushTimerRef.current);
       streamFlushTimerRef.current = null;
     }
     const pending = pendingStreamRef.current;
-    pendingStreamRef.current = null;
-    if (!pending) return;
-    setMessages(prev => prev.map(message => {
-      if (message.id !== pending.assistantId) return message;
-      let blocks = message.blocks;
-      if (pending.content) blocks = appendBlockDelta(blocks, 'text', pending.content);
-      if (pending.reasoning) blocks = appendBlockDelta(blocks, 'reasoning', pending.reasoning);
-      return {
-        ...message,
-        content: pending.content ? message.content + pending.content : message.content,
-        reasoning: pending.reasoning ? (message.reasoning || '') + pending.reasoning : message.reasoning,
-        blocks,
-      };
-    }));
-  }, [setMessages]);
+    if (!pending) {
+      finalizeStreamIfDone();
+      return;
+    }
+    const takeContent = force ? pending.content : pending.content.slice(0, STREAM_REVEAL_CHARS);
+    const takeReasoning = force ? pending.reasoning : pending.reasoning.slice(0, STREAM_REVEAL_CHARS);
+    pending.content = pending.content.slice(takeContent.length);
+    pending.reasoning = pending.reasoning.slice(takeReasoning.length);
+    const rest = pending.content.length + pending.reasoning.length;
+    if (!rest) pendingStreamRef.current = null;
+
+    if (takeContent || takeReasoning) {
+      setMessages(prev => prev.map(message => {
+        if (message.id !== pending.assistantId) return message;
+        let blocks = message.blocks;
+        if (takeContent) blocks = appendBlockDelta(blocks, 'text', takeContent);
+        if (takeReasoning) blocks = appendBlockDelta(blocks, 'reasoning', takeReasoning);
+        return {
+          ...message,
+          content: takeContent ? message.content + takeContent : message.content,
+          reasoning: takeReasoning ? (message.reasoning || '') + takeReasoning : message.reasoning,
+          blocks,
+        };
+      }));
+    }
+
+    if (rest) {
+      streamFlushTimerRef.current = window.setTimeout(() => {
+        streamFlushTimerRef.current = null;
+        flushStreamDelta();
+      }, force ? 16 : STREAM_REVEAL_MS);
+    } else {
+      finalizeStreamIfDone();
+    }
+  }, [finalizeStreamIfDone, setMessages]);
 
   const queueStreamDelta = useCallback((id: string, patch: { content?: string; reasoning?: string }) => {
     if (pendingStreamRef.current && pendingStreamRef.current.assistantId !== id) {
-      flushStreamDelta();
+      flushStreamDelta(true);
     }
     const pending = pendingStreamRef.current || { assistantId: id, content: '', reasoning: '' };
     pending.content += patch.content || '';
@@ -1732,7 +1708,7 @@ export default function AiAssistantV2Page() {
       streamFlushTimerRef.current = window.setTimeout(() => {
         streamFlushTimerRef.current = null;
         flushStreamDelta();
-      }, STREAM_FLUSH_MS);
+      }, STREAM_REVEAL_MS);
     }
   }, [flushStreamDelta]);
 
@@ -1782,7 +1758,7 @@ export default function AiAssistantV2Page() {
         queueStreamDelta(assistantId, { reasoning: event.text });
         break;
       case 'tool_start':
-        flushStreamDelta();
+        flushStreamDelta(true);
         setMessages(prev => prev.map(message => message.id === assistantId
           ? {
               ...message,
@@ -1801,7 +1777,7 @@ export default function AiAssistantV2Page() {
           : message));
         break;
       case 'tool_end':
-        flushStreamDelta();
+        flushStreamDelta(true);
         patchTool(assistantId, event.call.id, {
           status: event.ok ? 'done' : 'error',
           content: event.content,
@@ -1817,7 +1793,7 @@ export default function AiAssistantV2Page() {
         });
         break;
       case 'error':
-        flushStreamDelta();
+        flushStreamDelta(true);
         patchAssistant(assistantId, {
           content: event.message,
           blocks: [{ id: makeId('blk'), type: 'text', text: event.message }],
@@ -1829,13 +1805,8 @@ export default function AiAssistantV2Page() {
         }
         break;
       case 'done':
+        pendingDoneRef.current = { assistantId, runId };
         flushStreamDelta();
-        patchAssistant(assistantId, { streaming: false });
-        if (runMetricsRef.current?.runId === runId) {
-          patchMetrics(assistantId, { durationMs: Date.now() - runMetricsRef.current.startedAt });
-        }
-        if (user?.login) void clearRunSnapshot(user.login, runId);
-        setResumableSnapshot(null);
         break;
       default:
         break;
@@ -2123,6 +2094,10 @@ export default function AiAssistantV2Page() {
       }
     } finally {
       flushStreamDelta();
+      // 兜底：异常/中断时没有 done 事件，也要在缓冲区排空后收尾
+      if (!pendingDoneRef.current && pendingStreamRef.current) {
+        pendingDoneRef.current = { assistantId, runId };
+      }
       settleRunningTools(assistantId);
       finishRun(user?.login, runId, runStatus, runError);
       if (runStatus !== 'done' && user?.login) {
@@ -2208,7 +2183,8 @@ export default function AiAssistantV2Page() {
   };
 
   const handleStop = () => {
-    flushStreamDelta();
+    flushStreamDelta(true);
+    pendingDoneRef.current = null;
     pendingStreamRef.current = null;
     if (streamFlushTimerRef.current !== null) {
       window.clearTimeout(streamFlushTimerRef.current);
@@ -2366,8 +2342,8 @@ export default function AiAssistantV2Page() {
 
   return (
     <div
-      className="flex min-h-0 w-full min-w-0 overflow-hidden bg-background"
-      style={{ height: `${Math.max(240, viewportHeight - (isAndroid ? 56 : 120))}px` }}
+      className="flex min-h-0 w-full overflow-hidden bg-background"
+      style={{ height: `calc(100dvh - ${isAndroid ? 56 : 120}px)` }}
     >
       {/* 桌面端会话侧栏 */}
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-muted/10 2xl:flex">
@@ -2488,9 +2464,9 @@ export default function AiAssistantV2Page() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto w-full max-w-3xl px-3.5 py-4 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl px-3 py-4 sm:px-5">
             {sessionLoading ? (
               <div className="flex min-h-[28vh] items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2574,12 +2550,12 @@ export default function AiAssistantV2Page() {
         </div>
 
         <div
-          className="w-full min-w-0 shrink-0 border-t border-border bg-background/95 px-2 pt-2 sm:px-3"
+          className="shrink-0 border-t border-border bg-background/95 px-2 pt-2 sm:px-3"
           // 键盘弹出时整条输入区上移，避免被输入法遮住（pb 由 style 动态给出）
           style={{ paddingBottom: keyboardInset > 0 ? keyboardInset + 8 : 8 }}
         >
-          <div className="mx-auto w-full min-w-0 max-w-3xl">
-            <div className="rounded-[22px] border border-border/80 bg-card p-2 shadow-sm transition-colors">
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="rounded-[22px] border border-border/80 bg-card p-2 shadow-sm transition-colors focus-within:border-primary/40">
               <div className="mb-1 flex flex-wrap items-center gap-1.5 px-1">
                 {repoContext ? (
                   <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary">
@@ -2650,7 +2626,7 @@ export default function AiAssistantV2Page() {
                 placeholder={i18n.t('输入消息… Enter 发送，Shift+Enter 换行')}
                 rows={1}
                 disabled={streaming}
-                className="max-h-44 min-h-[42px] resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="max-h-44 min-h-[42px] resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none focus-visible:ring-0"
               />
 
               <div className="flex items-center gap-1 px-1 pt-1">
@@ -2685,7 +2661,7 @@ export default function AiAssistantV2Page() {
                 <button
                   type="button"
                   onClick={() => setModelDialogOpen(true)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <ModelAvatar modelDef={modelDef} size="sm" />
                   <span className="max-w-[110px] truncate">{modelLabel}</span>
@@ -2730,7 +2706,7 @@ export default function AiAssistantV2Page() {
           if (!open) resolveApproval(false);
         }}
       >
-        <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-lg">
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <ShieldAlert className="h-4 w-4 text-amber-500" />
@@ -2813,7 +2789,7 @@ const args = approvalRequest.arguments as Record<string, unknown>;
       </Dialog>
 
       <Dialog open={artifactDialogOpen} onOpenChange={setArtifactDialogOpen}>
-        <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-2xl">
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-primary" />
@@ -2846,7 +2822,7 @@ const args = approvalRequest.arguments as Record<string, unknown>;
       </Dialog>
 
       <Dialog open={repoDialogOpen} onOpenChange={setRepoDialogOpen}>
-        <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-xl">
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-xl">
           <DialogHeader>
             <DialogTitle className="text-base">{i18n.t('选择仓库')}</DialogTitle>
           </DialogHeader>
@@ -2928,7 +2904,7 @@ const args = approvalRequest.arguments as Record<string, unknown>;
       </Sheet>
 
       <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
-        <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto p-4 md:max-w-sm">
+        <DialogContent className="max-w-[calc(100%-2rem)] p-4 md:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-base">{i18n.t('会话上下文')}</DialogTitle>
           </DialogHeader>
