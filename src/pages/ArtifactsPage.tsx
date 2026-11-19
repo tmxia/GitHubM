@@ -111,6 +111,26 @@ function writeMaxSeen(assetId: number, value: number) {
   }
 }
 
+const RELEASE_OPEN_KEY = 'release_open_v1';
+
+function readReleaseOpenMap(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(RELEASE_OPEN_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeReleaseOpen(releaseId: number, open: boolean) {
+  try {
+    const map = readReleaseOpenMap();
+    map[String(releaseId)] = open;
+    localStorage.setItem(RELEASE_OPEN_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
 function AssetItem({
   asset,
   onDownloaded,
@@ -195,14 +215,25 @@ function ReleaseItem({
   canPush: boolean;
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
+  // 整卡折叠状态按 release id 记忆；无记录时默认收起
+  const [cardOpen, setCardOpen] = useState<boolean>(() => readReleaseOpenMap()[String(release.id)] === true);
   const [dlZip, setDlZip] = useState(false);
   const [dlTar, setDlTar] = useState(false);
   const totalSize = release.assets.reduce((sum, a) => sum + a.size, 0);
 
+  const handleCardOpenChange = (value: boolean) => {
+    setCardOpen(value);
+    writeReleaseOpen(release.id, value);
+  };
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      {/* 头部：版本 + 名称 + 时间/产物 */}
-      <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-3">
+      {/* 头部：版本 + 名称 + 时间/产物（点击整行折叠/展开） */}
+      <button
+        type="button"
+        onClick={() => handleCardOpenChange(!cardOpen)}
+        className="w-full flex items-start justify-between gap-3 px-4 pt-3.5 pb-3 hover:bg-secondary/40 transition-colors text-left"
+      >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Tag className="w-4 h-4 text-primary shrink-0" />
@@ -218,7 +249,8 @@ function ReleaseItem({
             <span>{release.assets.length} {i18n.t('个产物 ·')}{formatBytes(totalSize)}</span>
           </div>
         </div>
-      </div>
+        <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform mt-1 shrink-0 ${cardOpen ? 'rotate-180' : ''}`} />
+      </button>
 
       {/* 操作行：分享 + 删除（仅有权限者可见删除） */}
       <div className="flex items-center justify-end gap-5 px-4 py-2.5 border-t border-border/60">
@@ -241,6 +273,7 @@ function ReleaseItem({
         )}
       </div>
 
+      {cardOpen && (<>
       {/* 发布说明（内嵌可折叠） */}
       {release.body && (
         <div className="border-t border-border/60">
@@ -333,6 +366,7 @@ function ReleaseItem({
           release.assets.map((asset) => <AssetItem key={asset.id} asset={asset} />)
         )}
       </div>
+      </>)}
     </div>
   );
 }
