@@ -55,6 +55,7 @@ import {
   unstarRepo,
   forkRepo,
   getRepoLanguages,
+  searchIssues,
   formatRelativeTime,
   formatNumber,
   getLanguageColor,
@@ -114,6 +115,7 @@ export default function RepoDetailPage() {
   const [commits, setCommits] = useState<GitHubCommit[]>([]);
   const [languages, setLanguages] = useState<Record<string, number>>({});
   const [starred, setStarred] = useState(false);
+  const [openIssueCount, setOpenIssueCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [starring, setStarring] = useState(false);
   const [forking, setForking] = useState(false);
@@ -141,12 +143,13 @@ export default function RepoDetailPage() {
 
       try {
 
-        const [repoData, langData, readmeData, commitsResult, starredVal] = await Promise.all([
+        const [repoData, langData, readmeData, commitsResult, starredVal, issueCountResult] = await Promise.all([
           getRepo(owner, repoName, { fresh: true }),
           getRepoLanguages(owner, repoName, { fresh: true }),
           getReadme(owner, repoName, undefined, { fresh: true }).catch(() => null),
           getCommits(owner, repoName, { per_page: 10 }, { fresh: true }).catch(() => ({ data: [], hasNextPage: false })),
           isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
+          searchIssues(`repo:${owner}/${repoName} is:issue state:open`, { per_page: 1 }).catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -154,6 +157,7 @@ export default function RepoDetailPage() {
         setRepo(repoData);
         setLanguages(langData);
         setStarred(starredVal);
+        setOpenIssueCount(issueCountResult ? issueCountResult.total_count : null);
 
         const decoded = readmeData?.content ? decodeBase64Content(readmeData.content) : '';
         setReadme(decoded);
@@ -320,17 +324,19 @@ export default function RepoDetailPage() {
   const handleRefresh = async () => {
     if (!owner || !repoName) return;
     try {
-      const [repoData, langData, readmeData, commitsResult, starredVal] = await Promise.all([
+      const [repoData, langData, readmeData, commitsResult, starredVal, issueCountResult] = await Promise.all([
         getRepo(owner, repoName, { fresh: true }),
         getRepoLanguages(owner, repoName, { fresh: true }),
         getReadme(owner, repoName, undefined, { fresh: true }).catch(() => null),
         getCommits(owner, repoName, { per_page: 10 }, { fresh: true }).catch(() => ({ data: [], hasNextPage: false })),
         isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
+        searchIssues(`repo:${owner}/${repoName} is:issue state:open`, { per_page: 1 }).catch(() => null),
       ]);
 
       setRepo(repoData);
       setLanguages(langData);
       setStarred(starredVal);
+      setOpenIssueCount(issueCountResult ? issueCountResult.total_count : null);
       const decoded = readmeData?.content ? decodeBase64Content(readmeData.content) : '';
       setReadme(decoded);
       setCommits(commitsResult.data);
@@ -581,7 +587,7 @@ export default function RepoDetailPage() {
           { label: i18n.t('代码浏览'),        icon: Code,           path: 'code',          count: null,                   permission: 'read' as const },
           { label: i18n.t('产物下载'),        icon: Package,        path: 'artifacts',     count: null,                   permission: 'read' as const },
           { label: i18n.t('Pages 部署'),      icon: Globe,          path: 'pages',         count: null,                   permission: 'push' as const },
-          { label: 'Issues',          icon: AlertCircle,    path: 'issues',        count: repo.open_issues_count, permission: 'read' as const },
+          { label: 'Issues',          icon: AlertCircle,    path: 'issues',        count: openIssueCount, permission: 'read' as const },
           { label: 'Pull Requests',   icon: GitPullRequest, path: 'pulls',         count: null,                   permission: 'read' as const },
           { label: i18n.t('提交历史'),        icon: Clock,          path: 'commits',       count: null,                   permission: 'read' as const },
           { label: canPush ? i18n.t('分支管理') : i18n.t('分支浏览'), icon: GitBranch, path: 'branches', count: null, permission: 'read' as const },
@@ -903,7 +909,7 @@ export default function RepoDetailPage() {
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Watch</span>
                 </div>
                 <div className="flex flex-col items-center justify-center border-l border-border/50">
-                  <span className="text-lg font-bold text-foreground">{formatNumber(repo.open_issues_count)}</span>
+                  <span className="text-lg font-bold text-foreground">{formatNumber(openIssueCount ?? repo.open_issues_count)}</span>
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Issues</span>
                 </div>
               </div>
