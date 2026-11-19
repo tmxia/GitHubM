@@ -622,6 +622,18 @@ export async function getIssueComments(
   );
 }
 
+export async function getIssueCommentsPage(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  page = 1,
+  perPage = 50
+): Promise<{ data: GitHubComment[]; hasNextPage: boolean }> {
+  return requestWithPagination<GitHubComment>(
+    `/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=${perPage}&page=${page}`
+  );
+}
+
 export async function createIssueComment(
   owner: string,
   repo: string,
@@ -638,11 +650,41 @@ export async function createIssueComment(
   );
 }
 
+export async function updateIssueComment(
+  owner: string,
+  repo: string,
+  commentId: number,
+  body: string
+): Promise<GitHubComment> {
+  return request<GitHubComment>(`/repos/${owner}/${repo}/issues/comments/${commentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function deleteIssueComment(
+  owner: string,
+  repo: string,
+  commentId: number
+): Promise<void> {
+  await request<void>(`/repos/${owner}/${repo}/issues/comments/${commentId}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function getRepoLabels(
   owner: string,
   repo: string
 ): Promise<GitHubLabel[]> {
   return request<GitHubLabel[]>(`/repos/${owner}/${repo}/labels?per_page=100`);
+}
+
+export async function getRepoAssignees(
+  owner: string,
+  repo: string
+): Promise<GitHubUser[]> {
+  return request<GitHubUser[]>(`/repos/${owner}/${repo}/assignees?per_page=100`);
 }
 
 export async function getRepoMilestones(

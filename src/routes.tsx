@@ -5,6 +5,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ReposPage = lazy(() => import('./pages/ReposPage'));
 const RepoDetailPage = lazy(() => import('./pages/RepoDetailPage'));
 const IssuesPage = lazy(() => import('./pages/IssuesPage'));
+const NewIssuePage = lazy(() => import('./pages/NewIssuePage'));
 const IssueDetailPage = lazy(() => import('./pages/IssueDetailPage'));
 const PullsPage = lazy(() => import('./pages/PullsPage'));
 const PullDetailPage = lazy(() => import('./pages/PullDetailPage'));
@@ -65,6 +66,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('仓库列表'), path: '/repos', element: <ReposPage /> },
   { name: i18n.t('仓库详情'), path: '/repos/:owner/:repo', element: <RepoDetailPage /> },
   { name: 'Issues', path: '/repos/:owner/:repo/issues', element: <IssuesPage /> },
+  { name: i18n.t('新建 Issue'), path: '/repos/:owner/:repo/issues/new', element: <NewIssuePage /> },
   { name: i18n.t('Issue 详情'), path: '/repos/:owner/:repo/issues/:number', element: <IssueDetailPage /> },
   { name: 'Pull Requests', path: '/repos/:owner/:repo/pulls', element: <PullsPage /> },
   { name: i18n.t('PR 详情'), path: '/repos/:owner/:repo/pulls/:number', element: <PullDetailPage /> },

@@ -667,3 +667,32 @@ export async function gqlGetDashboardFeed(): Promise<{ releases: any[], prs: any
     return { releases: [], prs: [] };
   }
 }
+
+// ================== Issue 评论：隐藏（minimize） ==================
+
+export type HideCommentReason =
+  | 'OFF_TOPIC'
+  | 'OUTDATED'
+  | 'RESOLVED'
+  | 'SPAM'
+  | 'ABUSE'
+  | 'DUPLICATE';
+
+/**
+ * 隐藏 Issue/PR 评论（GitHub 官方「Hide」行为）。
+ * REST API 无此能力，必须走 GraphQL minimizeComment。
+ */
+export async function minimizeIssueComment(subjectId: string, classifier: HideCommentReason): Promise<void> {
+  const query = `mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+    minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
+      minimizedComment { isMinimized }
+    }
+  }`;
+  const result = await graphqlQuery<{ minimizeComment: { minimizedComment: { isMinimized: boolean } } }>(
+    query,
+    { id: subjectId, classifier },
+  );
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(result.errors[0].message);
+  }
+}
