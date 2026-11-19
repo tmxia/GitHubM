@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getReceivedEvents, formatRelativeTime } from '@/services/github';
 import { gqlGetDashboardFeed } from '@/services/github-graphql';
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { GitPullRequest, Tag, Star, Sparkles } from 'lucide-react';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import { useAuth } from '@/contexts/AuthContext';
-import { saveListScroll, readListScroll } from '@/lib/scrollRestore';
+import { rememberHomeScroll } from '@/lib/scrollRestore';
 
 export default function HomeFeed({ onlyStarred = false, limit = 40 }: { onlyStarred?: boolean, limit?: number }) {
   const { user } = useAuth();
@@ -101,15 +101,6 @@ export default function HomeFeed({ onlyStarred = false, limit = 40 }: { onlyStar
     load();
   }, [user]);
 
-  useEffect(() => {
-    if (!loading) {
-      const savedY = readListScroll('home-feed-scroll');
-      if (savedY) {
-        setTimeout(() => window.scrollTo({ top: savedY, behavior: 'instant' }), 100);
-      }
-    }
-  }, [loading]);
-
   if (loading) {
     return (
       <div className="space-y-4">
@@ -135,7 +126,7 @@ export default function HomeFeed({ onlyStarred = false, limit = 40 }: { onlyStar
                     <Avatar className="w-6 h-6">
                       <AvatarImage src={repo.owner.avatar_url} />
                     </Avatar>
-                    <Link to={`/repos/${repo.full_name}`} className="font-semibold hover:underline text-sm text-foreground">
+                    <Link to={`/repos/${repo.full_name}`} onClick={() => rememberHomeScroll()} className="font-semibold hover:underline text-sm text-foreground">
                       {repo.full_name}
                     </Link>
                   </div>
@@ -172,7 +163,7 @@ export default function HomeFeed({ onlyStarred = false, limit = 40 }: { onlyStar
                   {item.type === 'pr' && ' contributed to '}
                   {item.type === 'star' && ' starred '}
                   {item.type === 'push' && ' pushed to '}
-                  <Link to={`/repos/${item.repoName}`} className="font-semibold text-foreground hover:underline break-all">
+                  <Link to={`/repos/${item.repoName}`} onClick={() => rememberHomeScroll()} className="font-semibold text-foreground hover:underline break-all">
                     {item.repoName}
                   </Link>
                   <div className="text-xs text-muted-foreground mt-1">
@@ -210,8 +201,7 @@ export default function HomeFeed({ onlyStarred = false, limit = 40 }: { onlyStar
                     }
 
                     if (num) {
-                      saveListScroll('home-feed-scroll');
-                      saveListScroll('home-feed-scroll');
+                      rememberHomeScroll();
                       navigate(`/repos/${owner}/${repo}/pulls/${num}`);
                     } else {
                       window.open(item.data.html_url || item.data.url, '_blank');

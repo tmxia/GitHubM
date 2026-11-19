@@ -57,7 +57,7 @@ import {
   getDashboardFeedLimit,
   getDashboardActivityLimit
 } from '@/lib/preferences';;
-import { saveListScroll, readListScroll, clearListScroll } from '@/lib/scrollRestore';
+import { rememberHomeScroll, readHomeScroll, clearHomeScroll } from '@/lib/scrollRestore';
 import PullToRefresh from '@/components/common/PullToRefresh';
 import i18n from "@/i18n";
 
@@ -171,7 +171,7 @@ const PinnedRepoCard = memo(function PinnedRepoCard({ repo }: { repo: GQL_Pinned
     <button
       type="button"
       className="w-full text-left bg-secondary/30 border border-border rounded-lg p-3 hover:bg-secondary/60 transition-colors group"
-      onClick={() => navigate(`/repos/${repo.nameWithOwner}`)}
+      onClick={() => { rememberHomeScroll(); navigate(`/repos/${repo.nameWithOwner}`); }}
     >
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -262,10 +262,14 @@ function fmtDuration(startIso: string | null | undefined, endIso: string | null 
 export default function DashboardPage() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  /** 首页卡片跳转：先记录返回位置/锚点，再导航，保证返回时能回到原位置。 */
+  const goHome = (path: string, anchorId?: string) => {
+    rememberHomeScroll(anchorId);
+    navigate(path);
+  };
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [events, setEvents] = useState<GitHubEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const DASHBOARD_SCROLL_KEY = 'dashboard:scroll';
 
   const [calendar, setCalendar] = useState<ContributionCalendar | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(true);
@@ -724,63 +728,54 @@ export default function DashboardPage() {
     if (restoredRef.current) return;
     restoredRef.current = true;
 
-    const isReturning = sessionStorage.getItem('dashboard_is_returning') === '1';
+    const mem = readHomeScroll();
 
-    if (!isReturning) {
+    if (!mem.returning) {
       window.scrollTo(0, 0);
-      clearListScroll(DASHBOARD_SCROLL_KEY);
+      clearHomeScroll();
       return;
     }
 
-    const anchorId = sessionStorage.getItem('dash_anchor_id');
-    sessionStorage.removeItem('dashboard_is_returning');
-    sessionStorage.removeItem('dash_anchor_id');
+    let attempts = 0;
+    let cancelled = false;
+    let isUserScrolling = false;
 
-    if (anchorId) {
-      let attempts = 0;
-      let isUserScrolling = false;
+    const handleTouch = () => { isUserScrolling = true; };
+    window.addEventListener('touchstart', handleTouch, { passive: true });
+    window.addEventListener('touchmove', handleTouch, { passive: true });
 
-      const handleTouch = () => { isUserScrolling = true; };
-      window.addEventListener('touchstart', handleTouch, { passive: true });
-      window.addEventListener('touchmove', handleTouch, { passive: true });
+    const finish = () => {
+      cancelled = true;
+      window.removeEventListener('touchstart', handleTouch);
+      window.removeEventListener('touchmove', handleTouch);
+      clearHomeScroll();
+    };
 
-      const tryScrollToAnchor = () => {
-        if (isUserScrolling || attempts > 120) {
-          window.removeEventListener('touchstart', handleTouch);
-          window.removeEventListener('touchmove', handleTouch);
-          return;
-        }
+    const tryRestore = () => {
+      if (cancelled) return;
+      // 用户已手动滚动则不再自动恢复
+      if (isUserScrolling || attempts > 150) { finish(); return; }
 
-        const el = document.getElementById(anchorId);
-        if (el) {
-
-          el.scrollIntoView({ behavior: 'instant', block: 'center' });
-          clearListScroll(DASHBOARD_SCROLL_KEY);
-          window.removeEventListener('touchstart', handleTouch);
-          window.removeEventListener('touchmove', handleTouch);
-        } else {
-
-          attempts++;
-          requestAnimationFrame(tryScrollToAnchor);
-        }
-      };
-      requestAnimationFrame(tryScrollToAnchor);
-    } else {
-
-      const y = readListScroll(DASHBOARD_SCROLL_KEY);
-      if (y > 0) {
-        let attempts = 0;
-        const tryScroll = () => {
-          window.scrollTo(0, y);
-          const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-          if (Math.abs(actual - y) > 2 && attempts < 60) {
-            attempts++;
-            requestAnimationFrame(tryScroll);
-          }
-        };
-        requestAnimationFrame(tryScroll);
+      const el = mem.anchorId ? document.getElementById(mem.anchorId) : null;
+      if (el) {
+        el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        finish();
+        return;
       }
-    }
+      if (mem.y > 0) {
+        window.scrollTo(0, mem.y);
+        const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        if (Math.abs(actual - mem.y) <= 2 || attempts >= 100) { finish(); return; }
+      } else {
+        finish();
+        return;
+      }
+      attempts++;
+      requestAnimationFrame(tryRestore);
+    };
+    requestAnimationFrame(tryRestore);
+
+    return () => { cancelled = true; };
   }, [loading, compileStatus]);
 
   useEffect(() => {
@@ -970,7 +965,7 @@ export default function DashboardPage() {
               ].map((stat) => {
                 const Icon = stat.icon;
                 return (
-                  <button key={stat.label} type="button" className="text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:bg-secondary/40 active:scale-[0.98] transition-all group" id={`anchor-stat-${stat.label}`} onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-stat-${stat.label}`); navigate(stat.to); }}>
+                  <button key={stat.label} type="button" className="text-left bg-card border border-border rounded-xl p-4 hover:border-primary/50 hover:bg-secondary/40 active:scale-[0.98] transition-all group" id={`anchor-stat-${stat.label}`} onClick={() => goHome(stat.to, `anchor-stat-${stat.label}`)}>
                     <div className="flex items-center gap-2 mb-2"><Icon className={`w-4 h-4 ${stat.color}`} /><span className="text-xs text-muted-foreground">{stat.label}</span></div>
                     {stat.value === null ? <p className="text-2xl font-bold text-transparent mt-1 select-none" aria-hidden="true">0</p> : <p className="text-2xl font-bold text-foreground">{formatNumber(stat.value)}</p>}
                     <p className="text-xs text-muted-foreground mt-1 transition-colors">{i18n.t('点击查看 →')}</p>
@@ -1008,10 +1003,7 @@ export default function DashboardPage() {
                         key={r.id || repoName}
                         type="button"
                         className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left"
-                        onClick={() => {
-                          sessionStorage.setItem('dashboard_is_returning', '1'); saveListScroll(DASHBOARD_SCROLL_KEY);
-                          navigate(`/repos/${ownerName}/${repoName}`);
-                        }}
+                        onClick={() => goHome(`/repos/${ownerName}/${repoName}`)}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
@@ -1084,13 +1076,7 @@ export default function DashboardPage() {
                           id={`anchor-${repo.full_name}`}
                           key={`${repo.id}-${run?.id ?? idx}`}
                           className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left block cursor-pointer"
-                          onClick={() => {
-                            sessionStorage.setItem('dashboard_is_returning', '1');
-                            sessionStorage.setItem('dash_anchor_id', repo.full_name);
-                            sessionStorage.setItem('dash_exact_y', String(window.scrollY));
-                            saveListScroll(DASHBOARD_SCROLL_KEY);
-                            navigate(`/repos/${repo?.full_name}/actions`);
-                          }}
+                          onClick={() => goHome(`/repos/${repo?.full_name}/actions`, `anchor-${repo.full_name}`)}
                         >
 
                             <div className="flex items-center gap-2 mb-1">
@@ -1102,7 +1088,7 @@ export default function DashboardPage() {
                                     type="button"
                                     className="flex items-center justify-center p-0 hover:opacity-80 transition-opacity"
                                     title="编译成功，点击下载产物"
-                                    onClick={(e) => { e.stopPropagation(); navigate(`/repos/${repo?.full_name}/artifacts`); }}
+                                    onClick={(e) => { e.stopPropagation(); goHome(`/repos/${repo?.full_name}/artifacts`); }}
                                   >
                                     <Package className="w-4 h-4 text-success" />
                                   </button>
@@ -1152,7 +1138,7 @@ export default function DashboardPage() {
             <Card key="recentRepos" className="bg-card border-border h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-base font-semibold text-foreground">{i18n.t('最近仓库')}</CardTitle>
-                <Button variant="ghost" size="sm" className="text-accent hover:bg-secondary text-xs h-7" onClick={() => navigate('/repos')}>{i18n.t('查看全部')}</Button>
+                <Button variant="ghost" size="sm" className="text-accent hover:bg-secondary text-xs h-7" onClick={() => goHome('/repos')}>{i18n.t('查看全部')}</Button>
               </CardHeader>
               <CardContent className="flex-1 p-0">
                 {loading ? (
@@ -1162,7 +1148,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="divide-y divide-border">
                     {repos.slice(0, repoLimit).map((repo) => (
-                      <button id={`anchor-repo-${repo.full_name}`} key={repo.id} type="button" className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-repo-${repo.full_name}`); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(`/repos/${repo?.full_name}`); }}>
+                      <button id={`anchor-repo-${repo.full_name}`} key={repo.id} type="button" className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left" onClick={() => goHome(`/repos/${repo?.full_name}`, `anchor-repo-${repo.full_name}`)}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -1204,7 +1190,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="pb-4 space-y-0">
                     {events.slice(0, activityLimit).map((event, index) => (
-                      <button id={`anchor-event-${event.id}`} key={event.id} type="button" onClick={() => { sessionStorage.setItem('dashboard_is_returning', '1'); sessionStorage.setItem('dash_anchor_id', `anchor-event-${event.id}`); saveListScroll(DASHBOARD_SCROLL_KEY); navigate(getEventTargetPath(event)); }} className="w-full flex gap-3 py-3 px-4 border-b border-border last:border-0 text-left hover:bg-secondary/30 transition-colors">
+                      <button id={`anchor-event-${event.id}`} key={event.id} type="button" onClick={() => goHome(getEventTargetPath(event), `anchor-event-${event.id}`)} className="w-full flex gap-3 py-3 px-4 border-b border-border last:border-0 text-left hover:bg-secondary/30 transition-colors">
                         <div className="w-1 shrink-0 relative">
                           <div className={`w-2 h-2 rounded-full bg-primary mt-1 -ml-0.5 ${index === 0 ? 'ring-2 ring-primary/20' : ''}`} />
                           {index < events.length - 1 && <div className="absolute top-3 left-0.5 w-px h-full bg-border" />}

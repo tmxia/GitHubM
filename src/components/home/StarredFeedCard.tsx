@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { rememberHomeScroll } from '@/lib/scrollRestore';
 
 
 function sanitizeMarkdown(text: string) {
@@ -50,13 +51,6 @@ export default function StarredFeedCard({ refreshTrigger }: { refreshTrigger?: n
       } finally {
         if (mounted) {
           setLoading(false);
-
-          setTimeout(() => {
-            const savedY = sessionStorage.getItem('home_scroll_pos');
-            if (savedY) {
-              window.scrollTo({ top: parseInt(savedY, 10), behavior: 'instant' });
-            }
-          }, 100);
         }
       }
     }
@@ -76,7 +70,7 @@ export default function StarredFeedCard({ refreshTrigger }: { refreshTrigger?: n
           onClick={() => setActiveItem(item)}
         >
 
-          <div className="flex items-center gap-2 mb-1 group cursor-pointer" onClick={(e) => { e.stopPropagation(); sessionStorage.setItem('home_scroll_pos', String(window.scrollY)); navigate(`/repos/${item.repoName}`); }}>
+          <div className="flex items-center gap-2 mb-1 group cursor-pointer" onClick={(e) => { e.stopPropagation(); rememberHomeScroll(); navigate(`/repos/${item.repoName}`); }}>
             <img src={item.avatarUrl} className="w-5 h-5 rounded-full shrink-0" alt="" />
             <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">{item.repoName}</span>
             <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -96,7 +90,7 @@ export default function StarredFeedCard({ refreshTrigger }: { refreshTrigger?: n
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                sessionStorage.setItem('home_scroll_pos', String(window.scrollY));
+                rememberHomeScroll();
                 navigate(`/repos/${item.repoName}/artifacts`);
               }}
             >
