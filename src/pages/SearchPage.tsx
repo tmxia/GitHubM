@@ -352,6 +352,7 @@ export default function SearchPage() {
     sort: SortOption = sortOption,
     force = false,
   ) => {
+    setLoading(false);
     if (!searchQuery.trim()) return;
     const cacheKey = `search:${type}:${normalizeSort(type, sort)}:${page}:${searchQuery.trim()}`;
     // 返回 / 切 Tab 回到搜索页时命中缓存：直接回填，不发请求、不出骨架屏、不重置滚动
@@ -371,7 +372,6 @@ export default function SearchPage() {
         return;
       }
     }
-    setLoading(true);
     setSearched(true);
     setShowHistory(false);
     // 保存历史记录
