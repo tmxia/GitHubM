@@ -1,6 +1,6 @@
 import { withLoading } from '@/lib/loading';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Ban,
@@ -360,7 +360,7 @@ function LogPanel({ jobId, owner, repo, isRunning, stepName, onClearStep, stepSt
   );
 }
 
-function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; repo: string }) {
+const JobItem = memo(function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; repo: string }) {
   const [open, setOpen] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [selectedStep, setSelectedStep] = useState<{
@@ -446,7 +446,7 @@ function JobItem({ job, owner, repo }: { job: GitHubWorkflowJob; owner: string; 
       </CollapsibleContent>
     </Collapsible>
   );
-}
+});
 
 function downloadTextFile(content: string, filename: string, mime: string): boolean {
   try {

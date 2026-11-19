@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
@@ -131,7 +131,7 @@ function writeReleaseOpen(releaseId: number, open: boolean) {
   }
 }
 
-function AssetItem({
+const AssetItem = memo(function AssetItem({
   asset,
   onDownloaded,
 }: {
@@ -203,9 +203,9 @@ function AssetItem({
       </Button>
     </div>
   );
-}
+});
 
-function ReleaseItem({
+const ReleaseItem = memo(function ReleaseItem({
   release,
   onDelete,
   canPush,
@@ -369,7 +369,7 @@ function ReleaseItem({
       </>)}
     </div>
   );
-}
+});
 
 function ArtifactDownloadButton({ art, owner, repo }: { art: GitHubArtifact; owner: string; repo: string }) {
   const [downloading, setDownloading] = useState(false);

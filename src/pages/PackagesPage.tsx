@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
@@ -48,7 +48,7 @@ import i18n from "@/i18n";
 
 const PACKAGE_TYPES = ['npm', 'maven', 'rubygems', 'docker', 'nuget', 'container'];
 
-function PackageItem({ pkg, username }: { pkg: GitHubPackage; username: string }) {
+const PackageItem = memo(function PackageItem({ pkg, username }: { pkg: GitHubPackage; username: string }) {
   const [open, setOpen] = useState(false);
   const [versions, setVersions] = useState<GitHubPackageVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
@@ -164,7 +164,7 @@ function PackageItem({ pkg, username }: { pkg: GitHubPackage; username: string }
       </AlertDialog>
     </>
   );
-}
+});
 
 export default function PackagesPage() {
   const { user } = useAuth();
