@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 // 全局搜索页
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -370,7 +371,7 @@ export default function SearchPage() {
         return;
       }
     }
-    setLoading(true);
+    flushSync(() => setLoading(true));
     setSearched(true);
     setShowHistory(false);
     // 保存历史记录
