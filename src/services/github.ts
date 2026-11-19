@@ -1148,7 +1148,7 @@ export async function getFileContent(
 
 export async function searchRepositories(
   query: string,
-  params: { sort?: 'stars' | 'forks' | 'updated'; order?: SortDirection; per_page?: number; page?: number } = {}
+  params: { sort?: 'stars' | 'forks' | 'updated' | 'help-wanted-issues'; order?: SortDirection; per_page?: number; page?: number } = {}
 ): Promise<GitHubSearchResult<GitHubRepo>> {
   const { sort, order = 'desc', per_page = 20, page = 1 } = params;
   const q = encodeURIComponent(query);
@@ -1160,7 +1160,7 @@ export async function searchRepositories(
 
 export async function searchIssues(
   query: string,
-  params: { sort?: 'created' | 'updated' | 'comments'; order?: SortDirection; per_page?: number; page?: number } = {}
+  params: { sort?: 'created' | 'updated' | 'comments' | 'reactions' | 'interactions'; order?: SortDirection; per_page?: number; page?: number } = {}
 ): Promise<GitHubSearchResult<GitHubIssue>> {
   const { sort = 'created', order = 'desc', per_page = 20, page = 1 } = params;
   const q = encodeURIComponent(query);
