@@ -1,6 +1,6 @@
 import { withLoading } from '@/lib/loading';
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Ban,
@@ -978,7 +978,10 @@ export default function ActionsPage() {
     loadWorkflows();
   }, [loadWorkflows]);
 
-  const activeWorkflows = workflows.filter((w) => w.state !== 'deleted');
+  const activeWorkflows = useMemo(
+    () => workflows.filter((w) => w.state !== 'deleted'),
+    [workflows],
+  );
 
   const openTriggerDialog = useCallback(async (wf: GitHubWorkflow) => {
     setTriggerDialog(wf);
@@ -1220,7 +1223,10 @@ export default function ActionsPage() {
     setLastTrigger(loadLastTrigger(owner, repo));
   }, [owner, repo]);
 
-  const activeRuns = runs.filter((r) => r.status === 'in_progress' || r.status === 'queued' || r.status === 'waiting');
+  const activeRuns = useMemo(
+    () => runs.filter((r) => r.status === 'in_progress' || r.status === 'queued' || r.status === 'waiting'),
+    [runs],
+  );
 
   const handleCancelAll = async () => {
     if (!owner || !repo) return;

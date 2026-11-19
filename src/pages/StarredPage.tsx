@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Star,
@@ -177,17 +177,20 @@ export default function StarredPage() {
     }
   };
 
-  const filtered = sortRepos(
-    repos.filter((r) => {
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        r.full_name.toLowerCase().includes(q) ||
-        (r.description || '').toLowerCase().includes(q) ||
-        (r.language || '').toLowerCase().includes(q)
-      );
-    }),
-    sort
+  const filtered = useMemo(
+    () => sortRepos(
+      repos.filter((r) => {
+        if (!search.trim()) return true;
+        const q = search.toLowerCase();
+        return (
+          r.full_name.toLowerCase().includes(q) ||
+          (r.description || '').toLowerCase().includes(q) ||
+          (r.language || '').toLowerCase().includes(q)
+        );
+      }),
+      sort
+    ),
+    [repos, search, sort],
   );
 
   return (

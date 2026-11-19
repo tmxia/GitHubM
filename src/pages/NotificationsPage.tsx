@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -166,7 +166,10 @@ export default function NotificationsPage() {
     return map[type] || type;
   };
 
-  const unreadCount = notifications.filter((n) => n.unread).length;
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => n.unread).length,
+    [notifications],
+  );
 
   return (
     <PullToRefresh onRefresh={() => loadNotifications(true)}>

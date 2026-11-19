@@ -1,6 +1,6 @@
 
 import {
-   useState, useEffect, useCallback, useRef } from 'react';
+   useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTaskStore } from '@/stores/taskStore';
@@ -885,11 +885,14 @@ export default function ReposPage() {
       .catch(console.error);
   }, [createDialogOpen]);
 
-  const filteredRepos = repos.filter((repo) =>
-    debouncedSearch
-      ? repo.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        (repo.description || '').toLowerCase().includes(debouncedSearch.toLowerCase())
-      : true
+  const filteredRepos = useMemo(
+    () => repos.filter((repo) =>
+      debouncedSearch
+        ? repo.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+          (repo.description || '').toLowerCase().includes(debouncedSearch.toLowerCase())
+        : true
+    ),
+    [repos, debouncedSearch],
   );
 
   const resetCreateForm = () => {
