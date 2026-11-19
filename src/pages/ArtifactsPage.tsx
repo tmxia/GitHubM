@@ -169,7 +169,7 @@ function AssetItem({
   };
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 group hover:bg-secondary/30 transition-colors">
+    <div className="flex items-center gap-3 px-4 py-3 group hover:bg-secondary/30 transition-colors">
       <FileArchive className="w-4 h-4 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-foreground font-mono break-all line-clamp-3">{asset.name}</p>
@@ -740,7 +740,7 @@ export default function ArtifactsPage() {
             {loadingReleases ? (
               <div className="divide-y divide-border">
                 {[1,2,3].map(i => (
-                  <div key={i} className="p-4 flex gap-3">
+                  <div key={i} className="px-4 py-3 flex gap-3">
                     <Skeleton className="w-8 h-8 rounded bg-muted shrink-0" />
                     <div className="flex-1 space-y-2">
                       <Skeleton className="h-4 w-1/3 bg-muted" />
@@ -797,11 +797,11 @@ export default function ArtifactsPage() {
               </Button>
             </div>
           )}
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
             {loadingTags ? (
               <div className="divide-y divide-border">
                 {[1,2,3].map(i => (
-                  <div key={i} className="p-4 flex gap-3 items-center">
+                  <div key={i} className="px-4 py-3 flex gap-3 items-center">
                     <Skeleton className="w-4 h-4 rounded bg-muted shrink-0" />
                     <div className="flex-1 space-y-2">
                       <Skeleton className="h-4 w-1/3 bg-muted" />
@@ -867,7 +867,7 @@ export default function ArtifactsPage() {
 
         <TabsContent value="artifacts" className="mt-4">
           {artifacts.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {(() => {
 
                 const grouped = artifacts.reduce((acc, art) => {
@@ -889,7 +889,7 @@ export default function ArtifactsPage() {
                 );
 
                 return sortedRuns.map((run, idx) => (
-                  <div key={idx} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+                  <div key={idx} className="bg-card border border-border rounded-xl overflow-hidden">
 
                     <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -950,7 +950,7 @@ export default function ArtifactsPage() {
               })()}
             </div>
           ) : (
-            <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
+            <div className="text-center py-12 text-muted-foreground border border-border rounded-xl bg-card">
               <FileArchive className="w-10 h-10 mx-auto mb-3 opacity-20" />
               <p>{i18n.t('暂无构建产物')}</p>
             </div>
