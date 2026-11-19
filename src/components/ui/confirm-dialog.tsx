@@ -1,13 +1,17 @@
 // 全局确认弹窗：替代原生 window.confirm，支持异步 await
+// 视觉与 Actions 等删除弹窗统一：红色警告图标 + 加粗标题 + 灰色描述 + 取消/危险主按钮
 import { useEffect, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import i18n from '@/i18n';
 
 export interface ConfirmOptions {
@@ -57,39 +61,35 @@ export function ConfirmDialogHost() {
   const destructive = pending?.destructive !== false;
 
   return (
-    <Dialog open={Boolean(pending)} onOpenChange={open => { if (!open) close(false); }}>
-      <DialogContent className="max-w-[calc(100%-2rem)] gap-0 overflow-hidden rounded-2xl p-0 md:max-w-sm [&>button]:hidden">
-        <div className="px-5 pb-5 pt-6 text-center">
-          <DialogTitle className="text-[15px] font-semibold leading-6 break-words">
-            {pending?.title}
-          </DialogTitle>
+    <AlertDialog open={Boolean(pending)} onOpenChange={open => { if (!open) close(false); }}>
+      <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-md bg-card border-border overflow-hidden">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-foreground flex items-center gap-2">
+            {destructive && <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />}
+            <span className="break-words">{pending?.title}</span>
+          </AlertDialogTitle>
           {pending?.description && (
-            <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground break-words">
+            <AlertDialogDescription className="text-muted-foreground text-sm space-y-2">
               {pending.description}
-            </DialogDescription>
+            </AlertDialogDescription>
           )}
-        </div>
-        <DialogFooter className="flex-row gap-2 border-t border-border/60 bg-muted/20 px-4 py-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 flex-1 rounded-lg text-xs"
-            onClick={() => close(false)}
-          >
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0">
+          <AlertDialogCancel className="min-w-[80px] px-4 border-border hover:bg-secondary">
             {pending?.cancelText || i18n.t('取消')}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={destructive ? 'destructive' : 'default'}
-            className="h-9 flex-1 rounded-lg text-xs"
-            onClick={() => close(true)}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className={
+              destructive
+                ? 'min-w-[80px] px-4 bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                : 'min-w-[80px] px-4'
+            }
+            onClick={e => { e.preventDefault(); close(true); }}
           >
             {pending?.confirmText || i18n.t('删除')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
