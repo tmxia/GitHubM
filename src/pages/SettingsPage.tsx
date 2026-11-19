@@ -61,6 +61,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRateLimitStore } from '@/stores/rateLimitStore';
 import { useTheme, type ThemeMode, ACCENT_SCHEMES } from '@/contexts/ThemeContext';
 import {
   FEATURE_FLAGS,
@@ -345,8 +346,10 @@ export default function SettingsPage() {
       }
     }
   };  const { t, i18n } = useTranslation();
-  const { user, rateLimit, login, token, refreshRateLimit } = useAuth();
-  const [rateRefreshing, setRateRefreshing] = useState(false);
+  const { user, login, token } = useAuth();
+  const rateLimit = useRateLimitStore((s) => s.rate);
+  const refreshRateLimit = useRateLimitStore((s) => s.refresh);
+  const rateRefreshing = useRateLimitStore((s) => s.refreshing);
   const { theme: currentTheme, setTheme, accentSchemeId, setAccentScheme } = useTheme();
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadCollapsed());
@@ -1245,10 +1248,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
                 variant="ghost"
                 size="sm"
                 className="text-muted-foreground hover:bg-secondary h-7 text-xs"
-                onClick={async () => {
-                  setRateRefreshing(true);
-                  try { await refreshRateLimit(); } finally { setRateRefreshing(false); }
-                }}
+                onClick={() => { void refreshRateLimit(); }}
                 disabled={rateRefreshing}
               >
                 <RefreshCw className={`w-3 h-3 mr-1 ${rateRefreshing ? 'animate-spin' : ''}`} />

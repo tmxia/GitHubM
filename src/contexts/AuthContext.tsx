@@ -1,20 +1,19 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { GitHubUser, GitHubRateLimit, SavedAccount } from '@/types/types';
-import { getCurrentUser, getRateLimit, setToken } from '@/services/github';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import type { GitHubUser, SavedAccount } from '@/types/types';
+import { getCurrentUser, setToken } from '@/services/github';
 import { pageCache } from '@/lib/page-cache';
+import { useRateLimitStore } from '@/stores/rateLimitStore';
 
 interface AuthContextValue {
   token: string | null;
   user: GitHubUser | null;
   isAuthenticated: boolean;
-  rateLimit: GitHubRateLimit | null;
   loading: boolean;
   savedAccounts: SavedAccount[];
   login: (token: string) => Promise<void>;
   logout: () => void;
   switchAccount: (token: string) => Promise<void>;
   removeAccount: (token: string) => void;
-  refreshRateLimit: () => Promise<void>;
   refreshUser: () => Promise<void>;
   updateUser: (newUser: GitHubUser) => void;
 }
@@ -43,18 +42,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.getItem(TOKEN_KEY)
   );
   const [user, setUser] = useState<GitHubUser | null>(null);
-  const [rateLimit, setRateLimit] = useState<GitHubRateLimit | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>(() => loadAccounts());
-
-  const refreshRateLimit = useCallback(async () => {
-    try {
-      const { rate } = await getRateLimit();
-      setRateLimit(rate);
-    } catch {
-    }
-  }, []);
 
   const persistAccount = useCallback((newToken: string, userData: GitHubUser) => {
     setSavedAccounts((prev) => {
@@ -75,12 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
       setIsAuthenticated(true);
       persistAccount(newToken, userData);
-      refreshRateLimit();
+      useRateLimitStore.getState().refresh();
     } catch (e) {
       setToken(prevToken);
       throw e;
     }
-  }, [refreshRateLimit, persistAccount, token]);
+  }, [persistAccount, token]);
 
   const switchAccount = useCallback(async (switchToken: string) => {
     const prevToken = token;
@@ -92,12 +82,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
       setIsAuthenticated(true);
       persistAccount(switchToken, userData);
-      refreshRateLimit();
+      useRateLimitStore.getState().refresh();
     } catch (e) {
       setToken(prevToken);
       throw e;
     }
-  }, [refreshRateLimit, persistAccount, token]);
+  }, [persistAccount, token]);
 
   const removeAccount = useCallback((removeToken: string) => {
     setSavedAccounts((prev) => {
@@ -143,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setTokenState(null);
     setUser(null);
     setIsAuthenticated(false);
-    setRateLimit(null);
+    useRateLimitStore.getState().clear();
     pageCache.clear();
   }, []);
 
@@ -155,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .then((userData) => {
           setUser(userData);
           setIsAuthenticated(true);
-          refreshRateLimit();
+          useRateLimitStore.getState().refresh();
         })
         .catch((err: unknown) => {
           const status = (err as { status?: number })?.status;
@@ -175,13 +165,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       setLoading(false);
     }
-  }, [refreshRateLimit]);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(refreshRateLimit, 60000);
+    const interval = setInterval(() => useRateLimitStore.getState().refresh(), 60000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, refreshRateLimit]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -189,20 +179,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       getCurrentUser()
         .then((userData) => setUser(userData))
         .catch(() => {})
-        .finally(() => refreshRateLimit());
+        .finally(() => useRateLimitStore.getState().refresh());
     };
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
-  }, [isAuthenticated, refreshRateLimit]);
+  }, [isAuthenticated]);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      token, user, isAuthenticated, loading,
+      savedAccounts, login, logout, switchAccount, removeAccount,
+      refreshUser, updateUser,
+    }),
+    [token, user, isAuthenticated, loading, savedAccounts, login, logout, switchAccount, removeAccount, refreshUser, updateUser],
+  );
 
   return (
-    <AuthContext.Provider
-      value={{
-        token, user, isAuthenticated, rateLimit, loading,
-        savedAccounts, login, logout, switchAccount, removeAccount,
-        refreshRateLimit, refreshUser, updateUser,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

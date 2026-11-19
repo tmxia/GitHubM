@@ -43,6 +43,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme, type ThemeMode } from '@/contexts/ThemeContext';
 import { useTranslationStore } from '@/stores/translationStore';
+import { useRateLimitStore } from '@/stores/rateLimitStore';
 import { viewportTranslator } from '@/lib/auto-translator';
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
@@ -157,7 +158,8 @@ function SidebarNav({
   collapsed?: boolean;
   onClose?: () => void;
 }) {
-  const { user, rateLimit, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const rateLimit = useRateLimitStore((s) => s.rate);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -336,7 +338,8 @@ function SidebarNav({
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, rateLimit, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const rateLimit = useRateLimitStore((s) => s.rate);
   const { theme: currentTheme, setTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();

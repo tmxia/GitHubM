@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import i18n from "@/i18n";
 
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -398,8 +398,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
   }, [theme]);
 
+  const value = useMemo<ThemeContextValue>(
+    () => ({ theme, setTheme, resolvedTheme, accentSchemeId, setAccentScheme }),
+    [theme, setTheme, resolvedTheme, accentSchemeId, setAccentScheme],
+  );
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme, accentSchemeId, setAccentScheme }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );
