@@ -358,6 +358,7 @@ export default function SearchPage() {
     if (!force) {
       const cached = pageCache.get<SearchSnapshot>(cacheKey);
       if (cached) {
+         setLoading(true);
         setRepos(cached.repos);
         setIssues(cached.issues);
         setUsers(cached.users);
