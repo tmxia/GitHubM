@@ -1,4 +1,4 @@
-
+// AI 设置中心 — 功能入口 + 次级配置页
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,6 +31,7 @@ import {
 } from '@/ai-v2/characters';
 import type { CharacterCard } from '@/ai-v2/characters';
 import { Button } from '@/components/ui/button';
+import { confirmAction } from '@/components/ui/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -267,7 +268,7 @@ export default function AiSettingsPage() {
   };
 
   const handleFetchModels = async () => {
-
+    // 自定义接口常自带鉴权或本地免鉴权（如 ollama），不强制填 API Key
     if (!config.api_key?.trim() && config.type !== 'custom') {
       toast.error(i18n.t('请先填写 API Key'));
       return;
@@ -284,8 +285,13 @@ export default function AiSettingsPage() {
     }
   };
 
-  const clearSessions = () => {
-    if (!window.confirm(i18n.t('确定清除本机所有 AI 会话？此操作不可撤销。'))) return;
+  const clearSessions = async () => {
+    const confirmed = await confirmAction({
+      title: i18n.t('清除所有会话？'),
+      description: i18n.t('本机保存的全部 AI 会话都会被删除，无法撤销。'),
+      confirmText: i18n.t('清除'),
+    });
+    if (!confirmed) return;
     try {
       const keys = Object.keys(localStorage).filter(key =>
         key.startsWith('githubm_ai_v2_store:') || key.startsWith('githubm_ai_v2_session:'),
@@ -385,7 +391,7 @@ export default function AiSettingsPage() {
 
   if (activeSection.id === 'model') {
     const def = modelDef;
-
+    // 内置模型清单 + 从上游拉取到的模型（按 id 去重，拉取到的优先展示）
     const modelOptions = (() => {
       const merged = new Map<string, { value: string; label: string }>();
       fetchedModels.forEach(model => merged.set(model.id, { value: model.id, label: model.name || model.id }));
@@ -426,7 +432,7 @@ export default function AiSettingsPage() {
           )}
 
           {def.needKey && (
-            <SettingRow label="API Key" desc={i18n.t('仅保存在本机 localStorage，不会上传到服务器。')}>
+            <SettingRow label="API Key" desc={i18n.t('Android 使用系统 Keystore 加密，Web 使用浏览器存储；不会上传到服务器。')}>
               <div className="flex gap-2">
                 <Input
                   className="min-w-0 flex-1 px-3"
@@ -462,7 +468,7 @@ export default function AiSettingsPage() {
                   ))}
                 </SelectContent>
               </Select>
-
+              {/* 拉取上游模型：自定义接口没有内置模型清单，靠它把上游 /models 拿回来 */}
               <Button
                 type="button"
                 variant="outline"
@@ -597,30 +603,27 @@ export default function AiSettingsPage() {
       <div className="mx-auto min-h-full w-full max-w-2xl px-3 py-4 sm:px-4">
         <SectionHeader
           title={i18n.t('模型代理')}
-          desc={i18n.t('用于解决 WebView CORS、网络不可达或统一转发。')}
+          desc={i18n.t('默认直连模型官方接口；仅在直连失败时填写代理。')}
           onBack={() => go('')}
           onSave={() => saveConfig(config, false)}
         />
         <div className="space-y-5 rounded-xl border border-border bg-card p-4">
-          <SettingRow label={i18n.t('代理地址')} desc={i18n.t('留空使用内置无状态代理；OpenRouter 默认直连。')}>
+          <SettingRow label={i18n.t('代理地址')} desc={i18n.t('留空直连各模型官方接口；填写后所有模型请求经该地址转发。')}>
             <Input
               className="px-3"
-              placeholder={i18n.t('留空使用内置代理')}
+              placeholder={i18n.t('https://your-proxy.example.com')}
               value={config.proxy_url || ''}
               onChange={event => setConfig(prev => ({ ...prev, proxy_url: event.target.value }))}
             />
           </SettingRow>
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => setConfig(prev => ({ ...prev, proxy_url: '' }))}>
-              {i18n.t('使用内置代理')}
-            </Button>
-            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => setConfig(prev => ({ ...prev, proxy_url: 'https://llm.callact.xyz' }))}>
-              {i18n.t('填入默认代理')}
+              {i18n.t('使用直连')}
             </Button>
           </div>
           <div className="rounded-lg border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
             <p className="mb-1 flex items-center gap-1.5 font-medium text-foreground"><ShieldCheck className="h-3.5 w-3.5" />{i18n.t('安全说明')}</p>
-            {i18n.t('代理只转发请求和流式响应，不保存 Key，也不保存对话内容。')}
+            {i18n.t('留空时 API Key 只发往模型官方域名；填写代理后 Key 会经该地址转发，请只使用你信任的代理。')}
           </div>
         </div>
       </div>
@@ -629,8 +632,13 @@ export default function AiSettingsPage() {
 
   if (activeSection.id === 'context') {
     const totalSessions = sessions.reduce((sum, item) => sum + item.count, 0);
-    const clearUserArtifacts = () => {
-      if (!window.confirm(i18n.t('确定清除当前账号的 Artifact 缓存？'))) return;
+    const clearUserArtifacts = async () => {
+      const confirmed = await confirmAction({
+        title: i18n.t('清除 Artifact 缓存？'),
+        description: i18n.t('当前账号的 Artifact 缓存会被清空，无法恢复。'),
+        confirmText: i18n.t('清除'),
+      });
+      if (!confirmed) return;
       clearArtifacts(user?.login);
       setStorageVersion(version => version + 1);
       toast.success(i18n.t('已清除 Artifact'));
@@ -711,8 +719,13 @@ export default function AiSettingsPage() {
                 variant="outline"
                 size="sm"
                 className="mt-3 h-8 gap-1.5 text-xs"
-                onClick={() => {
-                  if (!window.confirm(i18n.t('确定清除当前账号的长期记忆？'))) return;
+                onClick={async () => {
+                  const confirmed = await confirmAction({
+                    title: i18n.t('清除长期记忆？'),
+                    description: i18n.t('当前账号保存的长期记忆会被清空，无法恢复。'),
+                    confirmText: i18n.t('清除'),
+                  });
+                  if (!confirmed) return;
                   clearMemories(user?.login);
                   setStorageVersion(version => version + 1);
                   toast.success(i18n.t('已清除长期记忆'));
@@ -958,8 +971,13 @@ export default function AiSettingsPage() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs text-destructive"
-                          onClick={() => {
-                            if (!window.confirm(i18n.t('确定删除角色卡「{{name}}」？', { name: card.name }))) return;
+                          onClick={async () => {
+                            const confirmed = await confirmAction({
+                              title: i18n.t('删除角色卡「{{name}}」？', { name: card.name }),
+                              description: i18n.t('删除后无法恢复。'),
+                              confirmText: i18n.t('删除'),
+                            });
+                            if (!confirmed) return;
                             deleteCustomCharacter(user?.login, card.id);
                             refresh();
                             toast.success(i18n.t('角色卡已删除'));
@@ -1077,8 +1095,13 @@ export default function AiSettingsPage() {
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-[10px] text-muted-foreground"
-                onClick={() => {
-                  if (!window.confirm(i18n.t('确定清除运行记录？'))) return;
+                onClick={async () => {
+                  const confirmed = await confirmAction({
+                    title: i18n.t('清除运行记录？'),
+                    description: i18n.t('已保存的运行记录会被删除，无法恢复。'),
+                    confirmText: i18n.t('清除'),
+                  });
+                  if (!confirmed) return;
                   void clearRuns(user?.login);
                   setStorageVersion(version => version + 1);
                   toast.success(i18n.t('已清除运行记录'));

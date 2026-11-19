@@ -1,4 +1,4 @@
-
+// AI V2 — 会话存储：索引与会话消息分片，内存只保留当前会话
 import type { RepoContext, UiChatMessage } from './types';
 import { idbDelete, idbGet, idbSet } from './idbKv';
 
@@ -7,15 +7,16 @@ export interface V2Session {
   title: string;
   messages: UiChatMessage[];
   repo: RepoContext | null;
-
+  /** 会话级模型覆盖；不设置时使用全局模型 */
   modelType?: string;
   model?: string;
-
+  /** 标题是否由系统自动生成；手动重命名后为 manual */
   titleSource?: 'auto' | 'manual';
   createdAt: string;
   updatedAt: string;
 }
 
+/** 侧边栏只需要元信息，不需要消息正文 */
 export type V2SessionMeta = Omit<V2Session, 'messages'>;
 
 export interface SessionIndex {
@@ -23,6 +24,7 @@ export interface SessionIndex {
   activeId: string;
 }
 
+/** 兼容旧接口：一次性读写全部会话（仅迁移与测试使用） */
 export interface SessionStore {
   sessions: V2Session[];
   activeId: string;
@@ -127,6 +129,7 @@ export function toSessionMeta(session: V2Session): V2SessionMeta {
   return meta;
 }
 
+/** 旧版本把全部消息塞在一个对象里；这里拆分成分片存储 */
 async function migrateStore(login: string | undefined, store: SessionStore): Promise<SessionIndex> {
   const sessions = store.sessions.map(item => toSessionMeta({ ...item, messages: [] }));
   let persisted = true;
@@ -226,6 +229,7 @@ export async function deleteSessionMessages(login: string | undefined, sessionId
   }
 }
 
+/** 兼容接口：读取全部会话（含消息），仅用于迁移与测试 */
 export async function loadSessionStore(login?: string): Promise<SessionStore | null> {
   const index = await loadSessionIndex(login);
   if (!index) return null;
@@ -237,6 +241,7 @@ export async function loadSessionStore(login?: string): Promise<SessionStore | n
   return { sessions, activeId: index.activeId };
 }
 
+/** 兼容接口：写入全部会话（含消息），仅用于迁移与测试 */
 export async function saveSessionStore(
   login: string | undefined,
   store: SessionStore,
@@ -263,7 +268,7 @@ export async function saveSessionStore(
   if (!indexSaved) {
     try {
       if (!login) return { ok: false, error: '未登录' };
-
+      // 回退时保留完整结构，保证旧读取路径可用
       localStorage.setItem(sessionLocalKey(login), JSON.stringify(store));
       fallback = true;
     } catch (error) {

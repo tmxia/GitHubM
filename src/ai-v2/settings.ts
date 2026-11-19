@@ -1,10 +1,10 @@
-
+// AI V2 — 运行时偏好（与模型配置分开）
 export interface V2Settings {
-
+  /** 全局允许所有工具权限；开启后写操作不再逐次弹窗 */
   allowAllPermissions: boolean;
-
+  /** 上下文预算（估算 token） */
   contextBudget: number;
-
+  /** 是否把长期记忆注入上下文 */
   memoryEnabled: boolean;
 }
 

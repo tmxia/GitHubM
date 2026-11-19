@@ -1,4 +1,4 @@
-
+// AI V2 — 轻量行级 Diff（用于写操作确认预览）
 export function buildUnifiedDiff(
   oldText: string,
   newText: string,
@@ -16,6 +16,7 @@ export function buildUnifiedDiff(
     ].join('\n');
   }
 
+  // LCS 行级 diff
   const n = oldLines.length;
   const m = newLines.length;
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));

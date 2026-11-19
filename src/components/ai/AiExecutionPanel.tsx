@@ -1,4 +1,4 @@
-
+// AI 助手 — 执行过程：折叠摘要 + 步骤时间线 + 失败筛选 + 复制记录
 import { useMemo, useState } from 'react';
 import { Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Eye, Loader2, XCircle } from 'lucide-react';
 import i18n from '@/i18n';

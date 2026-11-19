@@ -1,4 +1,4 @@
-
+// AI V2 — Context Builder：系统提示词 + 技能 + 记忆 + 预算裁剪
 import type { AgentHistoryMessage, CapabilityInfo, V2ProviderMessage } from './types';
 import { searchMemories } from './memory';
 import { selectSkills } from './skills';
@@ -54,6 +54,10 @@ function messageTokens(message: V2ProviderMessage): number {
   return estimateTokens(`${content}\n${message.reasoning_content || ''}\n${toolCalls}`) + imageTokens;
 }
 
+/**
+ * 工具循环可能连续产生大量结果。发送模型前压缩旧工具结果，
+ * 只保留最近的完整结果，避免无上限轮数把上下文撑爆。
+ */
 export function compactProviderMessages(
   messages: V2ProviderMessage[],
   budget = 32000,
@@ -106,12 +110,15 @@ export function compactProviderMessages(
   }
 
   if (!compacted) {
-    compacted = [...systemPrefix, ...body.slice(-8)];
+    let start = Math.max(0, body.length - 8);
+    while (start < body.length && body[start].role === 'tool') start += 1;
+    compacted = [...systemPrefix, ...body.slice(start)];
   }
 
   const overBudget = (items: V2ProviderMessage[]) =>
     items.reduce((sum, item) => sum + messageTokens(item), 0) > safeBudget;
 
+  // 仍超预算时，从最早的完整工具回合开始丢弃，保留最近几轮。
   while (overBudget(compacted) && compacted.length > 8) {
     const userIndex = compacted.findIndex(item => item.role === 'user');
     if (userIndex < 0) break;
@@ -123,6 +130,14 @@ export function compactProviderMessages(
     compacted.splice(start, end - start);
   }
 
+  // 兜底清理：任何压缩路径都不能让请求以孤儿 tool 消息开头。
+  const firstBodyIndex = compacted.findIndex(item => item.role !== 'system');
+  if (firstBodyIndex >= 0) {
+    let start = firstBodyIndex;
+    while (start < compacted.length && compacted[start].role === 'tool') start += 1;
+    if (start > firstBodyIndex) compacted.splice(firstBodyIndex, start - firstBodyIndex);
+  }
+  // 最后一个用户消息本身仍然过大时，截断非系统消息正文。
   return compacted.map(item => {
     if (item.role === 'tool' && typeof item.content === 'string' && estimateTokens(item.content) > 1500) {
       return { ...item, content: truncateTextToTokens(item.content, 1500) };
@@ -177,6 +192,7 @@ export function buildAgentContext(params: {
     systemTokens = estimateTokens(systemContent);
   }
 
+  // 给本轮输出和工具结果预留空间
   const historyBudget = Math.max(1500, budget - systemTokens - 6000);
   const selected: AgentHistoryMessage[] = [];
   let used = 0;

@@ -1,4 +1,4 @@
-
+// AI V2 — Run Store：持久化运行摘要，用于历史、诊断和后续恢复
 import type { AgentEvent, V2ProviderMessage } from './types';
 import { idbDelete, idbGet, idbKeys, idbSet } from './idbKv';
 
@@ -202,6 +202,12 @@ function clampContent(
   return content;
 }
 
+/**
+ * 快照只用于断点续跑：
+ * - 只保留最近 24 条消息
+ * - 只保留最近 10 轮工具调用，工具结果截断到 1500 字符
+ * - 图片一律省略
+ */
 export function compactSnapshotMessages(messages: V2ProviderMessage[]): V2ProviderMessage[] {
   const windowed = messages.slice(-MAX_SNAPSHOT_MESSAGES);
   let start = 0;

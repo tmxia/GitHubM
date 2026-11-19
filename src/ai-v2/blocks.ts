@@ -1,4 +1,4 @@
-
+// AI V2 — 助手消息区块：按发生顺序保存 思考 / 正文 / 工具
 import type { UiAssistantBlock, UiChatMessage } from './types';
 
 let sequence = 0;
@@ -8,6 +8,7 @@ function nextBlockId(type: string): string {
   return `blk_${type}_${Date.now().toString(36)}_${sequence}`;
 }
 
+/** 追加流式片段：连续同类型合并成一个区块，遇到工具调用自动断开 */
 export function appendBlockDelta(
   blocks: UiAssistantBlock[] | undefined,
   type: 'text' | 'reasoning',
@@ -31,6 +32,7 @@ export function appendToolBlock(
   return [...blocks, { id: nextBlockId('tool'), type: 'tool', toolId }];
 }
 
+/** 旧消息没有区块时，按 思考 → 正文 → 工具 还原一份初始结构 */
 export function ensureBlocks(message: UiChatMessage): UiAssistantBlock[] {
   if (message.blocks) return message.blocks;
   const list: UiAssistantBlock[] = [];
@@ -47,6 +49,10 @@ export type AssistantRenderGroup =
   | { kind: 'text'; id: string; text: string }
   | { kind: 'execution'; id: string; toolIds: string[] };
 
+/**
+ * 把有序区块合并成展示分组：
+ * 连续的工具调用合并成一个执行组，其余按原顺序保留。
+ */
 export function buildRenderGroups(blocks: UiAssistantBlock[]): AssistantRenderGroup[] {
   const groups: AssistantRenderGroup[] = [];
   for (const block of blocks) {

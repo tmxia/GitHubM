@@ -1,4 +1,4 @@
-
+// AI V2 — Artifact 读取工具（核心能力，始终可用）
 import type { AgentTool } from '../types';
 import { listArtifacts, readArtifact } from '../artifacts';
 

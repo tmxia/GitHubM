@@ -1,4 +1,4 @@
-
+/// <reference types="vite/client" />
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 export const MAX_PDF_BYTES = 10 * 1024 * 1024;

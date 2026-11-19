@@ -1,4 +1,4 @@
-
+// AI V2 — 根据首轮对话自动生成会话标题
 import type { UiAttachment } from './attachments';
 
 interface TitleMessage {

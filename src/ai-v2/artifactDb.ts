@@ -1,4 +1,4 @@
-
+// AI V2 — Artifact 正文 IndexedDB 存储（localStorage 只保留小型索引）
 const DB_NAME = 'githubm_ai_artifacts';
 const STORE = 'contents';
 const VERSION = 1;

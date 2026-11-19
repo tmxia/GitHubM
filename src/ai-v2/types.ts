@@ -1,4 +1,4 @@
-
+// AI Assistant V2 — 通用事件驱动 Agent 类型
 import type { ModelConfig } from '@/components/ai/aiTypes';
 import type { UiAttachment } from './attachments';
 
@@ -122,21 +122,21 @@ export interface RunAgentOptions {
   history: AgentHistoryMessage[];
   contextBudget?: number;
   memoryEnabled?: boolean;
-
+  /** 当前用户消息（可包含图片） */
   currentUserContent?: V2ProviderMessage['content'];
   currentUserText?: string;
-
+  /** 当前角色卡的人格设定 */
   persona?: string;
   signal: AbortSignal;
   onEvent: (event: AgentEvent) => void;
-
+  /** 写操作前的用户确认；未提供时写工具默认拒绝 */
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>;
-
+  /** 每个工具阶段后的状态快照，用于中断恢复 */
   onSnapshot?: (snapshot: { messages: V2ProviderMessage[]; steps: number }) => void;
-
+  /** 恢复被中断的运行 */
   resumeMessages?: V2ProviderMessage[];
   resumeSteps?: number;
-
+  /** 测试注入：默认使用真实 provider */
   callModel?: (
     config: ModelConfig,
     messages: V2ProviderMessage[],
@@ -144,9 +144,8 @@ export interface RunAgentOptions {
     signal: AbortSignal,
     onEvent: (event: AgentEvent) => void,
   ) => Promise<ProviderStreamResult>;
-
+  /** 测试注入：覆盖默认工具集合 */
   tools?: AgentTool[];
-  maxSteps?: number;
 }
 
 export interface UiToolRun {
@@ -160,6 +159,7 @@ export interface UiToolRun {
   endedAt?: number;
 }
 
+/** 助手消息内的有序区块：与 Operit 一样按发生顺序渲染 */
 export interface UiAssistantBlock {
   id: string;
   type: 'text' | 'reasoning' | 'tool';
@@ -171,12 +171,12 @@ export interface UiChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-
+  /** 包含附件正文的模型上下文；UI 仍显示 content */
   modelContent?: string | V2ContentPart[];
   attachments?: UiAttachment[];
   reasoning?: string;
   tools?: UiToolRun[];
-
+  /** 按发生顺序排列的区块；为空时退回旧版布局 */
   blocks?: UiAssistantBlock[];
   streaming?: boolean;
   error?: boolean;

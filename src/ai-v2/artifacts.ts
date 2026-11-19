@@ -1,4 +1,4 @@
-
+// AI V2 — Artifact Store：大工具结果落盘到本机，模型按需分页读取
 import type { ArtifactMeta } from './types';
 import {
   clearArtifactContents,
@@ -83,6 +83,7 @@ export function saveArtifact(params: {
     const next = [meta, ...previous].slice(0, MAX_ARTIFACTS);
     writeIndex(params.login, next);
 
+    // 清理超出上限的旧 Artifact 正文
     const kept = new Set(next.map(item => item.id));
     for (const item of previous) {
       if (!kept.has(item.id)) {

@@ -1,4 +1,4 @@
-
+// AI V2 — 图片 Blob 存储：消息里只保留缩略图，发送时按需回填
 import { idbDelete, idbGet, idbSet } from './idbKv';
 
 const PREFIX = 'attach_img:';

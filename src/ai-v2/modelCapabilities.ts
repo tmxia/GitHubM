@@ -1,4 +1,4 @@
-
+// AI V2 — 模型能力注册表
 import type { ModelType } from '@/components/ai/aiTypes';
 
 export interface ModelCapabilities {

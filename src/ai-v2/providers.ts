@@ -1,4 +1,5 @@
-
+// AI Assistant V2 — OpenAI 兼容 Provider 层
+import { normalizeChatEndpoint } from '@/lib/ai-endpoint';
 import type { ModelConfig } from '@/components/ai/aiTypes';
 import { getModelCapabilities } from './modelCapabilities';
 import type {
@@ -8,14 +9,6 @@ import type {
   V2ToolCall,
   V2ToolDefinition,
 } from './types';
-
-const DEFAULT_PROXY = 'https://llm.callact.xyz';
-
-function normalizeCustomChatEndpoint(endpoint?: string): string {
-  const raw = (endpoint || '').trim().replace(/\/+$/, '');
-  if (!raw) return '';
-  return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
-}
 
 export function getProviderEndpoint(config: ModelConfig): string {
   switch (config.type) {
@@ -30,7 +23,7 @@ export function getProviderEndpoint(config: ModelConfig): string {
     case 'openrouter':
       return 'https://openrouter.ai/api/v1/chat/completions';
     case 'custom':
-      return normalizeCustomChatEndpoint(config.endpoint);
+      return normalizeChatEndpoint(config.endpoint);
     default:
       return '';
   }
@@ -39,13 +32,19 @@ export function getProviderEndpoint(config: ModelConfig): string {
 function getRequestUrl(config: ModelConfig): { url: string; proxy: boolean } {
   const explicitProxy = config.proxy_url?.trim().replace(/\/+$/, '');
   if (explicitProxy) return { url: `${explicitProxy}/v1/chat/completions`, proxy: true };
-
-  if (config.type === 'openrouter' || config.type === 'custom') {
-    return { url: getProviderEndpoint(config), proxy: false };
+  // 默认直连模型官方接口：API Key 不经过任何第三方。
+  // 只有用户在设置里显式填写代理地址时才走代理。
+  const endpoint = getProviderEndpoint(config);
+  if (!endpoint) {
+    if (config.type === 'cloudflare') {
+      throw new Error('Cloudflare 免费通道需要先填写代理地址');
+    }
+    throw new Error('请先在模型设置中填写接口地址');
   }
-  return { url: `${DEFAULT_PROXY}/v1/chat/completions`, proxy: true };
+  return { url: endpoint, proxy: false };
 }
 
+/** 部分供应商（DeepSeek）禁止回传 reasoning_content，发送前统一剔除 */
 export function stripReasoningContent(messages: V2ProviderMessage[]): V2ProviderMessage[] {
   return messages.map(message => {
     if (!message.reasoning_content) return message;
@@ -116,6 +115,9 @@ function parseErrorBody(text: string): string {
   }
 }
 
+/**
+ * 统一流式调用。支持 OpenAI 兼容的 content / reasoning_content / tool_calls 增量。
+ */
 export async function streamProvider(
   config: ModelConfig,
   messages: V2ProviderMessage[],
@@ -129,10 +131,18 @@ export async function streamProvider(
   const onAbort = () => requestController.abort();
   if (signal.aborted) requestController.abort();
   else signal.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(() => {
-    timedOut = true;
-    requestController.abort();
-  }, timeoutMs);
+  // 空闲超时：每收到一块数据就重新计时。
+  // 这样长时间 reasoning 的模型不会因为「总时长」被硬切，
+  // 上游真正挂住不发包时仍能在 timeoutMs 内失败。
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const armTimeout = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      requestController.abort();
+    }, timeoutMs);
+  };
+  armTimeout();
 
   try {
   const prepared = buildProviderRequest(config, messages, tools);
@@ -225,6 +235,7 @@ export async function streamProvider(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      armTimeout();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || '';
@@ -265,7 +276,7 @@ export async function streamProvider(
     }
     throw error;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);
   }
 }

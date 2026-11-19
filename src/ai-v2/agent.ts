@@ -1,4 +1,4 @@
-
+// AI Assistant V2 — 无固定流程的通用 Agent 循环
 import type {
   AgentEvent,
   AgentHistoryMessage,
@@ -148,6 +148,7 @@ export async function runGeneralAgent(options: RunAgentOptions): Promise<void> {
   });
   onSnapshot?.({ messages, steps });
 
+  // 不设置固定工具轮数上限：由用户停止、网络错误或重复调用保护来结束。
   while (true) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
@@ -260,6 +261,7 @@ export async function runGeneralAgent(options: RunAgentOptions): Promise<void> {
   }
 }
 
+/** 给 UI 的轻量历史：只保留最终文本，工具轨迹不进入下一轮上下文 */
 export function toAgentHistory(messages: Array<{ role: 'user' | 'assistant'; content: string; modelContent?: string | V2ContentPart[]; attachments?: UiAttachment[] }>): AgentHistoryMessage[] {
   const contentText = (content: string | V2ContentPart[]): string => typeof content === 'string'
     ? content

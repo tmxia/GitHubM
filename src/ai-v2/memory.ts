@@ -1,4 +1,4 @@
-
+// AI V2 — 长期记忆（本机、按账号隔离）
 export interface MemoryRecord {
   id: string;
   content: string;

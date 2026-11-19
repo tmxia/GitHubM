@@ -1,4 +1,4 @@
-
+// AI V2 — 将 unified diff 应用到已有文件
 interface ParsedLine {
   type: '+' | '-' | ' ';
   text: string;

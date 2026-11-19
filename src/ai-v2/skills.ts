@@ -1,4 +1,4 @@
-
+// AI V2 — 内置技能（按需注入，不一次性塞进系统提示词）
 export interface AgentSkill {
   id: string;
   title: string;

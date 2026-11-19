@@ -1,4 +1,4 @@
-
+// AI V2 — 长期记忆工具
 import type { AgentTool } from '../types';
 import { listMemories, saveMemory, searchMemories } from '../memory';
 
@@ -14,7 +14,7 @@ export const MEMORY_TOOLS: AgentTool[] = [
       },
       required: ['content'],
     },
-    risk: 'read',
+    risk: 'write',
     async execute(args, ctx) {
       const record = saveMemory(
         ctx.userLogin,
