@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { lsGet } from '@/lib/storage';
 
 const resources = {
   en: {
@@ -2510,7 +2511,7 @@ login: {
   }
 };
 
-const savedLang = localStorage.getItem('app_language') || 'zh-CN';
+const savedLang = lsGet('app_language') || 'zh-CN';
 
 i18n
   .use(initReactI18next)

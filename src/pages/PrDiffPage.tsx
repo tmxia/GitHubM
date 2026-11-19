@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ChevronRight,
@@ -454,7 +454,7 @@ interface FileDiffCardProps {
   onCommentAdded: (c: GitHubComment, path: string, line: number) => void;
 }
 
-function FileDiffCard({ file, mode, commentGroups, prHead, owner, repo, pullNumber, onCommentAdded }: FileDiffCardProps) {
+const FileDiffCard = memo(function FileDiffCard({ file, mode, commentGroups, prHead, owner, repo, pullNumber, onCommentAdded }: FileDiffCardProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const statusColor =
@@ -491,7 +491,7 @@ function FileDiffCard({ file, mode, commentGroups, prHead, owner, repo, pullNumb
       )}
     </div>
   );
-}
+});
 
 export default function PrDiffPage() {
   const { owner, repo, number } = useParams<{ owner: string; repo: string; number: string }>();
@@ -534,11 +534,11 @@ export default function PrDiffPage() {
     load();
   }, [owner, repo, number]);
 
-  const commentGroups = groupCommentsByLine(reviewComments);
+  const commentGroups = useMemo(() => groupCommentsByLine(reviewComments), [reviewComments]);
 
-  const handleCommentAdded = (comment: GitHubComment, _path: string, _line: number) => {
+  const handleCommentAdded = useCallback((comment: GitHubComment, _path: string, _line: number) => {
     setReviewComments((prev) => [...prev, comment]);
-  };
+  }, []);
 
   const handleSubmitReview = async () => {
     if (!owner || !repo || !number || !reviewDialog) return;
