@@ -1,4 +1,4 @@
-import { flushSync } from "react-dom";
+import { withLoading } from '@/lib/loading';
 // 全局搜索页
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -371,7 +371,7 @@ export default function SearchPage() {
         return;
       }
     }
-    flushSync(() => setLoading(true));
+    setLoading(true);
     setSearched(true);
     setShowHistory(false);
     // 保存历史记录
@@ -387,38 +387,38 @@ export default function SearchPage() {
       let snapshot: SearchSnapshot;
 
       if (type === 'repositories') {
-        const result = await searchRepositories(searchQuery, {
+        const result = await withLoading(() => searchRepositories(searchQuery, {
           per_page: PER_PAGE,
           page,
           ...(sortParam
             ? { sort: sortParam as 'stars' | 'forks' | 'updated' | 'help-wanted-issues', order: orderParam }
             : {}),
-        });
+        }));
         snapshot = { repos: result.items, issues: [], users: [], codeResults: [], totalCount: result.total_count, page };
       } else if (type === 'issues') {
-        const result = await searchIssues(searchQuery, {
+        const result = await withLoading(() => searchIssues(searchQuery, {
           per_page: PER_PAGE,
           page,
           ...(sortParam
             ? { sort: sortParam as 'created' | 'updated' | 'comments' | 'reactions' | 'interactions', order: orderParam }
             : {}),
-        });
+        }));
         snapshot = { repos: [], issues: result.items, users: [], codeResults: [], totalCount: result.total_count, page };
       } else if (type === 'code') {
-        const result = await searchCode(searchQuery, {
+        const result = await withLoading(() => searchCode(searchQuery, {
           per_page: PER_PAGE,
           page,
           ...(sortParam ? { sort: sortParam as 'indexed', order: orderParam } : {}),
-        });
+        }));
         snapshot = { repos: [], issues: [], users: [], codeResults: result.items, totalCount: result.total_count, page };
       } else {
-        const result = await searchUsers(searchQuery, {
+        const result = await withLoading(() => searchUsers(searchQuery, {
           per_page: PER_PAGE,
           page,
           ...(sortParam
             ? { sort: sortParam as 'followers' | 'repositories' | 'joined', order: orderParam }
             : {}),
-        });
+        }));
         snapshot = { repos: [], issues: [], users: result.items, codeResults: [], totalCount: result.total_count, page };
       }
       setRepos(snapshot.repos);
