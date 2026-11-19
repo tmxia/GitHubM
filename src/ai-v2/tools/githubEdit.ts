@@ -1,9 +1,19 @@
-// AI Assistant V2 — 写入能力补充：局部替换与分片追加
+async function fetchWithResilience(input: RequestInfo | URL, init?: RequestInit, _method?: string): Promise<Response> {
+  const maxRetries = 3;
+  let delayMs = 400;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const resp = await fetch(input, init);
+    if (![429,500,502,503,504].includes(resp.status)) return resp;
+    if (attempt >= maxRetries -1) return resp;
+    await new Promise(r => setTimeout(r, delayMs));
+    delayMs *= 2;
+  }
+  throw new Error("fetchWithResilience unreachable");
+}
 // 背景：模型单次输出受 max_tokens 限制（一次大约只能输出 1 万字符），
 // 整篇重写大文件会超限、被截断或被迫改用「生成补丁文件」的绕路。
 // 这两个工具把单次写入量降到最小，使任意大小的文件都能稳定修改。
 import type { AgentTool, RepoContext, ToolRunResult, ToolRuntimeContext } from '../types';
-import { fetchWithResilience } from '@/services/github/http';
 
 const API = 'https://api.github.com';
 /** 单文件上限，与 github_write_files 保持一致 */
