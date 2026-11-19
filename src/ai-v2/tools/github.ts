@@ -1,4 +1,4 @@
-// AI Assistant V2 — GitHub 只读工具包（按需加载）
+
 import type { AgentTool, RepoContext, ToolRunResult, ToolRuntimeContext } from '../types';
 import { isTextFilePath } from '../attachments';
 
@@ -603,7 +603,6 @@ export const GITHUB_WRITE_TOOLS: AgentTool[] = [
   mergePullRequest,
 ];
 
-/** 只有选择了仓库才暴露 GitHub 工具 */
 export function getToolsForContext(repo?: RepoContext): AgentTool[] {
   return repo ? [...GITHUB_READ_TOOLS, ...GITHUB_WRITE_TOOLS] : [];
 }

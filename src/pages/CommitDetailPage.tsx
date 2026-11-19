@@ -1,13 +1,4 @@
-// 提交详情页
-//
-// 路由：/repos/:owner/:repo/commits/:sha
-// 数据：GET /repos/:owner/:repo/commits/:sha（含 stats 与 files[].patch）
-//
-// 复制 SHA 注意：
-// 1. 复制内容与界面显示保持一致 —— 只复制展示出来的 7 位短 SHA（displaySha 单一来源）；
-// 2. App 内 WebView 加载的是 file:// 页面（非安全上下文），navigator.clipboard
-//    为 undefined，必须走统一入口 copyToClipboard()，它内部优先调用原生桥
-//    AndroidBridge.writeClipboard。
+
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -24,7 +15,6 @@ import type { GitHubCommit, GitHubFile } from '@/types/types';
 import { toast } from 'sonner';
 import i18n from '@/i18n';
 
-/** 界面展示的短 SHA 位数，同时也是复制的内容长度 */
 const SHORT_SHA_LENGTH = 7;
 const shortSha = (sha: string) => (sha || '').substring(0, SHORT_SHA_LENGTH);
 
@@ -137,7 +127,6 @@ export default function CommitDetailPage() {
     return { additions, deletions, files: files.length };
   }, [commit]);
 
-  // 界面展示与复制的唯一来源，避免两处各自截断导致长度不一致
   const displaySha = useMemo(() => shortSha(commit?.sha ?? ''), [commit?.sha]);
 
   const handleCopySha = useCallback(async () => {

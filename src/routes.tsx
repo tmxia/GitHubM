@@ -54,11 +54,6 @@ export interface RouteConfig {
   public?: boolean;
 }
 
-/**
- * 兼容别名：/users/:login 统一重定向到 /users/:login/repos。
- * 历史上 UserLink 生成过不带 /repos 的路径，旧书签、旧版本留在 WebView 历史里的
- * 链接、以及将来误写的地方都会命中这里，避免再被 `path="*"` 静默送回首页。
- */
 function UserProfileRedirect() {
   const { login } = useParams<{ login: string }>();
   return <Navigate to={`/users/${encodeURIComponent(login ?? '')}/repos`} replace />;

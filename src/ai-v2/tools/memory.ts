@@ -1,4 +1,4 @@
-// AI V2 — 长期记忆工具
+
 import type { AgentTool } from '../types';
 import { listMemories, saveMemory, searchMemories } from '../memory';
 

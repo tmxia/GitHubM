@@ -1,4 +1,4 @@
-// AI 对话 — 代码容器：黑色背景、可折叠、一键复制
+
 import { useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import i18n from '@/i18n';

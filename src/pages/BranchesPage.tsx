@@ -1,4 +1,4 @@
-// 分支管理页
+
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -135,7 +135,6 @@ export default function BranchesPage() {
         canAdmin: adminPermission,
       });
 
-      // 仅比较前 10 个非默认分支，避免分支较多时触发大量 API 请求。
       const compareTargets = ordered.filter((b) => b.name !== defaultName).slice(0, 10);
       Promise.all(
         compareTargets.map((b) =>
@@ -184,7 +183,7 @@ export default function BranchesPage() {
     }
     setCreating(true);
     try {
-      // 获取基础分支的 SHA
+
       const baseBranch = branches.find((b) => b.name === newBranchFrom);
       if (!baseBranch) {
         toast.error(i18n.t('找不到基础分支'));
@@ -249,7 +248,7 @@ export default function BranchesPage() {
   return (
     <PullToRefresh onRefresh={() => loadBranches()}>
       <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
-      {/* 面包屑 */}
+
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
         <ChevronRight className="w-3 h-3" />
@@ -325,7 +324,6 @@ export default function BranchesPage() {
         )}
       </div>
 
-      {/* 分支列表 */}
       <div className="space-y-2">
         {loading ? (
           <>
@@ -429,7 +427,6 @@ export default function BranchesPage() {
         )}
       </div>
 
-      {/* 删除确认 */}
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
           <AlertDialogHeader>
@@ -450,7 +447,6 @@ export default function BranchesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 设为默认分支确认 */}
       <AlertDialog
         open={!!defaultTarget}
         onOpenChange={(open) => {

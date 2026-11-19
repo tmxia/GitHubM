@@ -1,13 +1,5 @@
-// 统一用户入口：头像 / 用户名点击后进入应用内「用户主页」
-//
-// 背景：此前大量页面把头像或用户名指向 github.com（或根本没有绑定点击），
-// 在 WebView APK 内会跳出应用或直接无响应，用户无法查看作者主页与其所有仓库。
-// 这里提供轻量组件，保证任意页面点击头像/用户名都走 React Router 内部路由。
-//
-// 修复记录：userProfilePath 曾返回 `/users/:login`，但 routes.tsx 中注册的用户主页
-// 是 `/users/:login/repos`（UserReposPage）。前者未命中任何路由，会落到 App.tsx 的
-// `path="*" → <Navigate to="/" replace />`，表现为「点他人头像跳回自己的首页」。
-// 因此路径必须带 `/repos` 段；routes.tsx 另注册了 `/users/:login` 的别名重定向兜底。
+
+
 import type { ReactNode, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -21,15 +13,10 @@ interface UserLinkProps {
   children: ReactNode;
   className?: string;
   title?: string;
-  /** 默认阻止冒泡，避免卡片本身的点击（进入仓库/Issue）被同时触发 */
+
   stopPropagation?: boolean;
 }
 
-/**
- * 把任意内容包成「进入用户主页」的链接。
- * 使用 <a href="#/users/..."> 保留 Web 语义（可长按复制/新标签打开），
- * 点击时用 navigate 走 SPA 路由，避免 WebView 重新加载页面。
- */
 export function UserLink({
   login,
   children,
@@ -40,7 +27,7 @@ export function UserLink({
   const navigate = useNavigate();
   const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (stopPropagation) e.stopPropagation();
-    // 让浏览器默认行为（新标签/中键）在其他按钮上继续生效
+
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     navigate(userProfilePath(login));

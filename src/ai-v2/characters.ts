@@ -1,4 +1,4 @@
-// AI V2 — 角色卡：内置默认角色 + 用户自定义角色
+
 export interface CharacterCard {
   id: string;
   name: string;

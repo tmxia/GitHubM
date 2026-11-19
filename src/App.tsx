@@ -10,7 +10,6 @@ import { recordVisit } from '@/lib/visitStats';
 import { startPolling } from '@/lib/compilePoller';
 import RouteScrollManager from '@/components/system/RouteScrollManager';
 
-// 提交详情页：routes.tsx 中以动态参数结尾的深层路由单独注册，避免污染菜单列表
 const CommitDetailPage = lazy(() => import('./pages/CommitDetailPage'));
 
 function RouteGuard({ children }: { children: React.ReactNode }) {
@@ -100,7 +99,6 @@ function AppContent() {
             />
           ))}
 
-        {/* 提交详情：/repos/:owner/:repo/commits/:sha（CommitsPage 的「详情」入口） */}
         <Route
           path="/repos/:owner/:repo/commits/:sha"
           element={

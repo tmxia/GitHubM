@@ -1,4 +1,4 @@
-// AI Assistant V2 — 通用聊天优先，仓库可选，Operit 风格对话流
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -849,7 +849,7 @@ export default function AiAssistantV2Page() {
       className="flex min-h-0 w-full overflow-hidden bg-background"
       style={{ height: `calc(100dvh - ${isAndroid ? 56 : 120}px)` }}
     >
-      {/* 桌面端会话侧栏 */}
+
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-muted/10 2xl:flex">
         <div className="flex h-12 items-center justify-between border-b border-border px-3">
           <span className="text-xs font-medium">{i18n.t('对话')}</span>
@@ -886,7 +886,6 @@ export default function AiAssistantV2Page() {
         </div>
       </aside>
 
-      {/* 主聊天列 */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border px-2 sm:px-3">
           <Button
@@ -1080,7 +1079,6 @@ export default function AiAssistantV2Page() {
       </div>
       </div>
 
-      {/* 大屏上下文档 */}
       <aside className="hidden w-72 shrink-0 flex-col border-l border-border bg-muted/10 2xl:flex">
         <div className="flex h-12 items-center border-b border-border px-3">
           <span className="text-xs font-medium">{i18n.t('会话上下文')}</span>

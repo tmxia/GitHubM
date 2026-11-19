@@ -1,4 +1,4 @@
-// 登录页 - GitHub 令牌认证（柔和卡片风格）
+
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -12,12 +12,6 @@ import { useTranslation } from 'react-i18next';
 
 const TOKEN_URL = 'https://github.com/settings/tokens/new';
 
-/**
- * 品牌标记：内联 SVG + currentColor。
- * 原先引用 public/assets/logo.svg（内部写死 fill="#1677FF"），
- * 导致切换主题色后登录页 logo 仍是蓝色，与 ThemeContext.updateFaviconAccent()
- * 已经把 favicon 换成主题色的行为不一致。改为内联后用 text-primary 跟随主题。
- */
 function BrandMark({ label }: { label: string }) {
   return (
     <svg
@@ -91,7 +85,7 @@ export default function LoginPage() {
   return (
     <div className="login-page min-h-screen">
       <div className="mx-auto flex min-h-screen w-full max-w-[400px] flex-col px-5">
-        {/* 语言切换 */}
+
         <div className="flex justify-end pt-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -117,7 +111,7 @@ export default function LoginPage() {
 
         <div className="flex flex-1 items-center justify-center pb-10 pt-4">
           <div className="w-full">
-            {/* Logo 与标题：卡片之外 */}
+
             <div className="mb-6 flex flex-col items-center text-center">
               <BrandMark label={t('login.title')} />
               <h1 className="mt-4 text-[21px] font-semibold tracking-tight text-foreground">
@@ -127,7 +121,7 @@ export default function LoginPage() {
             </div>
 
             <div className="login-card w-full">
-              {/* 登录表单 */}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <Label htmlFor="token" className="block text-center text-xs font-normal text-foreground">
@@ -180,7 +174,6 @@ export default function LoginPage() {
             </form>
             </div>
 
-            {/* 获取令牌：卡片之外 */}
             <div className="mt-6 text-center">
               <a
                 href={TOKEN_URL}

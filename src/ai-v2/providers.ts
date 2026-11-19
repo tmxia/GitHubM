@@ -1,4 +1,4 @@
-// AI Assistant V2 — OpenAI 兼容 Provider 层
+
 import type { ModelConfig } from '@/components/ai/aiTypes';
 import { getModelCapabilities } from './modelCapabilities';
 import type {
@@ -11,7 +11,6 @@ import type {
 
 const DEFAULT_PROXY = 'https://llm.callact.xyz';
 
-/** 自定义接口：/v1 这类基础地址自动补 /chat/completions；已带该路径则原样使用 */
 function normalizeCustomChatEndpoint(endpoint?: string): string {
   const raw = (endpoint || '').trim().replace(/\/+$/, '');
   if (!raw) return '';
@@ -40,14 +39,13 @@ export function getProviderEndpoint(config: ModelConfig): string {
 function getRequestUrl(config: ModelConfig): { url: string; proxy: boolean } {
   const explicitProxy = config.proxy_url?.trim().replace(/\/+$/, '');
   if (explicitProxy) return { url: `${explicitProxy}/v1/chat/completions`, proxy: true };
-  // OpenRouter / 自定义接口支持浏览器 CORS，默认直连；其余走项目内置无状态代理。
+
   if (config.type === 'openrouter' || config.type === 'custom') {
     return { url: getProviderEndpoint(config), proxy: false };
   }
   return { url: `${DEFAULT_PROXY}/v1/chat/completions`, proxy: true };
 }
 
-/** 部分供应商（DeepSeek）禁止回传 reasoning_content，发送前统一剔除 */
 export function stripReasoningContent(messages: V2ProviderMessage[]): V2ProviderMessage[] {
   return messages.map(message => {
     if (!message.reasoning_content) return message;
@@ -118,9 +116,6 @@ function parseErrorBody(text: string): string {
   }
 }
 
-/**
- * 统一流式调用。支持 OpenAI 兼容的 content / reasoning_content / tool_calls 增量。
- */
 export async function streamProvider(
   config: ModelConfig,
   messages: V2ProviderMessage[],

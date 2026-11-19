@@ -1,4 +1,4 @@
-// AI 设置中心 — 功能入口 + 次级配置页
+
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -267,7 +267,7 @@ export default function AiSettingsPage() {
   };
 
   const handleFetchModels = async () => {
-    // 自定义接口常自带鉴权或本地免鉴权（如 ollama），不强制填 API Key
+
     if (!config.api_key?.trim() && config.type !== 'custom') {
       toast.error(i18n.t('请先填写 API Key'));
       return;
@@ -385,7 +385,7 @@ export default function AiSettingsPage() {
 
   if (activeSection.id === 'model') {
     const def = modelDef;
-    // 内置模型清单 + 从上游拉取到的模型（按 id 去重，拉取到的优先展示）
+
     const modelOptions = (() => {
       const merged = new Map<string, { value: string; label: string }>();
       fetchedModels.forEach(model => merged.set(model.id, { value: model.id, label: model.name || model.id }));
@@ -462,7 +462,7 @@ export default function AiSettingsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              {/* 拉取上游模型：自定义接口没有内置模型清单，靠它把上游 /models 拿回来 */}
+
               <Button
                 type="button"
                 variant="outline"

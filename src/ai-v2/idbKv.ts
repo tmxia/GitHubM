@@ -1,4 +1,4 @@
-// AI V2 — 轻量 IndexedDB KV，用于大块会话数据
+
 const DB_NAME = 'githubm_ai_state';
 const STORE = 'kv';
 const VERSION = 1;

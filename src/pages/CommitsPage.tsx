@@ -1,4 +1,4 @@
-// 提交历史页
+
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -81,7 +81,6 @@ export default function CommitsPage() {
     };
   }, [owner, repo]);
 
-  // 默认使用仓库默认分支；URL 指定有效分支时才覆盖。
   useEffect(() => {
     if (branches.length === 0) return;
     const preferred = branchParam && branches.some((branch) => branch.name === branchParam)
@@ -111,7 +110,6 @@ export default function CommitsPage() {
         sha: selectedBranch,
         per_page: 30,
         page: pageNum,
-        path: pathFilter || undefined,
       });
       if (append) {
         setCommits((prev) => [...prev, ...result.data]);
@@ -162,7 +160,7 @@ export default function CommitsPage() {
   return (
     <PullToRefresh onRefresh={() => loadCommits(1, false, true)}>
       <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
-      {/* 面包屑 */}
+
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
         <ChevronRight className="w-3 h-3" />
@@ -203,7 +201,6 @@ export default function CommitsPage() {
         </Select>
       </div>
 
-      {/* 提交列表 */}
       <div className="space-y-2">
         {loading ? (
           <>
@@ -283,7 +280,7 @@ export default function CommitsPage() {
                 >
                   <GitCommit className="w-3.5 h-3.5" />{i18n.t('详情')}
                 </Button>
-                {/* 写入类操作按仓库权限显示：仅对可推送的仓库（自己的仓库/协作者）可见 */}
+
                 {canPush && (
                   <>
                     <Button
@@ -331,8 +328,6 @@ export default function CommitsPage() {
             {i18n.t('加载更多')}</Button>
         </div>
       )}
-
-
 
       <AlertDialog open={!!actionCommit && !!actionKind} onOpenChange={(open) => { if (!open && !actionBusy) { setActionCommit(null); setActionKind(null); } }}>
         <AlertDialogContent className="bg-card border-border">

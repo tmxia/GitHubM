@@ -19,15 +19,11 @@ if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./i18n";
-// 补齐 i18n 缺失词条（只补缺失 key，不覆盖 src/i18n.ts 里已有的翻译）。
-// 必须在首屏渲染前引入，否则首屏仍会显示中文 key 原文。
+
 import "@/i18n-extra";
-// 安装外部链接全局兜底（window.open / a[target=_blank]）。
-// 必须在首屏渲染前引入，否则「打开」按钮在进入过详情页之前无效。
+
 import "@/lib/open-external";
-// 安装剪贴板全局兜底：把 navigator.clipboard 接到原生桥 AndroidBridge.writeClipboard。
-// App 内是 file:// 页面（非安全上下文），不装这层的话历史代码里所有
-// navigator.clipboard.writeText(...) 都会静默失败。同样必须首屏前引入。
+
 import "@/lib/clipboard-bridge";
 import App from "./App.tsx";
 import { AppWrapper } from "./components/common/PageMeta.tsx";

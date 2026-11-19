@@ -1,4 +1,4 @@
-// AI V2 — 会话附件与 @ 仓库文件引用
+
 import type { UiChatMessage, V2ContentPart } from './types';
 import { loadImageDataUrl, putImageBlob } from './imageStore';
 
@@ -10,11 +10,11 @@ export interface UiAttachment {
   kind?: 'text' | 'image';
   size: number;
   content: string;
-  /** 发送给模型时使用；图片压缩后按需回填 */
+
   dataUrl?: string;
-  /** 消息列表里展示的缩略图，避免整张大图常驻内存 */
+
   thumbDataUrl?: string;
-  /** 压缩后的图片 Blob 存放于 IndexedDB */
+
   imageBlobId?: string;
   width?: number;
   height?: number;
@@ -99,7 +99,6 @@ export function makeAttachmentId(prefix = 'att'): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** 图片压缩：最长边 1600px，JPEG 质量 0.82，另存一张缩略图 */
 export interface PreparedImage {
   blob: Blob;
   thumbDataUrl: string;
@@ -176,7 +175,6 @@ export async function prepareImageAttachment(file: File): Promise<PreparedImage>
   }
 }
 
-/** 把图片 Blob 回填成 dataUrl（发送给模型前调用） */
 export async function hydrateAttachmentImages(attachments: UiAttachment[]): Promise<UiAttachment[]> {
   let changed = false;
   const next: UiAttachment[] = [];
@@ -194,7 +192,6 @@ export async function hydrateAttachmentImages(attachments: UiAttachment[]): Prom
   return changed ? next : attachments;
 }
 
-/** 历史消息里的图片同样按需回填，避免整段历史常驻大图 */
 export async function hydrateMessageImages(messages: UiChatMessage[]): Promise<UiChatMessage[]> {
   const next: UiChatMessage[] = [];
   let changed = false;

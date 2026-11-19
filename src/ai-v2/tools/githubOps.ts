@@ -1,4 +1,4 @@
-// AI V2 — GitHub Actions / Issues / Pull Requests 只读工具
+
 import type { AgentTool, RepoContext, ToolRunResult, ToolRuntimeContext } from '../types';
 
 const API = 'https://api.github.com';

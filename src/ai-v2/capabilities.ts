@@ -1,4 +1,4 @@
-// AI V2 — Capability Registry：按上下文激活能力包，避免一次性注入全部工具
+
 import type { AgentTool, CapabilityInfo, RepoContext } from './types';
 import { GITHUB_READ_TOOLS, GITHUB_WRITE_TOOLS } from './tools/github';
 import { GITHUB_OPS_TOOLS } from './tools/githubOps';

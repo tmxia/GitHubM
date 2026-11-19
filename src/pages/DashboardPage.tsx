@@ -732,7 +732,6 @@ export default function DashboardPage() {
       return;
     }
 
-    // 优先读取精准备份的锚点 ID
     const anchorId = sessionStorage.getItem('dash_anchor_id');
     sessionStorage.removeItem('dashboard_is_returning');
     sessionStorage.removeItem('dash_anchor_id');
@@ -740,7 +739,7 @@ export default function DashboardPage() {
     if (anchorId) {
       let attempts = 0;
       let isUserScrolling = false;
-      
+
       const handleTouch = () => { isUserScrolling = true; };
       window.addEventListener('touchstart', handleTouch, { passive: true });
       window.addEventListener('touchmove', handleTouch, { passive: true });
@@ -754,20 +753,20 @@ export default function DashboardPage() {
 
         const el = document.getElementById(anchorId);
         if (el) {
-          // 找到元素了！强行让它滚到屏幕正中间
+
           el.scrollIntoView({ behavior: 'instant', block: 'center' });
           clearListScroll(DASHBOARD_SCROLL_KEY);
           window.removeEventListener('touchstart', handleTouch);
           window.removeEventListener('touchmove', handleTouch);
         } else {
-          // 如果元素还没渲染出来（比如在卡片底部），下一帧继续找
+
           attempts++;
           requestAnimationFrame(tryScrollToAnchor);
         }
       };
       requestAnimationFrame(tryScrollToAnchor);
     } else {
-      // 降级兜底：如果没有锚点记录，退回到旧的像素恢复逻辑
+
       const y = readListScroll(DASHBOARD_SCROLL_KEY);
       if (y > 0) {
         let attempts = 0;
@@ -782,7 +781,7 @@ export default function DashboardPage() {
         requestAnimationFrame(tryScroll);
       }
     }
-  }, [loading, compileStatus]); // 依然依赖这两个状态，等数据加载完再找
+  }, [loading, compileStatus]);
 
   useEffect(() => {
     if (!compileEnabled) return;
@@ -1081,16 +1080,16 @@ export default function DashboardPage() {
                         const durationStr = fmtDuration(run?.run_started_at || run?.created_at, run?.status === 'completed' ? run?.updated_at : null);
 
                         return (
-                          <div 
+                          <div
                           id={`anchor-${repo.full_name}`}
-                          key={`${repo.id}-${run?.id ?? idx}`} 
-                          className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left block cursor-pointer" 
-                          onClick={() => { 
-                            sessionStorage.setItem('dashboard_is_returning', '1'); 
+                          key={`${repo.id}-${run?.id ?? idx}`}
+                          className="w-full px-4 py-3 hover:bg-secondary/50 transition-colors text-left block cursor-pointer"
+                          onClick={() => {
+                            sessionStorage.setItem('dashboard_is_returning', '1');
                             sessionStorage.setItem('dash_anchor_id', repo.full_name);
                             sessionStorage.setItem('dash_exact_y', String(window.scrollY));
-                            saveListScroll(DASHBOARD_SCROLL_KEY); 
-                            navigate(`/repos/${repo?.full_name}/actions`); 
+                            saveListScroll(DASHBOARD_SCROLL_KEY);
+                            navigate(`/repos/${repo?.full_name}/actions`);
                           }}
                         >
 

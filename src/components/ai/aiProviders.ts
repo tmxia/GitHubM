@@ -1,12 +1,8 @@
-// AI 平台直连层（已脱离 Supabase 后端）
-// - 各平台 OpenAI 兼容端点地址构建
-// - 模型列表拉取（前端直连各家官方 API）
-// - 连接测试（最小 chat 请求）
-// 所有请求均由浏览器直接发出，API Key 仅保存在本机 localStorage。
+
+
 import type { ModelType } from './aiTypes';
 import i18n from "@/i18n";
 
-// ── 各平台 OpenAI 兼容 Chat Completions 端点 ──────────────────────────────
 export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
   switch (type) {
     case 'deepseek': return 'https://api.deepseek.com/v1/chat/completions';
@@ -16,7 +12,7 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
     case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
     case 'cloudflare': return 'https://llm.callact.xyz/v1/chat/completions';
     case 'custom': {
-      // 既支持只填基础地址（如 http://127.0.0.1:17890/v1），也支持完整的 /chat/completions
+
       const base = normalizeCustomEndpoint(endpoint);
       return base ? `${base}/chat/completions` : '';
     }
@@ -25,18 +21,12 @@ export function getProviderChatUrl(type: ModelType, endpoint?: string): string {
   }
 }
 
-/**
- * 规整自定义接口地址：
- * - 去掉末尾多余的 “/”
- * - 去掉用户可能粘贴的 “/chat/completions”，统一按基础地址（如 http://127.0.0.1:17890/v1）处理
- */
 function normalizeCustomEndpoint(endpoint?: string): string {
   const raw = (endpoint || '').trim().replace(/\/+$/, '');
   if (!raw) return '';
   return raw.replace(/\/chat\/completions$/i, '');
 }
 
-/** 从 chat/completions 端点推导 models 列表端点（OpenAI 兼容） */
 export function getProviderModelsUrl(type: ModelType, endpoint?: string): string {
   switch (type) {
     case 'deepseek': return 'https://api.deepseek.com/v1/models';
@@ -53,7 +43,6 @@ export function getProviderModelsUrl(type: ModelType, endpoint?: string): string
   }
 }
 
-/** 构建请求认证头（gemini OpenAI 兼容端点用 Bearer，其余同样） */
 function authHeaders(apiKey: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -61,8 +50,6 @@ function authHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-// ── 默认模型 ────────────────────────────────────────────────────────────────
-/** 各平台未显式选择模型时用于连接测试和首次请求的默认值 */
 export function getDefaultProviderModel(type: ModelType): string {
   switch (type) {
     case 'deepseek': return 'deepseek-v4-flash';
@@ -77,9 +64,6 @@ export function getDefaultProviderModel(type: ModelType): string {
   }
 }
 
-// ── 模型列表 ───────────────────────────────────────────────────────────────
-
-/** 解析各家 /models 响应（兼容 {data:[{id}]} 与直接数组两种格式） */
 function parseModelsList(json: unknown): Array<{ id: string; name: string }> {
   const raw = json as { data?: Array<{ id?: string; name?: string }> } | Array<{ id?: string; name?: string }>;
   let items: Array<{ id?: string; name?: string }> = [];
@@ -90,10 +74,6 @@ function parseModelsList(json: unknown): Array<{ id: string; name: string }> {
     .map(m => ({ id: m.id as string, name: m.name || m.id as string }));
 }
 
-/**
- * 前端直连获取指定平台的可用模型列表。
- * 已脱离 Edge Function list-ai-models。
- */
 export async function fetchModelsFromAPI(
   type: ModelType,
   apiKey: string,
@@ -107,7 +87,7 @@ export async function fetchModelsFromAPI(
   try {
     res = await fetch(url, { headers: authHeaders(apiKey) });
   } catch {
-    // 浏览器只给出笼统的 “Failed to fetch”：明文 HTTP 被系统拦截、跨域被拒、地址不可达都走这里
+
     throw new Error(i18n.t('无法连接到接口地址：请确认地址可访问；Android 上如果是 http:// 明文地址，该地址需在白名单内且服务端允许跨域'));
   }
   if (!res.ok) {
@@ -127,18 +107,12 @@ export async function fetchModelsFromAPI(
   return models;
 }
 
-// ── 连接测试 ───────────────────────────────────────────────────────────────
-
 export interface TestConnectionResult {
   success: boolean;
   elapsedMs?: number;
   error?: string;
 }
 
-/**
- * 前端直连测试模型连接：发送最小 chat 请求验证 key 与端点可用性。
- * 已脱离 Edge Function ai-test-connection。
- */
 export async function testProviderConnection(
   type: ModelType,
   apiKey: string,
@@ -174,7 +148,6 @@ export async function testProviderConnection(
 
     if (res.ok) return { success: true, elapsedMs };
 
-    // 401/403：key 无效；404：端点错误；其余 4xx：已连通但请求参数（如模型名）有问题
     let detail = '';
     try {
       const j = await res.json() as { error?: { message?: string } | string };
