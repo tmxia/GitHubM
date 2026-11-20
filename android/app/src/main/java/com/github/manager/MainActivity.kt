@@ -1951,8 +1951,12 @@ class MainActivity : AppCompatActivity() {
         fun requestIgnoreBatteryOptimizations() {
             runOnUiThread {
                 try {
+                    val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+                    // 已在白名单则不再重复拉起授权页
+                    if (pm.isIgnoringBatteryOptimizations(packageName)) return@runOnUiThread
                     val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                     intent.data = android.net.Uri.parse("package:$packageName")
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(intent)
                 } catch (e: Exception) {
                     // 如果失败，降级打开电池优化设置列表
