@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Info,
   Copy,
+  Check,
   Shield,
   Zap,
   Key,
@@ -126,10 +127,32 @@ export default function RepoDetailPage() {
   const [readmeDraft, setReadmeDraft] = useState('');
   const [readmeSha, setReadmeSha] = useState('');
   const [savingReadme, setSavingReadme] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isOwner = !!(currentUser && owner && currentUser.login.toLowerCase() === owner.toLowerCase());
   const canAdmin = isOwner || !!repo?.permissions?.admin;
   const canPush  = canAdmin || !!repo?.permissions?.push;
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  const handleCopy = async (text: string, key: string, failMsg?: string) => {
+    const ok = await safeCopy(text);
+    if (!ok) {
+      toast.error(i18n.t(failMsg ?? '复制失败'));
+      return;
+    }
+    setCopiedKey(key);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null;
+      setCopiedKey(null);
+    }, 1500);
+  };
 
     useEffect(() => {
     if (!owner || !repoName) return;
@@ -485,9 +508,11 @@ export default function RepoDetailPage() {
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.html_url); if (ok) toast.success(i18n.t('已复制仓库链接')); else toast.error(i18n.t('复制链接失败')); }}
+                  onClick={(e) => { e.currentTarget.blur(); void handleCopy(repo.html_url, 'link', '复制链接失败'); }}
                 >
-                  <Copy className="w-4 h-4" />
+                  {copiedKey === 'link'
+                    ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    : <Copy className="w-4 h-4" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('复制仓库地址')}</TooltipContent>
@@ -696,12 +721,11 @@ export default function RepoDetailPage() {
             <CardContent className="p-6">
               {readme && (
                 <div className="flex justify-end -mt-4 -mr-4 mb-1 gap-1">
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={async () => {
-                    const ok = await safeCopy(readme);
-                    if (ok) toast.success(i18n.t('已复制 README 源码'));
-                    else toast.error(i18n.t('复制失败'));
-                  }}>
-                    <Copy className="w-2 h-2" style={{ width: 10, height: 10 }} />{i18n.t('复制')}
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={() => { void handleCopy(readme, 'readme'); }}>
+                    {copiedKey === 'readme'
+                      ? <Check className="w-2 h-2 text-emerald-600 dark:text-emerald-400" style={{ width: 10, height: 10 }} />
+                      : <Copy className="w-2 h-2" style={{ width: 10, height: 10 }} />}
+                    {copiedKey === 'readme' ? i18n.t('已复制') : i18n.t('复制')}
                   </Button>
                   {canPush && (
                     <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={openReadmeEdit}>
@@ -1018,14 +1042,18 @@ export default function RepoDetailPage() {
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wider">{i18n.t('克隆地址')}</span>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.clone_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.clone_url); if (ok) toast.success(i18n.t('已复制克隆地址')); else toast.error(i18n.t('复制失败')); }}>
-                    <Copy className="w-3.5 h-3.5" />
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); void handleCopy(repo.clone_url, 'clone'); }}>
+                    {copiedKey === 'clone'
+                      ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      : <Copy className="w-3.5 h-3.5" />}
                   </Button>
                 </div>
                 <div className="bg-secondary/30 border border-border rounded-lg p-1 flex items-center gap-2">
                   <code className="text-foreground font-mono text-xs break-all flex-1 pl-2 select-all">{repo.ssh_url}</code>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={async (e) => { e.currentTarget.blur(); const ok = await safeCopy(repo.ssh_url); if (ok) toast.success(i18n.t('已复制 SSH 地址')); else toast.error(i18n.t('复制失败')); }}>
-                    <Copy className="w-3.5 h-3.5" />
+                  <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:bg-background shrink-0" onClick={(e) => { e.currentTarget.blur(); void handleCopy(repo.ssh_url, 'ssh'); }}>
+                    {copiedKey === 'ssh'
+                      ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      : <Copy className="w-3.5 h-3.5" />}
                   </Button>
                 </div>
               </div>
