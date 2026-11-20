@@ -5,7 +5,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
   GitBranch,
-  Eye,
   Package,
   Plus,
   Download,
@@ -15,7 +14,6 @@ import {
   FileArchive,
   ChevronDown,
   Share2,
-  RefreshCw,
   Zap,
   Archive,
   Loader2,
@@ -428,25 +426,6 @@ function ArtifactDownloadButton({ art, owner, repo }: { art: GitHubArtifact; own
 }
 
 export default function ArtifactsPage() {
-  const [viewDetailArtifact, setViewDetailArtifact] = useState<GitHubArtifact | null>(null);
-
-  useEffect(() => {
-    const isAnyModalOpen = !!viewDetailArtifact;
-    if (isAnyModalOpen) {
-      document.body.style.overflow = 'hidden';
-      document.body.style.touchAction = 'none';
-      document.documentElement.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-      document.body.style.touchAction = '';
-      document.documentElement.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-      document.body.style.touchAction = '';
-      document.documentElement.style.overflow = '';
-    };
-  }, [viewDetailArtifact]);
   const { owner, repo } = useParams<{ owner: string; repo: string }>();
   const { canPush } = useRepoPermissions(owner, repo);
   const navigate = useNavigate();
@@ -777,9 +756,6 @@ export default function ArtifactsPage() {
                   )}
                 </>
               )}
-              <Button variant="ghost" size="icon" className="w-8 h-8 ml-auto text-muted-foreground hover:bg-secondary" onClick={() => loadTags(true)} disabled={loadingTags}>
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingTags ? 'animate-spin' : ''}`} />
-              </Button>
             </div>
           )}
           <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -909,9 +885,6 @@ export default function ArtifactsPage() {
                             </div>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:text-accent hover:bg-accent/10" onClick={() => setViewDetailArtifact(art)} title={i18n.t('详情')}>
-                              <Eye className="w-4 h-4" />
-                            </Button>
                             {!art.expired && (
                               <ArtifactDownloadButton art={art} owner={owner ?? ''} repo={repo ?? ''} />
                             )}
@@ -1100,65 +1073,6 @@ export default function ArtifactsPage() {
             <Button variant="outline" className="min-w-[80px] px-4 border-border" onClick={() => { setCreateOpen(false); resetCreateForm(); }} disabled={publishing}>{i18n.t('取消')}</Button>
             <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreateRelease} disabled={publishing || !newTag.trim()}>
               {publishing ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />{i18n.t('发布中...')}</> : i18n.t('发布')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!viewDetailArtifact} onOpenChange={(open) => !open && setViewDetailArtifact(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-md h-auto max-h-[300px] flex flex-col p-0 gap-0 bg-card border-border shadow-xl rounded-xl overflow-hidden"
-          onTouchStart={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
-        >
-          <DialogHeader className="px-4 py-3 border-b border-border bg-secondary/10 shrink-0">
-            <div className="flex items-center gap-2 mb-1 pr-6">
-              <FileArchive className="w-4 h-4 text-primary shrink-0" />
-              <DialogTitle className="text-sm font-bold text-foreground truncate">
-                {viewDetailArtifact?.name}
-              </DialogTitle>
-            </div>
-            {viewDetailArtifact?.expired && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground border-border mt-1 w-max">
-                {i18n.t('已过期')}
-              </Badge>
-            )}
-          </DialogHeader>
-
-          <div className="p-4 overflow-y-auto overscroll-contain flex-1 text-sm bg-background [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <div className="space-y-3">
-              <div className="flex justify-between items-start gap-4">
-                <span className="text-muted-foreground shrink-0">{i18n.t('大小')}</span>
-                <span className="font-mono text-right">{formatBytes(viewDetailArtifact?.size_in_bytes || 0)}</span>
-              </div>
-              <div className="flex justify-between items-start gap-4">
-                <span className="text-muted-foreground shrink-0">{i18n.t('创建时间')}</span>
-                <span className="text-right">{formatRelativeTime(viewDetailArtifact?.created_at || '')}</span>
-              </div>
-              {viewDetailArtifact?.expires_at && (
-                <div className="flex justify-between items-start gap-4">
-                  <span className="text-muted-foreground shrink-0">{i18n.t('过期时间')}</span>
-                  <span className="text-right">{formatRelativeTime(viewDetailArtifact.expires_at)}</span>
-                </div>
-              )}
-              {viewDetailArtifact?.workflow_run && (
-                <>
-                  <div className="h-px bg-border/50 my-2" />
-                  <div className="flex justify-between items-start gap-4">
-                    <span className="text-muted-foreground shrink-0">{i18n.t('分支')}</span>
-                    <code className="font-mono text-xs bg-secondary px-1.5 py-0.5 rounded break-all text-right">{viewDetailArtifact.workflow_run.head_branch}</code>
-                  </div>
-                  <div className="flex justify-between items-start gap-4">
-                    <span className="text-muted-foreground shrink-0">{i18n.t('提交 SHA')}</span>
-                    <code className="font-mono text-xs bg-secondary px-1.5 py-0.5 rounded break-all text-right">{viewDetailArtifact.workflow_run.head_sha.substring(0, 7)}</code>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
-            <Button variant="outline" className="min-w-[80px] px-4 hover:bg-secondary  px-5" onClick={() => setViewDetailArtifact(null)}>
-              {i18n.t('关闭')}
             </Button>
           </DialogFooter>
         </DialogContent>
