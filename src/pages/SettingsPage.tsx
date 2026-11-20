@@ -383,16 +383,14 @@ export default function SettingsPage() {
   const [pickerExpanded, setPickerExpanded] = useState<Set<string>>(new Set());
   const [pickerWorkflows, setPickerWorkflows] = useState<Map<string, GitHubWorkflow[]>>(new Map());
   const [pickerWorkflowsLoading, setPickerWorkflowsLoading] = useState<Set<string>>(new Set());
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
-  const openRepoPicker = async () => {
-    setPickerQuery('');
-    setPickerExpanded(new Set());
-    setPickerSelected(new Set(boardCustomWorkflows.map((w) => `${w.repoFullName}#${w.workflowId}`)));
-    setPickerOpen(true);
+  const loadPickerRepos = async () => {
     setPickerLoading(true);
+    setPickerError(null);
     try {
-      // 复用统一请求层（与智能模式同源认证 / 重试 / 错误处理），避免裸 fetch 在 WebView 下认证或网络不一致导致列表空白
-      const res = await getUserRepos({ sort: 'pushed', per_page: 100, type: 'owner' }, { fresh: true });
+      // 复用统一请求层（与智能模式同源认证 / 重试 / 错误处理）；不带 fresh，命中 30s 缓存可秒开
+      const res = await getUserRepos({ sort: 'pushed', per_page: 100, type: 'owner' });
       const repoList = res.data || [];
       setPickerRepos(repoList);
 
@@ -401,16 +399,25 @@ export default function SettingsPage() {
         const toPreload = selectedRepoFullNames.filter(fn => repoList.some((r: any) => r.full_name === fn));
         toPreload.forEach(fn => {
           if (!pickerWorkflows.has(fn)) {
-
             loadRepoWorkflows(fn);
           }
         });
       }
     } catch (e: any) {
-      toast.error("加载仓库失败：" + e.message);
+      // 失败保留已有列表；无列表时在弹窗内展示错误与重试，不再纯白
+      setPickerError(e?.message || '加载仓库失败');
     } finally {
       setPickerLoading(false);
     }
+  };
+
+  const openRepoPicker = () => {
+    setPickerQuery('');
+    setPickerExpanded(new Set());
+    setPickerSelected(new Set(boardCustomWorkflows.map((w) => `${w.repoFullName}#${w.workflowId}`)));
+    setPickerOpen(true);
+    // 已有列表先保留展示并后台静默刷新；仅首次无列表时进入加载骨架态，避免二次打开先白屏
+    void loadPickerRepos();
   };
 
   const loadRepoWorkflows = async (repoFullName: string) => {
@@ -1556,7 +1563,10 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
       {user && <EditProfileDialog open={editOpen} onOpenChange={setEditOpen} />}
 
     <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border flex flex-col h-[35vh]">
+      <DialogContent
+        className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border flex flex-col h-[35vh] max-h-[35vh] overflow-hidden"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             {t('选择监控仓库')}
@@ -1569,11 +1579,20 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
           className="bg-secondary border-border text-foreground shrink-0"
         />
         <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-          {pickerLoading ? (
+          {pickerLoading && pickerRepos.length === 0 ? (
             <div className="space-y-2">
               {[1, 2, 3, 4, 5].map((i) => (
                 <Skeleton key={i} className="h-12 bg-muted rounded" />
               ))}
+            </div>
+          ) : pickerRepos.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
+              <p className="text-xs text-muted-foreground">{pickerError ? `${t('加载失败')}：${pickerError}` : t('暂无仓库')}</p>
+              {pickerError && (
+                <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => void loadPickerRepos()}>
+                  {t('重试')}
+                </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-1">
