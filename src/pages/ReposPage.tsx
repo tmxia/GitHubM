@@ -152,7 +152,7 @@ function RepoContextMenu({ repo, onDeleteRequest, onDeleteSuccess }: {
 
   const handleCopyUrl = () => {
     copyToClipboard(repo.clone_url || repo.html_url);
-    toast.success(i18n.t('仓库地址已复制'));
+    toast.success(i18n.t('已复制仓库地址'));
   };
 
   return (
@@ -293,7 +293,7 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
 
   const handleCopyUrl = () => {
     copyToClipboard(repo.clone_url || repo.html_url);
-    toast.success(i18n.t('仓库地址已复制'));
+    toast.success(i18n.t('已复制仓库地址'));
   };
 
   return (

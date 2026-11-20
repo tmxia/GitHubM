@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/collapsible';
 import { graphqlQuery } from '@/services/github-graphql';
 import { toast } from 'sonner';
+import i18n from '@/i18n';
 import { copyToClipboard } from '@/lib/utils';
 
 const TEMPLATES = [
@@ -263,7 +264,7 @@ export default function GraphQLPlaygroundPage() {
   const handleCopyResult = () => {
     if (!result) return;
     copyToClipboard(JSON.stringify(result, null, 2));
-    toast.success('已复制到剪贴板');
+    toast.success(i18n.t('已复制到剪贴板'));
   };
 
   const handleClearHistory = () => {

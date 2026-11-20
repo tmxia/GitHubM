@@ -912,13 +912,13 @@ export default function CodeBrowserPage() {
 
   const handleCopyPath = (path: string) => {
     copyToClipboard(path);
-    toast.success(i18n.t('路径已复制'));
+    toast.success(i18n.t('已复制路径'));
   };
 
   const handleCopyRawLink = (path: string) => {
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${currentBranch}/${path}`;
     copyToClipboard(rawUrl);
-    toast.success(i18n.t('Raw 链接已复制'));
+    toast.success(i18n.t('已复制 Raw 链接'));
   };
 
   const pathParts = filePath ? filePath.split('/') : [];
@@ -1300,7 +1300,7 @@ export default function CodeBrowserPage() {
                             {wordWrap === 'on' ? i18n.t('取消自动换行') : i18n.t('自动换行')}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator className="bg-white/10" />
-                          <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('代码已复制')); }}>
+                          <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('已复制代码')); }}>
                             <Copy className="w-4 h-4 mr-2" />{i18n.t('复制内容')}</DropdownMenuItem>
                           {currentFile?.download_url && (
                             <DropdownMenuItem className="focus:bg-white/10 focus:text-white" onSelect={async () => { try { await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? ''); } catch { toast.error(i18n.t('下载失败')); } }}>
@@ -1402,7 +1402,7 @@ export default function CodeBrowserPage() {
                         </div>
                         <DropdownMenuItem onSelect={() => setShowSearchPanel(true)}>
                           <Search className="w-3.5 h-3.5 mr-2" />{i18n.t('搜索 / 替换')}</DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('代码已复制')); }}>
+                        <DropdownMenuItem onSelect={() => { copyToClipboard(editContent); toast.success(i18n.t('已复制代码')); }}>
                           <Copy className="w-3.5 h-3.5 mr-2" />{i18n.t('复制内容')}</DropdownMenuItem>
                         {currentFile?.download_url && (
                           <DropdownMenuItem onSelect={async () => { try { await downloadCodeFile(currentFile.download_url!, currentFile.name, token ?? ''); } catch { toast.error(i18n.t('下载失败')); } }}>
@@ -1625,7 +1625,7 @@ export default function CodeBrowserPage() {
                 )}
                 <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 px-2"
                   title={i18n.t('复制路径')}
-                  onClick={() => { copyToClipboard(currentFile.path); toast.success(i18n.t('路径已复制')); }}>
+                  onClick={() => { copyToClipboard(currentFile.path); toast.success(i18n.t('已复制路径')); }}>
                   <ClipboardCopy className="w-3.5 h-3.5" /><span className="hidden md:inline">{i18n.t('复制路径')}</span>
                 </Button>
                 <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:bg-secondary gap-1 px-2"
@@ -1640,7 +1640,7 @@ export default function CodeBrowserPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem onClick={() => { const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${currentBranch}/${currentFile.path}`; copyToClipboard(rawUrl); toast.success(i18n.t('Raw 链接已复制')); }}>
+                    <DropdownMenuItem onClick={() => { const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${currentBranch}/${currentFile.path}`; copyToClipboard(rawUrl); toast.success(i18n.t('已复制 Raw 链接')); }}>
                       <Link className="w-3.5 h-3.5 mr-2" />{i18n.t('复制 Raw 链接')}</DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => openAction('rename', currentFile)}>
