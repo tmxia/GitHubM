@@ -1441,7 +1441,7 @@ export default function ActionsPage() {
           ) : activeWorkflows.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">{i18n.t('暂无工作流')}</div>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border max-h-[35vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] [-webkit-overflow-scrolling:touch]">
               {activeWorkflows.map((wf) => (
                 <ContextMenu key={wf.id}>
                   <ContextMenuTrigger asChild>
