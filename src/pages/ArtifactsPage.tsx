@@ -72,6 +72,13 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** 按产物文件名归类安装包 / 网页包，用于行内类型小标识；识别不出返回 null。 */
+function artifactKind(name: string): string | null {
+  if (/apk/i.test(name)) return 'APK';
+  if (/web|dist|pages|html|zipball/i.test(name)) return 'Web';
+  return null;
+}
+
 async function downloadWithAuth(asset: { url: string; browser_download_url: string; name: string }): Promise<void> {
   const token = getToken();
   if (!token) {
@@ -443,6 +450,16 @@ export default function ArtifactsPage() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [deleteTagTarget, setDeleteTagTarget] = useState<string | null>(null);
   const [bulkDeleteTagsOpen, setBulkDeleteTagsOpen] = useState(false);
+  const [collapsedRuns, setCollapsedRuns] = useState<Set<string>>(new Set());
+
+  const toggleRunCollapse = (runId: string) => {
+    setCollapsedRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  };
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newTag, setNewTag] = useState('');
@@ -743,7 +760,7 @@ export default function ArtifactsPage() {
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <Button variant="ghost" size="sm" className="h-8 border border-border text-muted-foreground hover:bg-secondary" onClick={toggleAllTags}>
                 <CheckSquare className="w-3.5 h-3.5 mr-1.5" />
-                {selectedTags.size === tags.length ? i18n.t('取消全选') : i18n.t('全选')}
+                {selectedTags.size === deletableTags.length ? i18n.t('取消全选') : i18n.t('全选')}
               </Button>
               {selectedTags.size > 0 && (
                 <>
@@ -758,11 +775,11 @@ export default function ArtifactsPage() {
               )}
             </div>
           )}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex flex-col gap-3">
             {loadingTags ? (
-              <div className="divide-y divide-border">
+              <div className="flex flex-col gap-3">
                 {[1,2,3].map(i => (
-                  <div key={i} className="px-4 py-3 flex gap-3 items-center">
+                  <div key={i} className="bg-card border border-border rounded-xl px-4 py-3 flex gap-3 items-center">
                     <Skeleton className="w-4 h-4 rounded bg-muted shrink-0" />
                     <div className="flex-1 space-y-2">
                       <Skeleton className="h-4 w-1/3 bg-muted" />
@@ -777,52 +794,63 @@ export default function ArtifactsPage() {
                 <p className="text-foreground font-medium">{i18n.t('暂无 Tag')}</p>
                 <p className="text-sm text-muted-foreground mt-1">{i18n.t('推送带 tag 的提交后此处会显示')}</p>
               </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {tags.map((tag) => {
-                  const linkedRelease = releases.find((r) => r.tag_name === tag.name);
-                  const checked = selectedTags.has(tag.name);
-                  return (
-                    <div key={tag.name} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors">
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={() => toggleTagSelect(tag.name)}
-                        disabled={!!linkedRelease}
-                        className="shrink-0"
-                        title={linkedRelease ? i18n.t('有 Release 的 Tag 不支持批量删除，请先在 Releases 中删除对应 Release') : undefined}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-foreground font-mono break-all">{tag.name}</span>
-                          {linkedRelease ? (
-                            <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0">{i18n.t('有 Release')}</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-xs border-border text-muted-foreground shrink-0">{i18n.t('无 Release')}</Badge>
-                          )}
-                          {linkedRelease?.prerelease && (
-                            <Badge className="bg-warning/10 text-warning border-warning/30 text-xs shrink-0">{i18n.t('预发布')}</Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
-                          <code className="font-mono">{tag.commit.sha.substring(0, 7)}</code>
-                          {linkedRelease && (
-                            <>
-                              <span>·</span>
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatRelativeTime(linkedRelease.published_at || linkedRelease.created_at)}</span>
-                            </>
-                          )}
-                        </div>
+            ) : (() => {
+              const sortedTags = [...tags].sort((a, b) => {
+                const ra = releases.find((r) => r.tag_name === a.name);
+                const rb = releases.find((r) => r.tag_name === b.name);
+                if (!!ra !== !!rb) return ra ? -1 : 1;
+                if (ra && rb) {
+                  return new Date(rb.published_at || rb.created_at).getTime()
+                    - new Date(ra.published_at || ra.created_at).getTime();
+                }
+                return a.name.localeCompare(b.name);
+              });
+              return sortedTags.map((tag) => {
+                const linkedRelease = releases.find((r) => r.tag_name === tag.name);
+                const checked = selectedTags.has(tag.name);
+                return (
+                  <div key={tag.name} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:bg-secondary/30 transition-colors">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={() => toggleTagSelect(tag.name)}
+                      disabled={!!linkedRelease}
+                      className="shrink-0"
+                      title={linkedRelease ? i18n.t('有 Release 的 Tag 不支持批量删除，请先在 Releases 中删除对应 Release') : undefined}
+                    />
+                    {linkedRelease
+                      ? <Tag className="w-4 h-4 text-primary shrink-0" />
+                      : <Tags className="w-4 h-4 text-muted-foreground shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground font-mono truncate" title={tag.name}>{tag.name}</span>
+                        {linkedRelease ? (
+                          <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0">{i18n.t('有 Release')}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs border-border text-muted-foreground shrink-0">{i18n.t('无 Release')}</Badge>
+                        )}
+                        {linkedRelease?.prerelease && (
+                          <Badge className="bg-warning/10 text-warning border-warning/30 text-xs shrink-0">{i18n.t('预发布')}</Badge>
+                        )}
                       </div>
-                      {canPush && (
-                        <Button variant="ghost" size="icon" className="w-7 h-7 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTagTarget(tag.name)} title={i18n.t('删除 Tag')}>
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                        <code className="font-mono">{tag.commit.sha.substring(0, 7)}</code>
+                        {linkedRelease && (
+                          <>
+                            <span>·</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatRelativeTime(linkedRelease.published_at || linkedRelease.created_at)}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    {canPush && (
+                      <Button variant="ghost" size="icon" className="w-7 h-7 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTagTarget(tag.name)} title={i18n.t('删除 Tag')}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
         </TabsContent>
 
@@ -832,79 +860,97 @@ export default function ArtifactsPage() {
               {(() => {
 
                 const grouped = artifacts.reduce((acc, art) => {
-                  const runId = art.workflow_run?.id || art.id;
+                  const runId = String(art.workflow_run?.id || art.id);
                   if (!acc[runId]) {
                     acc[runId] = {
+                      runId,
                       branch: art.workflow_run?.head_branch || '未知',
                       sha: art.workflow_run?.head_sha || '',
+                      event: art.workflow_run?.event || '',
                       created_at: art.created_at,
                       items: []
                     };
                   }
                   acc[runId].items.push(art);
                   return acc;
-                }, {} as Record<string, { branch: string; sha: string; created_at: string; items: GitHubArtifact[] }>);
+                }, {} as Record<string, { runId: string; branch: string; sha: string; event: string; created_at: string; items: GitHubArtifact[] }>);
 
                 const sortedRuns = Object.values(grouped).sort((a, b) =>
                   new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 );
 
-                return sortedRuns.map((run, idx) => (
-                  <div key={idx} className="bg-card border border-border rounded-xl overflow-hidden">
-
-                    <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                        <GitBranch className="w-4 h-4 text-muted-foreground" />
-                        {run.branch}
-                        {run.sha && (
-                          <code className="text-[10px] bg-secondary/50 border border-border px-1.5 py-0.5 rounded font-mono text-muted-foreground ml-1">
-                            {run.sha.substring(0, 7)}
-                          </code>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Clock className="w-3.5 h-3.5" />
-                        {formatRelativeTime(run.created_at)}
-                      </div>
-                    </div>
-
-                    <div className="divide-y divide-border">
-                      {run.items.map((art) => (
-                        <div key={art.id} className="flex items-center gap-3 px-4 py-3 group hover:bg-secondary/30 transition-colors">
-                          <FileArchive className="w-4 h-4 text-muted-foreground shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-mono text-foreground">{art.name}</span>
-                              {art.expired && <Badge variant="outline" className="text-[10px] h-4 text-muted-foreground border-border">{i18n.t('已过期')}</Badge>}
-                            </div>
-                            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
-                              <span>{formatBytes(art.size_in_bytes)}</span>
-                              {art.expires_at && !art.expired && (
-                                <span>{i18n.t('过期：')}{formatRelativeTime(art.expires_at)}</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex gap-1 shrink-0">
-                            {!art.expired && (
-                              <ArtifactDownloadButton art={art} owner={owner ?? ''} repo={repo ?? ''} />
-                            )}
-                            {canPush && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => setDeleteArtTarget(art.id)}
-                                title={i18n.t('删除')}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
+                return sortedRuns.map((run) => {
+                  const collapsed = collapsedRuns.has(run.runId);
+                  return (
+                    <div key={run.runId} className="bg-card border border-border rounded-xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleRunCollapse(run.runId)}
+                        className="w-full px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center justify-between gap-2 flex-wrap hover:bg-secondary/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground min-w-0">
+                          <GitBranch className="w-4 h-4 text-muted-foreground shrink-0" />
+                          <span className="truncate">{run.branch}</span>
+                          {run.sha && (
+                            <code className="text-[10px] bg-secondary/50 border border-border px-1.5 py-0.5 rounded font-mono text-muted-foreground shrink-0">
+                              {run.sha.substring(0, 7)}
+                            </code>
+                          )}
+                          {run.event && (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground border-border shrink-0">{run.event}</Badge>
+                          )}
                         </div>
-                      ))}
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                          <Clock className="w-3.5 h-3.5" />
+                          {formatRelativeTime(run.created_at)}
+                          <ChevronDown className={`w-4 h-4 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+                        </div>
+                      </button>
+
+                      {!collapsed && (
+                        <div className="divide-y divide-border">
+                          {run.items.map((art) => {
+                            const kind = artifactKind(art.name);
+                            return (
+                              <div key={art.id} className={`flex items-center gap-3 px-4 py-3 group hover:bg-secondary/30 transition-colors ${art.expired ? 'opacity-50' : ''}`}>
+                                <FileArchive className="w-4 h-4 text-muted-foreground shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-mono text-foreground truncate" title={art.name}>{art.name}</span>
+                                    {kind && <Badge variant="outline" className="text-[10px] text-muted-foreground border-border shrink-0">{kind}</Badge>}
+                                    {art.expired && <Badge variant="outline" className="text-[10px] h-4 text-muted-foreground border-border">{i18n.t('已过期')}</Badge>}
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
+                                    <span>{formatBytes(art.size_in_bytes)}</span>
+                                    {art.expires_at && !art.expired && (
+                                      <span>{i18n.t('过期：')}{formatRelativeTime(art.expires_at)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex gap-1 shrink-0">
+                                  {!art.expired && (
+                                    <ArtifactDownloadButton art={art} owner={owner ?? ''} repo={repo ?? ''} />
+                                  )}
+                                  {canPush && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                      onClick={() => setDeleteArtTarget(art.id)}
+                                      title={i18n.t('删除')}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ));
+                  );
+                });
               })()}
             </div>
           ) : (
