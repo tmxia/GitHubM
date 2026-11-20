@@ -41,12 +41,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import {
   getRepo,
   getReadme,
   getFileContent,
@@ -409,7 +403,6 @@ export default function RepoDetailPage() {
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
-    <TooltipProvider>
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -487,94 +480,62 @@ export default function RepoDetailPage() {
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0 justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  asChild
-                  variant="ghost"
-                  size="icon"
-                  className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                >
-                  <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('在 GitHub 中查看')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                  onClick={(e) => { e.currentTarget.blur(); void handleCopy(repo.html_url, 'link', '复制链接失败'); }}
-                >
-                  {copiedKey === 'link'
-                    ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    : <Copy className="w-4 h-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('复制仓库地址')}</TooltipContent>
-            </Tooltip>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+            >
+              <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+              onClick={(e) => { e.currentTarget.blur(); void handleCopy(repo.html_url, 'link', '复制链接失败'); }}
+            >
+              {copiedKey === 'link'
+                ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                : <Copy className="w-4 h-4" />}
+            </Button>
 
             {canAdmin && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                    onClick={() => navigate(`/repos/${owner}/${repoName}/deploy-keys`)}
-                  >
-                    <Key className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('部署密钥')}</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                onClick={() => navigate(`/repos/${owner}/${repoName}/deploy-keys`)}
+              >
+                <Key className="w-4 h-4" />
+              </Button>
             )}
 
             {canAdmin && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                    onClick={() => navigate(`/repos/${owner}/${repoName}/secrets-variables`)}
-                  >
-                    <Shield className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('机密和变量')}</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                onClick={() => navigate(`/repos/${owner}/${repoName}/secrets-variables`)}
+              >
+                <Shield className="w-4 h-4" />
+              </Button>
             )}
             {canAdmin && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-8 h-8 text-muted-foreground hover:bg-secondary"
-                    onClick={() => navigate(`/repos/${owner}/${repoName}/actions-settings`)}
-                  >
-                    <Zap className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('Actions 设置')}</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-8 h-8 text-muted-foreground hover:bg-secondary"
+                onClick={() => navigate(`/repos/${owner}/${repoName}/actions-settings`)}
+              >
+                <Zap className="w-4 h-4" />
+              </Button>
             )}
             {canAdmin && (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:bg-secondary" onClick={() => navigate(`/repos/${owner}/${repoName}/settings`)}>
-                      <Settings className="w-4 h-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="bg-popover border-border text-foreground text-xs">{i18n.t('编辑仓库设置')}</TooltipContent>
-                </Tooltip>
-              </>
+              <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:bg-secondary" onClick={() => navigate(`/repos/${owner}/${repoName}/settings`)}>
+                <Settings className="w-4 h-4" />
+              </Button>
             )}
           </div>
         </div>
@@ -1116,7 +1077,6 @@ export default function RepoDetailPage() {
       </AlertDialog>
 
     </div>
-    </TooltipProvider>
     </PullToRefresh>
 
   );
