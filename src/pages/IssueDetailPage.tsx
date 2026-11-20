@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { buildCommentQuote } from '@/lib/quote';
+import { buildCommentQuote, buildIssueQuote } from '@/lib/quote';
 import {
   AlertCircle,
   CheckCircle2,
-  MessageSquare,
   Send,
   ChevronRight,
   Edit2,
@@ -103,6 +102,8 @@ export default function IssueDetailPage() {
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState('');
+  /** 待发送的引用块：与正文分开存，这样才能单独移除而不必手动删 Markdown */
+  const [pendingQuote, setPendingQuote] = useState<{ block: string; label: string } | null>(null);
   const [hiddenComments, setHiddenComments] = useState<Set<number>>(new Set());
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -142,14 +143,24 @@ export default function IssueDetailPage() {
     load();
   }, [owner, repo, number]);
 
+  /** 正文 + 引用块拼成最终提交内容；引用块永远排在正文之后，像 GitHub 的回复引用 */
+  const composeCommentBody = (): string => {
+    const text = newComment.trim();
+    if (!pendingQuote) return text;
+    return text ? `${text}\n\n${pendingQuote.block}` : pendingQuote.block.trim();
+  };
+
   const handleComment = async () => {
-    if (!owner || !repo || !number || !newComment.trim()) return;
+    if (!owner || !repo || !number) return;
+    const payload = composeCommentBody();
+    if (!payload.trim()) return;
     setSubmitting(true);
     try {
-      const comment = await createIssueComment(owner, repo, Number(number), newComment.trim());
+      const comment = await createIssueComment(owner, repo, Number(number), payload);
       setComments((prev) => [...prev, comment]);
       setIssue(prev => prev ? { ...prev, comments: prev.comments + 1 } : prev);
       setNewComment('');
+      setPendingQuote(null);
       invalidateIssueList();
       toast.success(i18n.t('评论已发布'));
     } catch (err) {
@@ -163,7 +174,7 @@ export default function IssueDetailPage() {
   const handleCommentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (!submitting && newComment.trim()) handleComment();
+      if (!submitting && composeCommentBody().trim()) handleComment();
     }
   };
 
@@ -307,13 +318,95 @@ export default function IssueDetailPage() {
   };
 
   const handleQuoteReply = (comment: GitHubComment) => {
-    const block = buildQuote(comment);
-    setNewComment((prev) => (prev.trim() ? `${prev.trimEnd()}
-
-${block}` : block));
+    setPendingQuote({
+      block: buildQuote(comment),
+      label: `@${comment.user.login} 的评论`,
+    });
     // 评论框是悬浮固定在底部的，不需要滚动；等 React 提交后立即聚焦（双保险）
     requestAnimationFrame(focusComposer);
     window.setTimeout(focusComposer, 60);
+  };
+
+  /** 引用 Issue 正文本身 —— 最常见的场景（逐条回应需求原文） */
+  const handleQuoteIssueBody = () => {
+    if (!issue) return;
+    setPendingQuote({
+      block: buildIssueQuote(issue, quoteIssueUrl),
+      label: `@${issue.user.login} 的议题描述`,
+    });
+    requestAnimationFrame(focusComposer);
+    window.setTimeout(focusComposer, 60);
+  };
+
+  const clearPendingQuote = () => {
+    setPendingQuote(null);
+    requestAnimationFrame(focusComposer);
+  };
+
+  /**
+   * 滚动到某条评论并短暂高亮。
+   *
+   * 评论是分页加载的，被引用的评论很可能还没拉下来。
+   * 这里不做「找不到就报错」，而是继续向后翻页直到命中或没有更多，
+   * 这样点「——来自 @xxx」时体验跟 GitHub 一致。
+   */
+  const jumpToComment = async (commentId: number) => {
+    const targetId = `issuecomment-${commentId}`;
+    const highlight = () => {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.classList.add('ring-2', 'ring-primary/60');
+      window.setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 1600);
+    };
+
+    if (document.getElementById(targetId)) {
+      highlight();
+      return;
+    }
+    if (!owner || !repo || !number) return;
+
+    // 已经在加载就不再并发翻页，直接等它结束（loading 结束会自动重试一次定位）
+    if (loadingMoreComments) return;
+
+    let nextPage = commentPage;
+    let more = hasMoreComments;
+
+    setLoadingMoreComments(true);
+    try {
+      // 上限兜底：避免超大 issue 卡死，也防 hasNextPage 判断异常时死循环
+      for (let i = 0; i < 20 && more; i += 1) {
+        const result = await getIssueCommentsPage(owner, repo, Number(number), nextPage + 1, 50);
+        nextPage += 1;
+        more = result.hasNextPage;
+        setCommentPage(nextPage);
+        setHasMoreComments(result.hasNextPage);
+
+        // 用函数式更新并把结果并进 comments，同时判断是否命中目标
+        const hit = result.data.some((c) => c.id === commentId);
+        setComments((prev) => {
+          const seen = new Set(prev.map((c) => c.id));
+          const merged = [...prev, ...result.data.filter((c) => !seen.has(c.id))];
+          return merged;
+        });
+
+        if (hit) break;
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : i18n.t('加载评论失败'));
+      return;
+    } finally {
+      setLoadingMoreComments(false);
+    }
+
+    // 等 React 把新评论渲染到 DOM 再滚动
+    requestAnimationFrame(() => {
+      if (!document.getElementById(targetId)) {
+        window.setTimeout(highlight, 120);
+        return;
+      }
+      highlight();
+    });
   };
 
   const handleQuoteToNewIssue = (comment: GitHubComment) => {
@@ -324,6 +417,31 @@ ${block}` : block));
         body: buildQuote(comment),
       },
     });
+  };
+
+  const handleQuoteToNewIssueBody = () => {
+    if (!owner || !repo || !issue) return;
+    navigate(`/repos/${owner}/${repo}/issues/new`, {
+      state: {
+        title: `引用 #${number}`,
+        body: buildIssueQuote(issue, quoteIssueUrl),
+      },
+    });
+  };
+
+  /**
+   * 判断锚点能否被本页处理。
+   *
+   * 这个函数会在 MarkdownRenderer 的 render 阶段被调用（每渲染一条带锚点的
+   * 评论就会调一次），所以它必须是纯函数：只做正则判定，绝不能触发跳转、
+   * toast 或请求，否则一屏出现 N 条引用就会弹 N 个提示。
+   */
+  const handleAnchor = (anchor: string): boolean => /^issuecomment-\d+$/.test(anchor);
+  /** 锚点真正被点击时才跳转（找不到评论会自动向后翻页加载）。 */
+  const handleAnchorClick = (anchor: string) => {
+    const matched = /^issuecomment-(\d+)$/.exec(anchor);
+    if (!matched) return;
+    void jumpToComment(Number(matched[1]));
   };
 
   const handleHide = async (comment: GitHubComment, reason: HideCommentReason) => {
@@ -470,11 +588,24 @@ ${block}` : block));
             <p className="text-muted-foreground text-sm italic">{i18n.t('无描述')}</p>
           )}
         </div>
+        {/* issue 正文操作栏：正文本身也要能引用，这是逐条回应需求原文的常用入口 */}
+        <div className="flex items-center gap-1 flex-wrap px-2 py-1.5 border-t border-border bg-secondary/20">
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={handleQuoteIssueBody}>
+            <Quote className="w-3.5 h-3.5 mr-1" />{i18n.t('引用回复')}
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={handleQuoteToNewIssueBody}>
+            <MessageSquarePlus className="w-3.5 h-3.5 mr-1" />{i18n.t('引用到新议题')}
+          </Button>
+        </div>
       </div>
 
       {/* 评论列表 */}
       {comments.map((comment) => (
-        <div key={comment.id} className="bg-card border border-border rounded-lg overflow-hidden">
+        <div
+          key={comment.id}
+          id={`issuecomment-${comment.id}`}
+          className="bg-card border border-border rounded-lg overflow-hidden scroll-mt-20 transition-shadow"
+        >
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-secondary/30">
             <UserLink login={comment.user.login} className="flex items-center gap-2">
               <Avatar className="w-6 h-6">
@@ -514,7 +645,7 @@ ${block}` : block));
             ) : hiddenComments.has(comment.id) ? (
               <p className="text-xs text-muted-foreground italic">{i18n.t('这条评论已被隐藏')}</p>
             ) : (
-              <MarkdownRenderer content={comment.body} repoContext={owner && repo ? { owner, repo } : undefined} />
+              <MarkdownRenderer content={comment.body} repoContext={owner && repo ? { owner, repo } : undefined} onAnchor={handleAnchor} onAnchorClick={handleAnchorClick} />
             )}
           </div>
           {editingCommentId !== comment.id && (
@@ -576,6 +707,24 @@ ${block}` : block));
             style={{ bottom: hasBridge ? 'env(safe-area-inset-bottom)' : 'calc(4rem + env(safe-area-inset-bottom))' }}
           >
             <div className="rounded-xl border border-border bg-card shadow-lg overflow-hidden max-w-4xl mx-auto">
+              {/* 引用预览条：引用块独立于正文存储，所以可以单独移除，不必手动删 Markdown */}
+              {pendingQuote && (
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-secondary/40">
+                  <Quote className="w-3.5 h-3.5 shrink-0 text-primary" />
+                  <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+                    {i18n.t('正在引用')} {pendingQuote.label}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={clearPendingQuote}
+                    aria-label={i18n.t('取消引用')}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
               <Textarea
                 ref={composerRef}
                 value={newComment}
@@ -599,7 +748,7 @@ ${block}` : block));
                   <Button
                     className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-3"
                     onClick={handleComment}
-                    disabled={submitting || !newComment.trim()}
+                    disabled={submitting || !composeCommentBody().trim()}
                     size="sm"
                   >
                     {submitting ? i18n.t('发布中...') : (

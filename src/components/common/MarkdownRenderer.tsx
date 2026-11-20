@@ -18,6 +18,10 @@ export interface RepoLinkContext {
 
 interface MarkdownRendererProps {
   onLinkClick?: (href: string) => Promise<boolean>;
+  /** 判断锚点能否被本页处理；必须是纯函数，不能在 render 阶段触发跳转/请求/toast */
+  onAnchor?: (anchor: string) => boolean;
+  /** 锚点真正被点击时回调，由宿主负责按需加载并定位 */
+  onAnchorClick?: (anchor: string) => void;
   content: string;
   className?: string;
 
@@ -154,7 +158,7 @@ export function resolveMarkdownImage(src: string | undefined, ctx?: RepoLinkCont
   return rawFileUrl(ctx, resolved);
 }
 
-export default function MarkdownRenderer({ content, className, repoContext, onLinkClick }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, className, repoContext, onLinkClick, onAnchor, onAnchorClick }: MarkdownRendererProps) {
   const navigate = useNavigate();
 
   return (
@@ -175,7 +179,54 @@ export default function MarkdownRenderer({ content, className, repoContext, onLi
           ),
 
           a: ({ href, children, node: _node, ...props }) => {
-            const target = resolveMarkdownHref(typeof href === 'string' ? href : undefined, repoContext);
+            const rawHref = typeof href === 'string' ? href : undefined;
+
+            // 页内锚点优先：`#issuecomment-123`，交给宿主处理，避免在 app 内跳出到浏览器。
+            // 这里只做「能不能处理」的纯判断，真正跳转放到 onClick，
+            // 否则 render 阶段触发副作用，一屏多条引用会一次性触发多次。
+            if (onAnchor && rawHref) {
+              const anchorHash = rawHref.startsWith('#') ? rawHref.slice(1) : '';
+              if (anchorHash && onAnchor(anchorHash)) {
+                return (
+                  <a
+                    href={`#${anchorHash}`}
+                    {...props}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                      e.preventDefault();
+                      onAnchorClick?.(anchorHash);
+                    }}
+                  >
+                    {children}
+                  </a>
+                );
+              }
+            }
+
+            // 同仓库 issue/PR 链接带的 hash（引用块出处链接就是这种形态），也交宿主定位。
+            if (onAnchor && rawHref && /#issue(comment)?-/.test(rawHref)) {
+              const sameRepo =
+                !!repoContext &&
+                new RegExp(`github\\.com/${repoContext.owner}/${repoContext.repo}/`, 'i').test(rawHref);
+              const hash = rawHref.slice(rawHref.indexOf('#') + 1);
+              if (sameRepo && onAnchor(hash)) {
+                return (
+                  <a
+                    href={`#${hash}`}
+                    {...props}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                      e.preventDefault();
+                      onAnchorClick?.(hash);
+                    }}
+                  >
+                    {children}
+                  </a>
+                );
+              }
+            }
+
+            const target = resolveMarkdownHref(rawHref, repoContext);
 
             if (target?.kind === 'internal') {
 
