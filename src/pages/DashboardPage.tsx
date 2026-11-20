@@ -393,12 +393,12 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  let lastRequestId = 0;
+  const lastRequestIdRef = useRef(0);
   const loadCompileStatus = useCallback(async (
     items: Array<{ repo: GitHubRepo; workflow?: import('@/types/types').GitHubWorkflow }>,
     opts: { silent?: boolean } = {},
   ) => {
-    const currentReqId = ++lastRequestId;
+    const currentReqId = ++lastRequestIdRef.current;
 
     const isSilent = opts.silent || compileStatus.length > 0;
 
@@ -449,7 +449,11 @@ export default function DashboardPage() {
         },
       );
 
+      // 过期批次（已有更新的请求发起）直接丢弃，避免并发批次交叉覆盖造成逐条增换
+      if (currentReqId !== lastRequestIdRef.current) return;
       const filtered = collected.filter((x): x is Item => !!x);
+      // 静默刷新时本批结果为空（多为请求失败或暂无记录）则保留旧卡片，不用空列表覆盖
+      if (isSilent && filtered.length === 0) return;
       setCompileStatus(filtered);
       try { pageCache.set(`dashboard:${user?.login}:compile`, filtered); } catch { /* ignore */ }
     } catch {
@@ -620,7 +624,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     if (repos.length === 0) return;
-    void loadCompileStatus(monitoredItems);
+    void loadCompileStatus(monitoredItems, { silent: true });
   }, [user, repos.length, monitoredItems, loadCompileStatus]);
 
   useEffect(() => {
