@@ -117,6 +117,7 @@ export default function RepoDetailPage() {
   const [starred, setStarred] = useState(false);
   const [openIssueCount, setOpenIssueCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [metaLoading, setMetaLoading] = useState(false);
   const [starring, setStarring] = useState(false);
   const [forking, setForking] = useState(false);
   const [forkConfirmOpen, setForkConfirmOpen] = useState(false);
@@ -134,47 +135,80 @@ export default function RepoDetailPage() {
     if (!owner || !repoName) return;
 
     let cancelled = false;
+    const cacheKey = `repodetail:v2:${owner}/${repoName}`;
 
-    const load = async () => {
+    // 1) 缓存预热：命中则直接回填秒开，不重复发请求（下拉刷新可强制拉取最新）
+    const cached = pageCache.get<{
+      repo: GitHubRepo;
+      languages: Record<string, number>;
+      readme: string;
+      commits: GitHubCommit[];
+      starred: boolean;
+    }>(cacheKey);
+    if (cached?.repo) {
+      setRepo(cached.repo);
+      setLanguages(cached.languages ?? {});
+      setReadme(typeof cached.readme === 'string' ? cached.readme : '');
+      setCommits(Array.isArray(cached.commits) ? cached.commits : []);
+      setStarred(!!cached.starred);
+      setOpenIssueCount(null);
+      setLoading(false);
+      setMetaLoading(false);
+      return;
+    }
 
-      setLoading(true);
-      setRepo(null);
-      setReadme('');
+    setLoading(true);
+    setMetaLoading(true);
+    setRepo(null);
+    setReadme('');
+    setCommits([]);
+    setLanguages({});
+    setStarred(false);
+    setOpenIssueCount(null);
 
+    // 2) 核心信息先行：getRepo 回来即渲染页面骨架，不被 README / 提交 / 语言等次要数据拖住
+    (async () => {
+      let repoData: GitHubRepo;
       try {
-
-        const [repoData, langData, readmeData, commitsResult, starredVal, issueCountResult] = await Promise.all([
-          getRepo(owner, repoName, { fresh: true }),
-          getRepoLanguages(owner, repoName, { fresh: true }),
-          getReadme(owner, repoName, undefined, { fresh: true }).catch(() => null),
-          getCommits(owner, repoName, { per_page: 10 }, { fresh: true }).catch(() => ({ data: [], hasNextPage: false })),
-          isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
-          searchIssues(`repo:${owner}/${repoName} is:issue state:open`, { per_page: 1 }).catch(() => null),
-        ]);
-
-        if (cancelled) return;
-
-        setRepo(repoData);
-        setLanguages(langData);
-        setStarred(starredVal);
-        setOpenIssueCount(issueCountResult ? issueCountResult.total_count : null);
-
-        const decoded = readmeData?.content ? decodeBase64Content(readmeData.content) : '';
-        setReadme(decoded);
-        setCommits(commitsResult.data);
+        repoData = await getRepo(owner, repoName, { fresh: true });
       } catch (err) {
-        if (!cancelled) {
-          toast.error(i18n.t('加载仓库信息失败'));
-          console.error(err);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (cancelled) return;
+        toast.error(i18n.t('加载仓库信息失败'));
+        console.error(err);
+        setLoading(false);
+        setMetaLoading(false);
+        return;
       }
-    };
+      if (cancelled) return;
+      setRepo(repoData);
+      setLoading(false);
 
-    load();
+      // 3) 次要数据并行拉取，各自失败静默降级，互不牵连、不阻塞首屏
+      const [langRes, readmeRes, commitsRes, starredVal, issueRes] = await Promise.all([
+        getRepoLanguages(owner, repoName, { fresh: true }).catch(() => null),
+        getReadme(owner, repoName, undefined, { fresh: true }).catch(() => null),
+        getCommits(owner, repoName, { per_page: 10 }, { fresh: true })
+          .catch(() => ({ data: [] as GitHubCommit[], hasNextPage: false })),
+        isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
+        searchIssues(`repo:${owner}/${repoName} is:issue state:open`, { per_page: 1 }).catch(() => null),
+      ]);
+      if (cancelled) return;
+
+      const languages = langRes ?? {};
+      const readme = readmeRes?.content ? decodeBase64Content(readmeRes.content) : '';
+      const commits = commitsRes?.data ?? [];
+      const starred = starredVal;
+      const openIssueCount = issueRes ? issueRes.total_count : null;
+
+      setLanguages(languages);
+      setReadme(readme);
+      setCommits(commits);
+      setStarred(starred);
+      setOpenIssueCount(openIssueCount);
+      setMetaLoading(false);
+
+      pageCache.set(cacheKey, { repo: repoData, languages, readme, commits, starred });
+    })();
 
     return () => {
       cancelled = true;
@@ -323,23 +357,27 @@ export default function RepoDetailPage() {
 
   const handleRefresh = async () => {
     if (!owner || !repoName) return;
+    const cacheKey = `repodetail:v2:${owner}/${repoName}`;
     try {
       const [repoData, langData, readmeData, commitsResult, starredVal, issueCountResult] = await Promise.all([
         getRepo(owner, repoName, { fresh: true }),
-        getRepoLanguages(owner, repoName, { fresh: true }),
+        getRepoLanguages(owner, repoName, { fresh: true }).catch(() => ({})),
         getReadme(owner, repoName, undefined, { fresh: true }).catch(() => null),
         getCommits(owner, repoName, { per_page: 10 }, { fresh: true }).catch(() => ({ data: [], hasNextPage: false })),
         isOwner ? Promise.resolve(false) : checkStarred(owner, repoName).catch(() => false),
         searchIssues(`repo:${owner}/${repoName} is:issue state:open`, { per_page: 1 }).catch(() => null),
       ]);
 
+      const languages = langData ?? {};
+      const decoded = readmeData?.content ? decodeBase64Content(readmeData.content) : '';
+      const commits = commitsResult.data;
       setRepo(repoData);
-      setLanguages(langData);
+      setLanguages(languages);
       setStarred(starredVal);
       setOpenIssueCount(issueCountResult ? issueCountResult.total_count : null);
-      const decoded = readmeData?.content ? decodeBase64Content(readmeData.content) : '';
       setReadme(decoded);
-      setCommits(commitsResult.data);
+      setCommits(commits);
+      pageCache.set(cacheKey, { repo: repoData, languages, readme: decoded, commits, starred: starredVal });
       // 刷新成功，静默更新不弹提示
     } catch (err) {
       toast.error(i18n.t('刷新失败'));
@@ -716,6 +754,13 @@ export default function RepoDetailPage() {
                     return false;
                   }}
                 />
+              ) : metaLoading ? (
+                <div className="space-y-3 py-2">
+                  <Skeleton className="h-4 w-3/4 bg-muted" />
+                  <Skeleton className="h-4 w-full bg-muted" />
+                  <Skeleton className="h-4 w-5/6 bg-muted" />
+                  <Skeleton className="h-24 w-full bg-muted" />
+                </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <Code className="w-10 h-10 mx-auto mb-3" />
@@ -730,7 +775,21 @@ export default function RepoDetailPage() {
           <Card className="bg-card border-border">
             <CardContent className="p-0">
               {commits.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">{i18n.t('暂无提交记录')}</div>
+                metaLoading ? (
+                  <div className="divide-y divide-border p-4">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="flex items-center gap-3 py-3">
+                        <Skeleton className="w-7 h-7 rounded-full bg-muted" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-2/3 bg-muted" />
+                          <Skeleton className="h-3 w-1/3 bg-muted" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">{i18n.t('暂无提交记录')}</div>
+                )
               ) : (
                 <div className="divide-y divide-border">
                   {commits.map((commit) => (
