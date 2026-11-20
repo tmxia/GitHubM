@@ -1,6 +1,7 @@
 import { withLoading } from '@/lib/loading';
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { lsGet, lsSet, lsSetJSON } from "@/lib/storage";
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Ban,
@@ -131,7 +132,7 @@ function lastTriggerKey(owner: string, repo: string, workflowId?: number) {
 
 function loadLastTrigger(owner: string, repo: string, workflowId?: number): LastTrigger | null {
   try {
-    const raw = localStorage.getItem(lastTriggerKey(owner, repo, workflowId));
+    const raw = lsGet(lastTriggerKey(owner, repo, workflowId));
     return raw ? (JSON.parse(raw) as LastTrigger) : null;
   } catch {
     return null;
@@ -139,9 +140,7 @@ function loadLastTrigger(owner: string, repo: string, workflowId?: number): Last
 }
 
 function saveLastTrigger(owner: string, repo: string, data: LastTrigger) {
-  try {
-    localStorage.setItem(lastTriggerKey(owner, repo, data.workflowId), JSON.stringify(data));
-  } catch {}
+  lsSetJSON(lastTriggerKey(owner, repo, data.workflowId), data);
 }
 
 function fmtDuration(startIso: string | null | undefined, endIso: string | null | undefined): string {
@@ -510,10 +509,8 @@ function RunDetail({ owner, repo, run, workflowPath, onClose, onDeleted, onRunUp
   const [cancelling, setCancelling] = useState(false);
   const [rerunning, setRerunning] = useState(false);
   const [rerunMode, setRerunMode] = useState<'rerun' | 'dispatch'>(() => {
-    try {
-      const v = localStorage.getItem('rerun_mode');
-      return v === 'dispatch' ? 'dispatch' : 'rerun';
-    } catch { return 'rerun'; }
+    const v = lsGet('rerun_mode');
+    return v === 'dispatch' ? 'dispatch' : 'rerun';
   });
   const [singleDeleting, setSingleDeleting] = useState(false);
   const [singleDeleteOpen, setSingleDeleteOpen] = useState(false);
@@ -702,7 +699,7 @@ function RunDetail({ owner, repo, run, workflowPath, onClose, onDeleted, onRunUp
 
   const handleRerunModeChange = (mode: 'rerun' | 'dispatch') => {
     setRerunMode(mode);
-    try { localStorage.setItem('rerun_mode', mode); } catch { /* ignore */ }
+    lsSet('rerun_mode', mode);
   };
 
   const handleDeleteSingle = async () => {

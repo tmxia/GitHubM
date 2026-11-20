@@ -2,6 +2,7 @@ import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import PullToRefresh from '@/components/common/PullToRefresh';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { ssGetJSON, ssSetJSON } from '@/lib/storage';
 import { useParams, useNavigate } from 'react-router-dom';
 import sealedbox from 'tweetnacl-sealedbox-js';
 import {
@@ -64,12 +65,12 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
   const [deleting, setDeleting] = useState(false);
 
   const deletedNamesRef = useRef<Set<string>>(
-    new Set(JSON.parse(sessionStorage.getItem(`del_secrets_${owner}_${repo}_${scope}`) || '[]'))
+    new Set(ssGetJSON<string[]>(`del_secrets_${owner}_${repo}_${scope}`, []))
   );
 
   const addDeletedName = (name: string) => {
     deletedNamesRef.current.add(name);
-    sessionStorage.setItem(`del_secrets_${owner}_${repo}_${scope}`, JSON.stringify(Array.from(deletedNamesRef.current)));
+    ssSetJSON(`del_secrets_${owner}_${repo}_${scope}`, Array.from(deletedNamesRef.current));
   };
 
   const load = useCallback(async () => {

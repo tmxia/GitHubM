@@ -6,6 +6,7 @@ import {
   useRef,
   lazy,
   Suspense } from 'react';
+import { lsGet, lsSet, lsGetJSON, lsSetJSON } from '@/lib/storage';
 import {
   Settings,
   Key,
@@ -274,13 +275,11 @@ function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps) {
 const COLLAPSE_KEY = 'settings_collapse';
 
 function loadCollapsed(): Record<string, boolean> {
-  try {
-    return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
-  } catch { return {}; }
+  return lsGetJSON<Record<string, boolean>>(COLLAPSE_KEY, {});
 }
 
 function saveCollapsed(data: Record<string, boolean>) {
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(data)); } catch {}
+  lsSetJSON(COLLAPSE_KEY, data);
 }
 
 function highlightMatch(text: string, query: string) {
@@ -525,15 +524,15 @@ export default function SettingsPage() {
 
   const [showToken, setShowToken] = useState(false);
   const [notifyCompile, setNotifyCompile] = useState(() => {
-    try { return localStorage.getItem('notify_compile_done') !== 'false'; } catch { return true; }
+    return lsGet('notify_compile_done') !== 'false';
   });
   const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
-  
+
   const [toastEnabled, setToastEnabled] = useState(() => {
-    try { return localStorage.getItem('app_toast_enabled') !== 'false'; } catch { return true; }
+    return lsGet('app_toast_enabled') !== 'false';
   });
 const [notifyDownload, setNotifyDownload] = useState(() => {
-    try { return localStorage.getItem('notify_artifact_download') !== 'false'; } catch { return true; }
+    return lsGet('notify_artifact_download') !== 'false';
   });
   const [newToken, setNewToken] = useState('');
   const [showNewToken, setShowNewToken] = useState(false);
@@ -605,7 +604,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
 
   useEffect(() => {
     const ver = import.meta.env.VITE_APP_VERSION;
-    if (ver) { try { localStorage.setItem('app_version', ver); } catch {} }
+    if (ver) { lsSet('app_version', ver); }
   }, []);
 
   useEffect(() => {
@@ -661,7 +660,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
-    localStorage.setItem('app_language', lng);
+    lsSet('app_language', lng);
   };
 
   return (
@@ -920,7 +919,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
                   checked={notifyCompile}
                   onCheckedChange={(v) => {
                     setNotifyCompile(v);
-                    try { localStorage.setItem('notify_compile_done', v ? 'true' : 'false'); } catch {}
+                    lsSet('notify_compile_done', v ? 'true' : 'false');
 
                     if (v && notifPermission === false) {
                       const bridge = (window as unknown as {
@@ -970,7 +969,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
               onClick={() => {
                 const next = !notifyDownload;
                 setNotifyDownload(next);
-                try { localStorage.setItem('notify_artifact_download', next ? 'true' : 'false'); } catch {}
+                lsSet('notify_artifact_download', next ? 'true' : 'false');
               }}
               className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border border-border hover:bg-secondary/50 transition-colors text-left"
             >
@@ -984,7 +983,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
                 checked={notifyDownload}
                 onCheckedChange={(v) => {
                   setNotifyDownload(v);
-                  try { localStorage.setItem('notify_artifact_download', v ? 'true' : 'false'); } catch {}
+                  lsSet('notify_artifact_download', v ? 'true' : 'false');
                   try {
                     const bridge = (window as unknown as {
                       AndroidBridge?: { setDownloadNotify?: (v: boolean) => void };
@@ -1000,7 +999,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
               onClick={() => {
                 const next = !toastEnabled;
                 setToastEnabled(next);
-                try { localStorage.setItem('app_toast_enabled', next ? 'true' : 'false'); } catch {}
+                lsSet('app_toast_enabled', next ? 'true' : 'false');
               }}
               className="w-full flex items-center justify-between gap-3 p-3 mt-3 rounded-lg border border-border hover:bg-secondary/50 transition-colors text-left"
             >
@@ -1014,7 +1013,7 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
                 checked={toastEnabled}
                 onCheckedChange={(v) => {
                   setToastEnabled(v);
-                  try { localStorage.setItem('app_toast_enabled', v ? 'true' : 'false'); } catch {}
+                  lsSet('app_toast_enabled', v ? 'true' : 'false');
                 }}
                 onClick={(e) => e.stopPropagation()}
               />

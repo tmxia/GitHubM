@@ -1,6 +1,7 @@
 
 import {
    useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { lsGet, lsSet } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTaskStore } from '@/stores/taskStore';
@@ -349,15 +350,13 @@ function RepoCardDropdown({ repo, onDeleteRequest, onDeleteSuccess }: { repo: Gi
 const REPOS_SORT_PREF = 'repos_sort_pref';
 
 function loadReposSortPref(): RepoSortField {
-  try {
-    const v = localStorage.getItem(REPOS_SORT_PREF);
-    if (v === 'pushed' || v === 'created' || v === 'updated' || v === 'full_name') return v as RepoSortField;
-  } catch {}
+  const v = lsGet(REPOS_SORT_PREF);
+  if (v === 'pushed' || v === 'created' || v === 'updated' || v === 'full_name') return v as RepoSortField;
   return 'pushed' as RepoSortField;
 }
 
 function saveReposSortPref(v: RepoSortField): void {
-  try { localStorage.setItem(REPOS_SORT_PREF, v); } catch {}
+  lsSet(REPOS_SORT_PREF, v);
 }
 
 async function ensureFreshWorkflow(

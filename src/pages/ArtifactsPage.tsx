@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useCallback, memo } from 'react';
+import { lsGetJSON, lsSetJSON } from '@/lib/storage';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
@@ -94,41 +95,25 @@ async function downloadWithAuth(asset: { url: string; browser_download_url: stri
 const ASSET_MAX_SEEN_KEY = 'asset_max_seen_v1';
 
 function readMaxSeenMap(): Record<string, number> {
-  try {
-    return JSON.parse(localStorage.getItem(ASSET_MAX_SEEN_KEY) || '{}');
-  } catch {
-    return {};
-  }
+  return lsGetJSON<Record<string, number>>(ASSET_MAX_SEEN_KEY, {});
 }
 
 function writeMaxSeen(assetId: number, value: number) {
-  try {
-    const map = readMaxSeenMap();
-    map[String(assetId)] = value;
-    localStorage.setItem(ASSET_MAX_SEEN_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
+  const map = readMaxSeenMap();
+  map[String(assetId)] = value;
+  lsSetJSON(ASSET_MAX_SEEN_KEY, map);
 }
 
 const RELEASE_OPEN_KEY = 'release_open_v1';
 
 function readReleaseOpenMap(): Record<string, boolean> {
-  try {
-    return JSON.parse(localStorage.getItem(RELEASE_OPEN_KEY) || '{}');
-  } catch {
-    return {};
-  }
+  return lsGetJSON<Record<string, boolean>>(RELEASE_OPEN_KEY, {});
 }
 
 function writeReleaseOpen(releaseId: number, open: boolean) {
-  try {
-    const map = readReleaseOpenMap();
-    map[String(releaseId)] = open;
-    localStorage.setItem(RELEASE_OPEN_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
+  const map = readReleaseOpenMap();
+  map[String(releaseId)] = open;
+  lsSetJSON(RELEASE_OPEN_KEY, map);
 }
 
 const AssetItem = memo(function AssetItem({

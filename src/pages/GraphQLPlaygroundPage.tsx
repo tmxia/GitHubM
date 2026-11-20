@@ -1,5 +1,6 @@
 
 import { useState, useCallback } from 'react';
+import { lsGet, lsSetJSON } from '@/lib/storage';
 import {
   Play,
   Clock,
@@ -172,7 +173,7 @@ interface HistoryItem {
 
 function loadHistory(): HistoryItem[] {
   try {
-    const raw = localStorage.getItem(HISTORY_KEY);
+    const raw = lsGet(HISTORY_KEY);
     return raw ? (JSON.parse(raw) as HistoryItem[]) : [];
   } catch {
     return [];
@@ -180,10 +181,7 @@ function loadHistory(): HistoryItem[] {
 }
 
 function saveHistory(items: HistoryItem[]) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 20)));
-  } catch {
-  }
+  lsSetJSON(HISTORY_KEY, items.slice(0, 20));
 }
 
 export default function GraphQLPlaygroundPage() {

@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
+import { lsGet, lsSet } from '@/lib/storage';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   GitPullRequest,
@@ -34,15 +35,13 @@ import PullToRefresh from '@/components/common/PullToRefresh';
 const PULLS_SORT_PREF = 'pulls_sort_pref';
 
 function loadPullsSortPref(): 'created' | 'updated' | 'popularity' | 'long-running' {
-  try {
-    const v = localStorage.getItem(PULLS_SORT_PREF);
-    if (v === 'created' || v === 'updated' || v === 'popularity' || v === 'long-running') return v as 'created' | 'updated' | 'popularity' | 'long-running';
-  } catch {}
+  const v = lsGet(PULLS_SORT_PREF);
+  if (v === 'created' || v === 'updated' || v === 'popularity' || v === 'long-running') return v as 'created' | 'updated' | 'popularity' | 'long-running';
   return 'created' as 'created' | 'updated' | 'popularity' | 'long-running';
 }
 
 function savePullsSortPref(v: 'created' | 'updated' | 'popularity' | 'long-running'): void {
-  try { localStorage.setItem(PULLS_SORT_PREF, v); } catch {}
+  lsSet(PULLS_SORT_PREF, v);
 }
 
 export default function PullsPage() {

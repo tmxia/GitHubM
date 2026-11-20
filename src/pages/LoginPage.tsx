@@ -1,6 +1,7 @@
 
 
 import React, { useState } from 'react';
+import { lsSet } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, Globe } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -40,7 +41,7 @@ export default function LoginPage() {
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
-    localStorage.setItem('app_language', lng);
+    lsSet('app_language', lng);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

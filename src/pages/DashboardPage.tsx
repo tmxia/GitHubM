@@ -7,6 +7,7 @@ import {
   useCallback,
   useMemo,
   memo } from 'react';
+import { lsGet, lsGetJSON } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import {BookOpen,
   Star,
@@ -804,13 +805,9 @@ export default function DashboardPage() {
     if (repos.length === 0) return;
 
     let notifyEnabled = true;
-    try { notifyEnabled = localStorage.getItem('notify_compile_done') !== 'false'; } catch { /* ignore */ }
+    notifyEnabled = lsGet('notify_compile_done') !== 'false';
 
-    let lastStatus: Record<string, string> = {};
-    try {
-      const raw = localStorage.getItem('gm_monitor_last_status');
-      if (raw) lastStatus = JSON.parse(raw);
-    } catch { /* ignore */ }
+    let lastStatus: Record<string, string> = lsGetJSON<Record<string, string>>('gm_monitor_last_status', {});
 
     try {
       bridge.syncMonitorConfig(JSON.stringify({ notifyEnabled, token, repos, lastStatus }));
@@ -828,9 +825,7 @@ export default function DashboardPage() {
     }).AndroidBridge;
 
     let enabled = true;
-    try {
-      enabled = localStorage.getItem('notify_compile_done') !== 'false';
-    } catch { /* ignore */ }
+    enabled = lsGet('notify_compile_done') !== 'false';
 
     for (const item of compileStatus) {
       if (!item.run) continue;

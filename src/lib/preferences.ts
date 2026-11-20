@@ -1,3 +1,4 @@
+import { lsGet, lsSet, lsGetJSON, lsSetJSON } from '@/lib/storage';
 
 const PREFIX = 'feature_flag_';
 
@@ -17,20 +18,14 @@ export const FEATURE_FLAGS = {
 export type FeatureFlagKey = typeof FEATURE_FLAGS[keyof typeof FEATURE_FLAGS];
 
 export function getFeatureFlag(key: FeatureFlagKey, defaultValue = true): boolean {
-  try {
-    const v = localStorage.getItem(PREFIX + key);
-    if (v === null) return defaultValue;
-    return v === 'true';
-  } catch {
-    return defaultValue;
-  }
+  const v = lsGet(PREFIX + key);
+  if (v === null) return defaultValue;
+  return v === 'true';
 }
 
 export function setFeatureFlag(key: FeatureFlagKey, value: boolean): void {
-  try {
-    localStorage.setItem(PREFIX + key, value ? 'true' : 'false');
-    window.dispatchEvent(new CustomEvent('feature-flags-changed', { detail: { key, value } }));
-  } catch {}
+  lsSet(PREFIX + key, value ? 'true' : 'false');
+  window.dispatchEvent(new CustomEvent('feature-flags-changed', { detail: { key, value } }));
 }
 
 export function subscribeFeatureFlags(cb: () => void): () => void {
@@ -46,40 +41,32 @@ const BOARD_CUSTOM_REPOS_KEY = 'compile_board_custom_repos';
 export type CompileBoardMode = 'smart' | 'custom';
 
 export function getCompileBoardMode(): CompileBoardMode {
-  try {
-    const v = localStorage.getItem(BOARD_MODE_KEY);
-    if (v === 'custom' || v === 'smart') return v;
-  } catch { /* ignore */ }
+  const v = lsGet(BOARD_MODE_KEY);
+  if (v === 'custom' || v === 'smart') return v;
   return 'smart';
 }
 
 export function setCompileBoardMode(mode: CompileBoardMode): void {
-  try {
-    localStorage.setItem(BOARD_MODE_KEY, mode);
-    window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
-  } catch { /* ignore */ }
+  lsSet(BOARD_MODE_KEY, mode);
+  window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
 }
 
 export function getCompileBoardSmartCount(): number {
-  try {
-    const v = parseInt(localStorage.getItem(BOARD_SMART_COUNT_KEY) || '6', 10);
-    if (Number.isFinite(v) && v > 0 && v <= 50) return v;
-  } catch { /* ignore */ }
+  const v = parseInt(lsGet(BOARD_SMART_COUNT_KEY) || '6', 10);
+  if (Number.isFinite(v) && v > 0 && v <= 50) return v;
   return 6;
 }
 
 export function setCompileBoardSmartCount(count: number): void {
-  try {
-    const n = Math.max(1, Math.min(50, count));
-    localStorage.setItem(BOARD_SMART_COUNT_KEY, String(n));
-    window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
-  } catch { /* ignore */ }
+  const n = Math.max(1, Math.min(50, count));
+  lsSet(BOARD_SMART_COUNT_KEY, String(n));
+  window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
 }
 
 export function getCompileBoardCustomRepos(): string[] {
+  const raw = lsGet(BOARD_CUSTOM_REPOS_KEY);
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(BOARD_CUSTOM_REPOS_KEY);
-    if (!raw) return [];
     const arr = JSON.parse(raw);
     if (Array.isArray(arr)) return arr.filter((x) => typeof x === 'string');
   } catch { /* ignore */ }
@@ -87,10 +74,8 @@ export function getCompileBoardCustomRepos(): string[] {
 }
 
 export function setCompileBoardCustomRepos(repos: string[]): void {
-  try {
-    localStorage.setItem(BOARD_CUSTOM_REPOS_KEY, JSON.stringify(repos));
-    window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
-  } catch { /* ignore */ }
+  lsSetJSON(BOARD_CUSTOM_REPOS_KEY, repos);
+  window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
 }
 
 
@@ -103,16 +88,16 @@ export function subscribeCompileBoardConfig(cb: () => void): () => void {
 const BOARD_CUSTOM_WORKFLOWS_KEY = 'compile_board_custom_workflows';
 
 export interface MonitoredWorkflow {
-  repoFullName: string;  
+  repoFullName: string;
   workflowId: number;
-  workflowName: string;  
-  workflowPath: string;  
+  workflowName: string;
+  workflowPath: string;
 }
 
 export function getCompileBoardCustomWorkflows(): MonitoredWorkflow[] {
+  const raw = lsGet(BOARD_CUSTOM_WORKFLOWS_KEY);
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(BOARD_CUSTOM_WORKFLOWS_KEY);
-    if (!raw) return [];
     const arr = JSON.parse(raw);
     if (Array.isArray(arr)) {
       return arr.filter(
@@ -128,10 +113,8 @@ export function getCompileBoardCustomWorkflows(): MonitoredWorkflow[] {
 }
 
 export function setCompileBoardCustomWorkflows(list: MonitoredWorkflow[]): void {
-  try {
-    localStorage.setItem(BOARD_CUSTOM_WORKFLOWS_KEY, JSON.stringify(list));
-    window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
-  } catch { /* ignore */ }
+  lsSetJSON(BOARD_CUSTOM_WORKFLOWS_KEY, list);
+  window.dispatchEvent(new CustomEvent('compile-board-config-changed'));
 }
 
 
@@ -140,25 +123,23 @@ const DASHBOARD_ORDER_KEY = 'dashboard_cards_order';
 
 export function getDashboardCardOrder(): DashboardCardId[] {
   const def: DashboardCardId[] = ['stats', 'compileBoard', 'pinned', 'feed', 'recentRepos', 'recentActivity', 'heatmap'];
-  try {
-    const raw = localStorage.getItem(DASHBOARD_ORDER_KEY);
-    if (raw) {
+  const raw = lsGet(DASHBOARD_ORDER_KEY);
+  if (raw) {
+    try {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr) && arr.length > 0) {
         const merged = [...arr];
         def.forEach(d => { if (!merged.includes(d)) merged.push(d); });
         return merged as DashboardCardId[];
       }
-    }
-  } catch {}
+    } catch { /* ignore */ }
+  }
   return def;
 }
 
 export function setDashboardCardOrder(order: DashboardCardId[]): void {
-  try {
-    localStorage.setItem(DASHBOARD_ORDER_KEY, JSON.stringify(order));
-    window.dispatchEvent(new CustomEvent('dashboard-order-changed'));
-  } catch {}
+  lsSetJSON(DASHBOARD_ORDER_KEY, order);
+  window.dispatchEvent(new CustomEvent('dashboard-order-changed'));
 }
 
 
@@ -166,22 +147,22 @@ const REPO_LIMIT_KEY = 'dashboard_repo_limit';
 const ACTIVITY_LIMIT_KEY = 'dashboard_activity_limit';
 
 export function getDashboardRepoLimit(): number {
-  const v = parseInt(localStorage.getItem(REPO_LIMIT_KEY) || '5', 10);
+  const v = parseInt(lsGet(REPO_LIMIT_KEY) || '5', 10);
   return Number.isFinite(v) && v > 0 ? Math.min(v, 50) : 5;
 }
 
 export function setDashboardRepoLimit(n: number): void {
-  localStorage.setItem(REPO_LIMIT_KEY, String(Math.max(1, Math.min(50, n))));
+  lsSet(REPO_LIMIT_KEY, String(Math.max(1, Math.min(50, n))));
   window.dispatchEvent(new Event('dashboard-limits-changed'));
 }
 
 export function getDashboardActivityLimit(): number {
-  const v = parseInt(localStorage.getItem(ACTIVITY_LIMIT_KEY) || '5', 10);
+  const v = parseInt(lsGet(ACTIVITY_LIMIT_KEY) || '5', 10);
   return Number.isFinite(v) && v > 0 ? Math.min(v, 50) : 5;
 }
 
 export function setDashboardActivityLimit(n: number): void {
-  localStorage.setItem(ACTIVITY_LIMIT_KEY, String(Math.max(1, Math.min(50, n))));
+  lsSet(ACTIVITY_LIMIT_KEY, String(Math.max(1, Math.min(50, n))));
   window.dispatchEvent(new Event('dashboard-limits-changed'));
 }
 
@@ -189,46 +170,46 @@ export function setDashboardActivityLimit(n: number): void {
 const COLOR_PALETTE_COLLAPSED_KEY = 'color_palette_collapsed';
 
 export function getColorPaletteCollapsed(): boolean {
-  return localStorage.getItem(COLOR_PALETTE_COLLAPSED_KEY) === 'true';
+  return lsGet(COLOR_PALETTE_COLLAPSED_KEY) === 'true';
 }
 
 export function setColorPaletteCollapsed(collapsed: boolean): void {
-  localStorage.setItem(COLOR_PALETTE_COLLAPSED_KEY, collapsed ? 'true' : 'false');
+  lsSet(COLOR_PALETTE_COLLAPSED_KEY, collapsed ? 'true' : 'false');
 }
 
 
 const NOTIFICATION_COLLAPSED_KEY = 'notification_collapsed';
 export function getNotificationCollapsed(): boolean {
-  return localStorage.getItem(NOTIFICATION_COLLAPSED_KEY) === 'true';
+  return lsGet(NOTIFICATION_COLLAPSED_KEY) === 'true';
 }
 export function setNotificationCollapsed(collapsed: boolean): void {
-  localStorage.setItem(NOTIFICATION_COLLAPSED_KEY, collapsed ? 'true' : 'false');
+  lsSet(NOTIFICATION_COLLAPSED_KEY, collapsed ? 'true' : 'false');
 }
 
 const FEATURES_COLLAPSED_KEY = 'features_collapsed';
 export function getFeaturesCollapsed(): boolean {
-  return localStorage.getItem(FEATURES_COLLAPSED_KEY) === 'true';
+  return lsGet(FEATURES_COLLAPSED_KEY) === 'true';
 }
 export function setFeaturesCollapsed(collapsed: boolean): void {
-  localStorage.setItem(FEATURES_COLLAPSED_KEY, collapsed ? 'true' : 'false');
+  lsSet(FEATURES_COLLAPSED_KEY, collapsed ? 'true' : 'false');
 }
 
 const MISC_COLLAPSED_KEY = 'misc_collapsed';
 export function getMiscCollapsed(): boolean {
-  return localStorage.getItem(MISC_COLLAPSED_KEY) === 'true';
+  return lsGet(MISC_COLLAPSED_KEY) === 'true';
 }
 export function setMiscCollapsed(collapsed: boolean): void {
-  localStorage.setItem(MISC_COLLAPSED_KEY, collapsed ? 'true' : 'false');
+  lsSet(MISC_COLLAPSED_KEY, collapsed ? 'true' : 'false');
 }
 
 const FEED_LIMIT_KEY = 'dashboard_feed_limit';
 
 export function getDashboardFeedLimit(): number {
-  const v = parseInt(localStorage.getItem(FEED_LIMIT_KEY) || '5', 10);
+  const v = parseInt(lsGet(FEED_LIMIT_KEY) || '5', 10);
   return Number.isFinite(v) && v > 0 ? Math.min(v, 50) : 5;
 }
 
 export function setDashboardFeedLimit(n: number): void {
-  localStorage.setItem(FEED_LIMIT_KEY, String(Math.max(1, Math.min(30, n))));
+  lsSet(FEED_LIMIT_KEY, String(Math.max(1, Math.min(30, n))));
   window.dispatchEvent(new Event('dashboard-limits-changed'));
 }

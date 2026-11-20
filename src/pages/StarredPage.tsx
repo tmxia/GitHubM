@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { lsGet, lsSet, ssGet, ssSet, ssRemove } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import {
   Star,
@@ -50,15 +51,13 @@ type SortKey = 'updated' | 'created' | 'stars' | 'name';
 const STARRED_SORT_KEY = 'starred_sort_pref';
 
 function loadSortPref(): SortKey {
-  try {
-    const v = localStorage.getItem(STARRED_SORT_KEY);
-    if (v === 'updated' || v === 'created' || v === 'stars' || v === 'name') return v;
-  } catch {}
+  const v = lsGet(STARRED_SORT_KEY);
+  if (v === 'updated' || v === 'created' || v === 'stars' || v === 'name') return v;
   return 'created';
 }
 
 function saveSortPref(v: SortKey): void {
-  try { localStorage.setItem(STARRED_SORT_KEY, v); } catch {}
+  lsSet(STARRED_SORT_KEY, v);
 }
 
 function sortRepos(repos: GitHubRepo[], sort: SortKey): GitHubRepo[] {
@@ -131,7 +130,7 @@ export default function StarredPage() {
     if (loading || repos.length === 0 || restoredRef.current) return;
     restoredRef.current = true;
 
-    const isReturning = sessionStorage.getItem('starred_is_returning') === '1';
+    const isReturning = ssGet('starred_is_returning') === '1';
 
     if (!isReturning) {
 
@@ -140,7 +139,7 @@ export default function StarredPage() {
       return;
     }
 
-    sessionStorage.removeItem('starred_is_returning');
+    ssRemove('starred_is_returning');
     const y = readListScroll(SCROLL_KEY);
     if (y <= 0) return;
     let attempts = 0;
@@ -290,7 +289,7 @@ export default function StarredPage() {
                         prefetchRepoDetail(o, n, isOwner);
                       }}
                       onClick={() => {
-                        sessionStorage.setItem('starred_is_returning', '1');
+                        ssSet('starred_is_returning', '1');
                         saveListScroll(SCROLL_KEY);
                         navigate(`/repos/${repo.full_name}`);
                       }}

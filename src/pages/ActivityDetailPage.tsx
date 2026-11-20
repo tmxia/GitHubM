@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { ssGetJSON, ssSetJSON } from '@/lib/storage';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -20,9 +21,7 @@ import i18n from '@/i18n';
 const EVENT_STORAGE_PREFIX = 'github_activity_event_';
 
 export function cacheActivityEvent(event: GitHubEvent) {
-  try {
-    sessionStorage.setItem(`${EVENT_STORAGE_PREFIX}${event.id}`, JSON.stringify(event));
-  } catch { /* ignore */ }
+  ssSetJSON(`${EVENT_STORAGE_PREFIX}${event.id}`, event);
 }
 
 function getTypeLabel(type: string): string {
@@ -76,12 +75,8 @@ export default function ActivityDetailPage() {
   const event = useMemo<GitHubEvent | null>(() => {
     const stateEvent = (location.state as { event?: GitHubEvent } | null)?.event;
     if (stateEvent && stateEvent.id === eventId) return stateEvent;
-    try {
-      const raw = sessionStorage.getItem(`${EVENT_STORAGE_PREFIX}${eventId}`);
-      return raw ? JSON.parse(raw) as GitHubEvent : null;
-    } catch {
-      return null;
-    }
+    const cached = ssGetJSON<GitHubEvent | null>(`${EVENT_STORAGE_PREFIX}${eventId}`, null);
+    return cached ?? null;
   }, [eventId, location.state]);
 
   if (!event) {

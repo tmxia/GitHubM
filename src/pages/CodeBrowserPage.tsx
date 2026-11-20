@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { ssGetJSON, ssSetJSON, lsGet, lsSet } from '@/lib/storage';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import FileTree from '@/components/code/FileTree';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
@@ -224,12 +225,10 @@ function codeNavKey(owner: string, repo: string) {
   return `code_nav_${owner}_${repo}`;
 }
 function getCodeNavStack(owner: string, repo: string): string[] {
-  try { return JSON.parse(sessionStorage.getItem(codeNavKey(owner, repo)) || '[]'); }
-  catch { return []; }
+  return ssGetJSON<string[]>(codeNavKey(owner, repo), []);
 }
 function setCodeNavStack(owner: string, repo: string, stack: string[]) {
-  try { sessionStorage.setItem(codeNavKey(owner, repo), JSON.stringify(stack)); }
-  catch {}
+  ssSetJSON(codeNavKey(owner, repo), stack);
 }
 
 function formatCommitTime(iso: string): string {
@@ -258,16 +257,14 @@ export default function CodeBrowserPage() {
   const [contents, setContents] = useState<GitHubContent[]>([]);
   const [commitMap, setCommitMap] = useState<Record<string, { date: string; message: string; author: string } | null>>({});
   const [sortMode, setSortMode] = useState<'default' | 'desc' | 'asc'>(() => {
-    try {
-      const v = localStorage.getItem('code_sort_mode');
-      if (v === 'default' || v === 'desc' || v === 'asc') return v;
-    } catch {}
+    const v = lsGet('code_sort_mode');
+    if (v === 'default' || v === 'desc' || v === 'asc') return v;
     return 'default';
   });
   const cycleSortMode = () => {
     setSortMode((prev) => {
       const next = prev === 'default' ? 'desc' : prev === 'desc' ? 'asc' : 'default';
-      try { localStorage.setItem('code_sort_mode', next); } catch {}
+      lsSet('code_sort_mode', next);
       return next;
     });
   };

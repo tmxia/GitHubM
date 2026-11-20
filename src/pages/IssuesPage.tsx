@@ -1,6 +1,7 @@
 // Issue 列表页
 
 import { useState, useEffect, useCallback } from 'react';
+import { lsGet, lsSet } from '@/lib/storage';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
@@ -51,15 +52,13 @@ import i18n from "@/i18n";
 const ISSUES_SORT_PREF = 'issues_sort_pref';
 
 function loadIssuesSortPref(): IssueSortField {
-  try {
-    const v = localStorage.getItem(ISSUES_SORT_PREF);
-    if (v === 'created' || v === 'updated' || v === 'comments') return v as IssueSortField;
-  } catch {}
+  const v = lsGet(ISSUES_SORT_PREF);
+  if (v === 'created' || v === 'updated' || v === 'comments') return v as IssueSortField;
   return 'created' as IssueSortField;
 }
 
 function saveIssuesSortPref(v: IssueSortField): void {
-  try { localStorage.setItem(ISSUES_SORT_PREF, v); } catch {}
+  lsSet(ISSUES_SORT_PREF, v);
 }
 
 export default function IssuesPage() {

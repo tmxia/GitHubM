@@ -1,5 +1,6 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { lsGet, lsSet } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
@@ -519,7 +520,7 @@ export default function FileTree({
       if (!viewport) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        try { localStorage.setItem(scrollKey, String(viewport!.scrollTop)); } catch {}
+        lsSet(scrollKey, String(viewport!.scrollTop));
       }, 200);
     };
 
@@ -547,7 +548,7 @@ export default function FileTree({
   useEffect(() => {
     if (rootStatus !== 'loaded') return;
     let saved = 0;
-    try { saved = parseInt(localStorage.getItem(scrollKey) || '0', 10); } catch {}
+    saved = parseInt(lsGet(scrollKey) || '0', 10);
     if (!saved || saved <= 0) return;
 
     let cancelled = false;

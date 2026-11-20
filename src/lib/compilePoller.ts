@@ -1,4 +1,5 @@
 import { getWorkflowRunFresh } from '@/services/github';
+import { lsGet, lsSetJSON } from '@/lib/storage';
 
 const PENDING_KEY = 'gm_pending_compiles';
 const INTERVAL = 10000;
@@ -18,7 +19,7 @@ let running = false;
 
 function loadPending(): PendingCompile[] {
   try {
-    const raw = localStorage.getItem(PENDING_KEY);
+    const raw = lsGet(PENDING_KEY);
     return raw ? (JSON.parse(raw) as PendingCompile[]) : [];
   } catch {
     return [];
@@ -26,17 +27,11 @@ function loadPending(): PendingCompile[] {
 }
 
 function savePending(list: PendingCompile[]) {
-  try {
-    localStorage.setItem(PENDING_KEY, JSON.stringify(list));
-  } catch {}
+  lsSetJSON(PENDING_KEY, list);
 }
 
 function isEnabled(): boolean {
-  try {
-    return localStorage.getItem('notify_compile_done') !== 'false';
-  } catch {
-    return true;
-  }
+  return lsGet('notify_compile_done') !== 'false';
 }
 
 
@@ -45,7 +40,7 @@ const MAX_NOTIFIED = 200;
 
 function loadNotified(): string[] {
   try {
-    const raw = localStorage.getItem(NOTIFIED_KEY);
+    const raw = lsGet(NOTIFIED_KEY);
     return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
@@ -57,7 +52,7 @@ function appendNotified(key: string) {
   if (list.includes(key)) return;
   list.push(key);
   if (list.length > MAX_NOTIFIED) list.splice(0, list.length - MAX_NOTIFIED);
-  try { localStorage.setItem(NOTIFIED_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+  lsSetJSON(NOTIFIED_KEY, list);
 }
 
 export function getNotifiedKeys(): string[] {
@@ -94,7 +89,7 @@ export function syncToWorkManager() {
     const pending = loadPending();
 
     let notifyEnabled = true;
-    try { notifyEnabled = localStorage.getItem('notify_compile_done') !== 'false'; } catch { /* ignore */ }
+    notifyEnabled = lsGet('notify_compile_done') !== 'false';
 
     
     
@@ -110,7 +105,7 @@ export function syncToWorkManager() {
 
     let lastStatus: Record<string, string> = {};
     try {
-      const raw = localStorage.getItem('gm_monitor_last_status');
+      const raw = lsGet('gm_monitor_last_status');
       if (raw) lastStatus = JSON.parse(raw);
     } catch { /* ignore */ }
 

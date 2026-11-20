@@ -1,4 +1,5 @@
 import { withLoading } from '@/lib/loading';
+import { lsGet, lsSetJSON, lsGetJSON, lsRemove } from '@/lib/storage';
 // 全局搜索页
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -197,10 +198,10 @@ const DEFAULT_SORT_MAP: Record<SearchType, SortOption> = {
 function loadSortMap(): Record<SearchType, SortOption> {
   const result = { ...DEFAULT_SORT_MAP };
   try {
-    const raw = localStorage.getItem(SORT_STORAGE_KEY);
+    const raw = lsGet(SORT_STORAGE_KEY);
     const parsed = (raw ? JSON.parse(raw) : {}) as Record<string, unknown>;
     // 兼容旧版单值存储：旧值只能代表仓库类型的排序
-    const legacy = localStorage.getItem(LEGACY_SORT_STORAGE_KEY);
+    const legacy = lsGet(LEGACY_SORT_STORAGE_KEY);
     if (legacy) parsed.repositories = legacy;
     (Object.keys(result) as SearchType[]).forEach(type => {
       result[type] = normalizeSort(type, parsed[type] as SortOption | undefined);
@@ -212,28 +213,22 @@ function loadSortMap(): Record<SearchType, SortOption> {
 }
 
 function saveSortMap(map: Record<SearchType, SortOption>): void {
-  try {
-    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(map));
-  } catch {
-    /* 隐私模式等写入失败时忽略，不影响本次会话内的排序 */
-  }
+  lsSetJSON(SORT_STORAGE_KEY, map);
 }
 
 // ── 搜索历史工具函数 ──────────────────────────────────────────────────────
 function loadHistory(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
-  } catch { return []; }
+  return lsGetJSON<string[]>(HISTORY_STORAGE_KEY, []);
 }
 
 function saveHistory(query: string) {
   const prev = loadHistory().filter(q => q !== query);
   const next = [query, ...prev].slice(0, MAX_HISTORY);
-  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
+  lsSetJSON(HISTORY_STORAGE_KEY, next);
 }
 
 function clearHistory() {
-  localStorage.removeItem(HISTORY_STORAGE_KEY);
+  lsRemove(HISTORY_STORAGE_KEY);
 }
 
 // 搜索结果仓库右键菜单
@@ -659,7 +654,7 @@ export default function SearchPage() {
                         e.stopPropagation();
                         e.preventDefault();
                         const next = history.filter((_, i) => i !== idx);
-                        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
+                        lsSetJSON(HISTORY_STORAGE_KEY, next);
                         setHistory(next);
                       }}
                     >

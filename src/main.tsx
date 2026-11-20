@@ -26,12 +26,13 @@ import "@/lib/open-external";
 
 import "@/lib/clipboard-bridge";
 import App from "./App.tsx";
+import { lsGet } from "@/lib/storage";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
 import { ThemeProvider } from "./contexts/ThemeContext.tsx";
 
 (async () => {
   try {
-    const enabled = localStorage.getItem("notify_artifact_download") !== "false";
+    const enabled = lsGet("notify_artifact_download") !== "false";
     const bridge = (window as unknown as {
       AndroidBridge?: { setDownloadNotify?: (v: boolean) => void };
     }).AndroidBridge;
@@ -58,7 +59,7 @@ const originalToastInfo = toast.info;
 const originalToastWarning = toast.warning;
 
 const checkToastEnabled = () => {
-  try { return localStorage.getItem('app_toast_enabled') !== 'false'; } catch { return true; }
+  return lsGet('app_toast_enabled') !== 'false';
 };
 
 toast.success = (...args: any[]) => {
