@@ -300,48 +300,51 @@ function highlightMatch(text: string, query: string) {
 export default function SettingsPage() {
 
   const [keepAliveEnabled, setKeepAliveEnabled] = useState(false);
-  useEffect(() => {
-    if (typeof window !== 'undefined' && (window as any).AndroidBattery) {
-      try {
-        setKeepAliveEnabled((window as any).AndroidBattery.isIgnoringBatteryOptimizations());
-      } catch (e) {
-        console.error(e);
-      }
+
+  // 读取原生电池优化忽略状态并回填开关；桥接不存在时不改动当前开关
+  const refreshKeepAlive = useCallback(() => {
+    const battery = (window as any).AndroidBattery;
+    if (!battery) return;
+    try {
+      setKeepAliveEnabled(Boolean(battery.isIgnoringBatteryOptimizations()));
+    } catch (e) {
+      console.error(e);
     }
   }, []);
 
-  const handleKeepAlive = async (enable: boolean) => {
-    if (enable) {
-      if (typeof window !== 'undefined' && (window as any).AndroidBattery) {
-        try {
-          (window as any).AndroidBattery.requestIgnoreBatteryOptimizations();
-          setTimeout(() => {
-            try {
-              const isIgnoring = (window as any).AndroidBattery.isIgnoringBatteryOptimizations();
-              setKeepAliveEnabled(isIgnoring);
-            } catch (e) { console.error("重查状态失败", e); }
-          }, 1500);
-        } catch (e) {
-          console.error("拉起授权失败:", e);
-          toast.error("拉起授权失败: " + String(e));
-          setKeepAliveEnabled(false);
-        }
+  useEffect(() => {
+    refreshKeepAlive();
+    // 从系统授权页 / 电池优化设置页返回 WebView 时重新校正开关状态
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshKeepAlive(); };
+    window.addEventListener('focus', refreshKeepAlive);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refreshKeepAlive);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshKeepAlive]);
+
+  const handleKeepAlive = (enable: boolean) => {
+    const battery = typeof window !== 'undefined' ? (window as any).AndroidBattery : undefined;
+    if (!battery) {
+      toast.error("当前环境不支持原生电池优化调用");
+      setKeepAliveEnabled(false);
+      return;
+    }
+    // 乐观置位：拉起的是系统异步授权/设置页，受控开关先跟随点击，避免被弹回；
+    // 最终状态由回前台重查与兜底定时器校正。
+    setKeepAliveEnabled(enable);
+    try {
+      if (enable) {
+        battery.requestIgnoreBatteryOptimizations();
       } else {
-        toast.error("当前环境不支持原生电池优化调用");
-        setKeepAliveEnabled(false);
+        battery.openBatteryOptimizationSettings();
       }
-    } else {
-      if (typeof window !== 'undefined' && (window as any).AndroidBattery) {
-        (window as any).AndroidBattery.openBatteryOptimizationSettings();
-        setTimeout(() => {
-          try {
-            const isIgnoring = (window as any).AndroidBattery.isIgnoringBatteryOptimizations();
-            setKeepAliveEnabled(isIgnoring);
-          } catch (e) {}
-        }, 1500);
-      } else {
-        setKeepAliveEnabled(false);
-      }
+      setTimeout(() => refreshKeepAlive(), 1500);
+    } catch (e) {
+      console.error("拉起授权失败:", e);
+      toast.error("拉起授权失败: " + String(e));
+      refreshKeepAlive();
     }
   };  const { t, i18n } = useTranslation();
   const { user, login, token } = useAuth();
