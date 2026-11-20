@@ -35,7 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserRepos, getUserEvents, formatRelativeTime, formatNumber, getLanguageColor, getStarredCount, getRepo, getWorkflowRuns, clearApiCache } from '@/services/github';
+import { getUserRepos, getUserEvents, formatRelativeTime, formatNumber, getLanguageColor, getStarredCount, getRepo, getWorkflowRuns } from '@/services/github';
 import { gqlGetContributions, gqlGetPinnedRepos } from '@/services/github-graphql';
 import type { GitHubRepo, GitHubEvent, ContributionCalendar, GQL_PinnedRepo } from '@/types/types';
 import { toast } from 'sonner';
@@ -282,7 +282,6 @@ export default function DashboardPage() {
 
   const compileStatusRef = useRef<typeof compileStatus>([]);
   useEffect(() => { compileStatusRef.current = compileStatus; }, [compileStatus]);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [compileEnabled, setCompileEnabled] = useState(() => getFeatureFlag(FEATURE_FLAGS.compileBoard));
   const [showStats, setShowStats] = useState(() => getFeatureFlag(FEATURE_FLAGS.dashboardStats));
   const [cardOrder, setCardOrder] = useState<DashboardCardId[]>(() => getDashboardCardOrder());
@@ -450,13 +449,96 @@ export default function DashboardPage() {
         },
       );
 
-      setCompileStatus(collected.filter((x): x is Item => !!x));
+      const filtered = collected.filter((x): x is Item => !!x);
+      setCompileStatus(filtered);
+      try { pageCache.set(`dashboard:${user?.login}:compile`, filtered); } catch { /* ignore */ }
     } catch {
       if (!isSilent) setCompileStatus([]);
     } finally {
       if (!isSilent) setCompileLoading(false);
     }
-  }, [compileStatus.length]);
+  }, [compileStatus.length, user]);
+
+  /**
+   * 拉取首页主数据（仓库 / 活动 / 热力图 / 置顶 / 收藏数）。
+   * silent=true 时不进入骨架态，保留现有界面，后台拉新后整体替换；
+   * fresh=true 时绕过请求层内存缓存拿最新数据（用于下拉刷新）。
+   */
+  const fetchDashboard = useCallback(async (silent: boolean, fresh: boolean) => {
+    if (!user) return;
+    const cacheKey = `dashboard:${user?.login}`;
+
+    const loadData = async (): Promise<{ repos: GitHubRepo[]; events: GitHubEvent[] }> => {
+      if (!silent) setLoading(true);
+      try {
+        const [reposResult, eventsResult] = await Promise.all([
+          getUserRepos({ sort: 'pushed', per_page: 6, type: 'owner' }, { fresh }),
+          getUserEvents(user?.login, 1, { fresh }),
+        ]);
+        const repos = reposResult.data;
+        const events = [...eventsResult]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 15);
+        setRepos(repos);
+        setEvents(events);
+        return { repos, events };
+      } catch (err) {
+        if (!silent) {
+          toast.error(i18n.t('加载仪表盘数据失败'));
+          console.error(err);
+        }
+        return { repos: [], events: [] };
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    };
+
+    const loadCalendar = async (): Promise<ContributionCalendar | null> => {
+      if (!silent) setCalendarLoading(true);
+      try {
+        const cal = await gqlGetContributions(user?.login);
+        setCalendar(cal);
+        return cal;
+      } catch {
+        return null;
+      } finally {
+        if (!silent) setCalendarLoading(false);
+      }
+    };
+
+    const loadPinned = async (): Promise<GQL_PinnedRepo[]> => {
+      if (!silent) setPinnedLoading(true);
+      try {
+        const pinned = await gqlGetPinnedRepos(user?.login);
+        setPinnedRepos(pinned);
+        return pinned;
+      } catch {
+        return [];
+      } finally {
+        if (!silent) setPinnedLoading(false);
+      }
+    };
+
+    const loadStarredCount = async (): Promise<number | null> => {
+      try {
+        const count = await getStarredCount();
+        setStarredCount(count);
+        return count;
+      } catch {
+        return null;
+      }
+    };
+
+    const [{ repos, events }, calendar, pinnedRepos, starredCount] = await Promise.all([
+      loadData(),
+      loadCalendar(),
+      loadPinned(),
+      loadStarredCount(),
+    ]);
+    pageCache.set(cacheKey, { repos, events, calendar, pinnedRepos, starredCount });
+    // 工作流状态由监听 repos 的独立 effect 负责刷新，这里不直接调用，
+    // 避免 monitoredItems 随 repos 重算导致本回调身份变化、主加载 effect 重复触发。
+  }, [user]);
 
   useEffect(() => {
     const handleOrderChange = () => setCardOrder(getDashboardCardOrder());
@@ -500,103 +582,46 @@ export default function DashboardPage() {
     if (!user) return;
 
     const cacheKey = `dashboard:${user?.login}`;
+    const compileKey = `${cacheKey}:compile`;
 
-    const cached = pageCache.get<{
+    // 缓存优先：有历史数据（即使已过期）先整屏渲染，后台静默拉新替换，
+    // 避免骨架逐张替换造成的卡片依次冒出与布局跳动；无任何历史数据才走骨架流程。
+    const stale = pageCache.getStale<{
       repos: GitHubRepo[];
       events: GitHubEvent[];
       calendar: ContributionCalendar | null;
       pinnedRepos: GQL_PinnedRepo[];
       starredCount: number | null;
     }>(cacheKey);
-    if (cached) {
-      setRepos(cached.repos);
-      setEvents(cached.events);
-      setCalendar(cached.calendar);
-      setPinnedRepos(cached.pinnedRepos);
-      setStarredCount(cached.starredCount);
+
+    if (stale?.data) {
+      const d = stale.data;
+      setRepos(d.repos);
+      setEvents(d.events);
+      setCalendar(d.calendar);
+      setPinnedRepos(d.pinnedRepos);
+      setStarredCount(d.starredCount);
       setLoading(false);
       setCalendarLoading(false);
       setPinnedLoading(false);
-      void getStarredCount().then(setStarredCount).catch(() => {});
+
+      const compileStale = pageCache.getStale<typeof compileStatus>(compileKey);
+      if (compileStale?.data) setCompileStatus(compileStale.data);
+      setCompileLoading(false);
+
       void refreshUser();
+      void fetchDashboard(true, false);
       return;
     }
 
-    const loadData = async (): Promise<{ repos: GitHubRepo[]; events: GitHubEvent[] }> => {
-      setLoading(true);
-      try {
-        const [reposResult, eventsResult] = await Promise.all([
-          getUserRepos({ sort: 'pushed', per_page: 6, type: 'owner' }),
-          getUserEvents(user?.login, 1),
-        ]);
-        const repos = reposResult.data;
-        const events = [...eventsResult]
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 15);
-        setRepos(repos);
-        setEvents(events);
-        return { repos, events };
-      } catch (err) {
-        toast.error(i18n.t('加载仪表盘数据失败'));
-        console.error(err);
-        return { repos: [], events: [] };
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const loadCalendar = async (): Promise<ContributionCalendar | null> => {
-      setCalendarLoading(true);
-      try {
-        const cal = await gqlGetContributions(user?.login);
-        setCalendar(cal);
-        return cal;
-      } catch {
-        return null;
-      } finally {
-        setCalendarLoading(false);
-      }
-    };
-
-    const loadPinned = async (): Promise<GQL_PinnedRepo[]> => {
-      setPinnedLoading(true);
-      try {
-        const pinned = await gqlGetPinnedRepos(user?.login);
-        setPinnedRepos(pinned);
-        return pinned;
-      } catch {
-        return [];
-      } finally {
-        setPinnedLoading(false);
-      }
-    };
-
-    const loadStarredCount = async (): Promise<number | null> => {
-      try {
-        const count = await getStarredCount();
-        setStarredCount(count);
-        return count;
-      } catch {
-        return null;
-      }
-    };
-
-    Promise.all([loadData(), loadCalendar(), loadPinned(), loadStarredCount()]).then(
-      ([{ repos, events }, calendar, pinnedRepos, starredCount]) => {
-        pageCache.set(cacheKey, { repos, events, calendar, pinnedRepos, starredCount });
-
-        if (repos && repos.length > 0) {
-          loadCompileStatus(monitoredItems, { silent: true });
-        }
-      }
-    );
-  }, [user, refreshUser, refreshKey]);
+    void fetchDashboard(false, false);
+  }, [user, refreshUser, fetchDashboard]);
 
   useEffect(() => {
     if (!user) return;
     if (repos.length === 0) return;
     void loadCompileStatus(monitoredItems);
-  }, [user, repos.length, monitoredItems, loadCompileStatus, refreshKey]);
+  }, [user, repos.length, monitoredItems, loadCompileStatus]);
 
   useEffect(() => {
     if (!compileLoading) return;
@@ -861,12 +886,11 @@ export default function DashboardPage() {
     setFeedRefreshTrigger(prev => prev + 1);
     if (!user) return;
 
-    try { clearApiCache(); } catch { /* ignore */ }
-    try { pageCache.delete(`dashboard:${user?.login}`); } catch { /* ignore */ }
-
     try { await refreshUser(); } catch { /* ignore */ }
 
-    setRefreshKey((k) => k + 1);
+    // 保留现有界面，后台静默拉新后整体替换；fresh 绕过请求层内存缓存拿最新数据，
+    // 不清空页面、不进骨架态，避免下拉刷新时卡片被清空后逐张重建。
+    await fetchDashboard(true, true);
 
     if (compileEnabled) {
       try { await loadCompileStatus(monitoredItems, { silent: true }); } catch { /* ignore */ }

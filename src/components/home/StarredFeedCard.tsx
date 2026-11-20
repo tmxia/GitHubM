@@ -27,7 +27,7 @@ export default function StarredFeedCard({ refreshTrigger }: { refreshTrigger?: n
   const navigate = useNavigate();
   const cacheKey = 'starred_feed_cache';
   const [feed, setFeed] = useState<any[]>(() => {
-    return pageCache.get<any[]>(cacheKey) || [];
+    return pageCache.getStale<any[]>(cacheKey)?.data || [];
   });
   const [loading, setLoading] = useState(feed.length === 0);
   const [activeItem, setActiveItem] = useState<any>(null);
