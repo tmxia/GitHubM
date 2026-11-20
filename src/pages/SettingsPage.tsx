@@ -391,14 +391,9 @@ export default function SettingsPage() {
     setPickerOpen(true);
     setPickerLoading(true);
     try {
-      const token = localStorage.getItem('github_token') || localStorage.getItem('token') || localStorage.getItem('github_manager_token');
-      if (!token) { toast.error("登录失效，请重新登录"); setPickerLoading(false); return; }
-      const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=100&affiliation=owner&t=' + Date.now(), {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' }
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const repoList = Array.isArray(data) ? data : [];
+      // 复用统一请求层（与智能模式同源认证 / 重试 / 错误处理），避免裸 fetch 在 WebView 下认证或网络不一致导致列表空白
+      const res = await getUserRepos({ sort: 'pushed', per_page: 100, type: 'owner' }, { fresh: true });
+      const repoList = res.data || [];
       setPickerRepos(repoList);
 
       if (boardCustomWorkflows.length > 0) {
