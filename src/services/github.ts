@@ -191,6 +191,20 @@ function invalidateCacheForMutation(url: string, method: string): void {
   if (actionsMatch) {
     invalidateAndBust(actionsMatch[1]);
   }
+
+  // 部署密钥：增 / 删 / 改单条后回清密钥列表缓存，避免重载读到旧列表
+  const keysMatch = cleanPath.match(/^(\/repos\/[^/]+\/[^/]+)\/keys(\/|$)/);
+  if (keysMatch) {
+    invalidateAndBust(`${keysMatch[1]}/keys`);
+  }
+
+  // 机密 / 变量（含 actions / dependabot / codespaces 作用域）：增 / 改 / 删单条后回清对应列表缓存
+  const secretVarMatch = cleanPath.match(
+    /^(\/repos\/[^/]+\/[^/]+(?:\/(?:actions|dependabot|codespaces))?)\/(secrets|variables)(\/|$)/
+  );
+  if (secretVarMatch) {
+    invalidateAndBust(`${secretVarMatch[1]}/${secretVarMatch[2]}`);
+  }
 }
 
 const inFlightMap = new Map<string, Promise<unknown>>();
@@ -2349,20 +2363,10 @@ export async function updateActionsPermissions(
   repo: string,
   data: { enabled: boolean; allowed_actions?: 'all' | 'local_only' | 'selected' }
 ): Promise<void> {
-  console.log('🚀 正在请求 PUT Actions 权限:', data);
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/permissions`, {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions`, {
     method: 'PUT',
-    headers: {
-      ...buildHeaders(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
   });
-  console.log('📥 服务器返回状态码:', res.status);
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GitHub API 报错 (HTTP ${res.status}): ${err}`);
-  }
 }
 
 export interface WorkflowPermissions {
@@ -2379,20 +2383,10 @@ export async function updateWorkflowPermissions(
   repo: string,
   data: { default_workflow_permissions: 'read' | 'write'; can_approve_pull_request_reviews?: boolean }
 ): Promise<void> {
-  console.log('🚀 正在请求 PUT Workflow 权限:', data);
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/permissions/workflow`, {
+  await request<unknown>(`/repos/${owner}/${repo}/actions/permissions/workflow`, {
     method: 'PUT',
-    headers: {
-      ...buildHeaders(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
   });
-  console.log('📥 服务器返回状态码:', res.status);
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GitHub API 报错 (HTTP ${res.status}): ${err}`);
-  }
 }
 
 export interface SelectedActions {

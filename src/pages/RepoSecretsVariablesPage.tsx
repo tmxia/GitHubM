@@ -115,14 +115,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       await putRepoSecret(owner, repo, secretName.trim(), encrypted, pk.key_id, scope);
       toast.success(i18n.t('机密已保存'));
       setSecretOpen(false);
-
-      setSecrets(prev => {
-        const exists = prev.find(s => s.name === secretName.trim());
-        if (exists) return prev;
-        return [{ name: secretName.trim(), updated_at: new Date().toISOString() } as any, ...prev];
-      });
-
-      setTimeout(() => { load(); }, 800);
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
@@ -157,16 +150,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
       }
       toast.success(i18n.t('变量已保存'));
       setVarOpen(false);
-
-      setVariables(prev => {
-        if (varEditMode) {
-          return prev.map(v => v.name === varOriginalName ? { ...v, name: varName.trim(), value: varValue } as any : v);
-        } else {
-          return [{ name: varName.trim(), value: varValue, updated_at: new Date().toISOString() } as any, ...prev];
-        }
-      });
-
-      setTimeout(() => { load(); }, 800);
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('保存失败'));
     } finally {
@@ -191,7 +175,7 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
         setVariables((prev) => prev.filter((v) => v.name !== deleteTarget.name));
       }
       setDeleteTarget(null);
-      // 移除 await load()，直接依赖本地过滤状态
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : i18n.t('删除失败'));
     } finally {
