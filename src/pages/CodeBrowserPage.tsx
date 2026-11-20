@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import JSZip from 'jszip';
 import { ssGetJSON, ssSetJSON, lsGet, lsSet } from '@/lib/storage';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import FileTree from '@/components/code/FileTree';
@@ -116,6 +117,8 @@ import {
   getRepoContents,
   getRepo,
   getBranches,
+  getBranch,
+  getGitTree,
   updateFileContent,
   createFileContent,
   deleteFileContent,
@@ -283,6 +286,7 @@ export default function CodeBrowserPage() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
   const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
@@ -802,6 +806,106 @@ export default function CodeBrowserPage() {
       loadContents();
     } finally {
       setBatchDeleting(false);
+    }
+  };
+
+  // 整仓打包：走 GitHub codeload 由服务端打包 zip，避免前端逐文件拉取大仓库
+  const downloadRepoZip = async () => {
+    if (!owner || !repo || !currentBranch || zipBusy) return;
+    setZipBusy(true);
+    try {
+      const safeBranch = currentBranch.replace(/[\\/:*?"<>|]/g, '_');
+      const zipUrl = `https://codeload.github.com/${owner}/${repo}/zip/refs/heads/${encodeURIComponent(currentBranch)}`;
+      const zipName = `${repo}-${safeBranch}.zip`;
+      await downloadCodeFile(zipUrl, zipName, token ?? '');
+      toast.success(i18n.t('已开始下载仓库打包文件'));
+    } catch (e) {
+      console.error('下载仓库打包失败', e);
+      toast.error(i18n.t('下载失败'));
+    } finally {
+      setZipBusy(false);
+    }
+  };
+
+  // 多选打包：递归 tree 筛出勾选文件/目录下的 blob，逐文件取内容后前端打成 zip
+  const handleBatchDownloadZip = async () => {
+    if (!owner || !repo || !currentBranch || selectedPaths.size === 0 || zipBusy) return;
+    setZipBusy(true);
+    try {
+      const branch = await getBranch(owner, repo, currentBranch);
+      const tree = await getGitTree(owner, repo, branch.commit.sha, true);
+
+      const selectedDirs = new Set<string>();
+      const selectedFiles = new Set<string>();
+      displayedContents.forEach((it) => {
+        if (!selectedPaths.has(it.path)) return;
+        if (it.type === 'dir') selectedDirs.add(it.path);
+        else selectedFiles.add(it.path);
+      });
+      const matchPath = (p: string) =>
+        selectedFiles.has(p) || Array.from(selectedDirs).some((d) => p === d || p.startsWith(d + '/'));
+      const blobs = tree.tree.filter((it) => it.type === 'blob' && matchPath(it.path));
+      if (blobs.length === 0) {
+        toast.warning(i18n.t('所选内容无可打包文件'));
+        return;
+      }
+
+      const zip = new JSZip();
+      let ok = 0;
+      let fail = 0;
+      for (let i = 0; i < blobs.length; i++) {
+        const f = blobs[i];
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(currentBranch)}/${f.path.split('/').map(encodeURIComponent).join('/')}`;
+          const headers: Record<string, string> = {};
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const res = await fetch(rawUrl, { headers });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          zip.file(f.path, await res.blob());
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
+
+      if (ok === 0) {
+        toast.error(i18n.t('打包失败：未能获取所选文件'));
+        return;
+      }
+
+      const b64 = await zip.generateAsync({
+        type: 'base64',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 1 },
+      });
+      const zipName = `${repo}-selected-${Date.now()}.zip`;
+      const bridge = (window as unknown as {
+        AndroidBridge?: { saveBlobData?: (f: string, m: string, b: string) => void };
+      }).AndroidBridge;
+      if (bridge?.saveBlobData) {
+        bridge.saveBlobData(zipName, 'application/zip', b64);
+      } else {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+        const blob = new Blob([bytes], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = zipName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+      }
+
+      if (fail === 0) toast.success(i18n.t(`已打包下载 ${ok} 个文件`));
+      else toast.warning(i18n.t(`打包完成：成功 ${ok}，失败 ${fail}`));
+      exitSelectionMode();
+    } catch (e) {
+      console.error('打包下载失败', e);
+      toast.error(i18n.t('打包失败'));
+    } finally {
+      setZipBusy(false);
     }
   };
 
@@ -1561,6 +1665,14 @@ export default function CodeBrowserPage() {
                     {sortMode === 'asc' && <ArrowUpNarrowWide className="w-3.5 h-3.5 text-primary" />}
                   </Button>
                 )}
+                {!selectionMode && contents.length > 0 && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                    title={i18n.t('下载整个仓库打包')}
+                    disabled={zipBusy}
+                    onClick={downloadRepoZip}>
+                    <Download className="w-3 h-3" /><span className="hidden sm:inline">{i18n.t('下载 ZIP')}</span>
+                  </Button>
+                )}
               {canPush && !selectionMode && (
                 <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
                   onClick={() => setSelectionMode(true)}>
@@ -1579,6 +1691,11 @@ export default function CodeBrowserPage() {
                   <span className="text-xs text-muted-foreground px-1">
                     {i18n.t('已选')} {selectedPaths.size}
                   </span>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground border border-border hover:bg-secondary gap-1 px-2"
+                    onClick={handleBatchDownloadZip}
+                    disabled={selectedPaths.size === 0 || zipBusy}>
+                    <Download className="w-3 h-3" />{i18n.t('下载打包')}
+                  </Button>
                   <Button variant="ghost" size="sm"
                     className="h-7 text-xs text-destructive border border-destructive/40 hover:bg-destructive/10 gap-1 px-2"
                     onClick={() => setBatchDeleteConfirmOpen(true)}
