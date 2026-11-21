@@ -906,6 +906,7 @@ export default function ActionsPage() {
   const cancelledIdsRef = useRef<Map<number, number>>(new Map());
   const [activeTab, setActiveTab] = useState<'workflows' | 'caches'>('workflows');
   const refreshRef = useRef<PullToRefreshRef>(null);
+  const ghcrReloadRef = useRef<(() => Promise<void>) | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ deleted: 0, total: 0, failed: 0, currentName: '' });
@@ -1394,7 +1395,11 @@ export default function ActionsPage() {
   return (
     <>
     <PullToRefresh ref={refreshRef} onRefresh={async () => {
-      await Promise.all([loadRuns(1, false, true, true), loadWorkflows()]);
+      if (activeTab === 'caches') {
+        await ghcrReloadRef.current?.();
+      } else {
+        await Promise.all([loadRuns(1, false, true, true), loadWorkflows()]);
+      }
     }}>
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
@@ -1712,7 +1717,7 @@ export default function ActionsPage() {
       )}
 
       {activeTab === 'caches' && canManageGHCR && (
-        <GhcrPanel owner={owner!} repo={repo!} />
+        <GhcrPanel owner={owner!} repo={repo!} onRegisterReload={(fn) => { ghcrReloadRef.current = fn; }} />
       )}
     </div>
 
@@ -1955,11 +1960,9 @@ export default function ActionsPage() {
   );
 }
 
-function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
+function GhcrPanel({ owner, repo, onRegisterReload }: { owner: string; repo: string; onRegisterReload?: (reload: () => Promise<void>) => void }) {
   const [packages, setPackages] = useState<import('@/types/types').GitHubPackage[]>([]);
   const [loading, setLoading] = useState(true);
-  const refreshRef = useRef<PullToRefreshRef>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [versions, setVersions] = useState<Record<string, import('@/types/types').GitHubPackageVersion[]>>({});
@@ -1972,9 +1975,8 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
     | null
   >(null);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     setError('');
     try {
       const all = await getUserPackages(owner, 'container', true);
@@ -1986,11 +1988,14 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
       setError(e instanceof Error ? e.message : i18n.t('加载失败'));
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, [owner, repo]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    onRegisterReload?.(() => load());
+  }, [onRegisterReload, load]);
 
   const loadVersions = async (pkg: import('@/types/types').GitHubPackage) => {
     setLoadingVersions((prev) => ({ ...prev, [pkg.name]: true }));
@@ -2099,20 +2104,9 @@ function GhcrPanel({ owner, repo }: { owner: string; repo: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {packages.length > 0 ? `${packages.length} ${i18n.t('个包')}` : ''}
-        </p>
-        <Button
-          variant="ghost" size="sm"
-          className="h-8 text-xs text-muted-foreground border border-border hover:bg-secondary"
-          onClick={() => load(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
-          {i18n.t('刷新')}
-        </Button>
-      </div>
+      {packages.length > 0 && (
+        <p className="text-sm text-muted-foreground">{`${packages.length} ${i18n.t('个包')}`}</p>
+      )}
 
       {packages.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground border border-border rounded-lg bg-card">
