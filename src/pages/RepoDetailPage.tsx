@@ -344,14 +344,30 @@ export default function RepoDetailPage() {
   if (loading) {
   return (
 
-      <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
-        <Skeleton className="h-8 w-64 bg-muted" />
-        <Skeleton className="h-4 w-96 bg-muted" />
-        <div className="flex gap-2">
-          <Skeleton className="h-9 w-24 bg-muted" />
-          <Skeleton className="h-9 w-24 bg-muted" />
+      <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
+        {/* 面包屑 */}
+        <Skeleton className="h-4 w-32 bg-muted" />
+        {/* 标题行 */}
+        <Skeleton className="h-7 w-2/3 bg-muted" />
+        {/* 操作按钮行（右对齐图标钮） */}
+        <div className="flex items-center justify-end gap-1.5">
+          <Skeleton className="h-8 w-8 bg-muted" />
+          <Skeleton className="h-8 w-8 bg-muted" />
+          <Skeleton className="h-8 w-8 bg-muted" />
         </div>
-        <Skeleton className="h-48 w-full bg-muted" />
+        {/* 收藏 / Fork 统计行 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Skeleton className="h-8 w-28 bg-muted" />
+          <Skeleton className="h-8 w-28 bg-muted" />
+        </div>
+        {/* 入口卡片网格：复刻真实两列布局与卡片高度，避免骨架→整页重排 */}
+        <div className="grid grid-cols-2 gap-3">
+          {Array.from({ length: 13 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 bg-muted" />
+          ))}
+        </div>
+        {/* Tabs 行 */}
+        <Skeleton className="h-9 w-44 bg-muted" />
       </div>
 
     );
@@ -680,7 +696,7 @@ export default function RepoDetailPage() {
         <TabsContent value="readme">
           <Card className="bg-card border-border">
             <CardContent className="p-6">
-              {readme && (
+              {readme ? (
                 <div className="flex justify-end -mt-4 -mr-4 mb-1 gap-1">
                   <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground gap-0.5" onClick={() => { void handleCopy(readme, 'readme'); }}>
                     {copiedKey === 'readme'
@@ -694,7 +710,9 @@ export default function RepoDetailPage() {
                     </Button>
                   )}
                 </div>
-              )}
+              ) : metaLoading ? (
+                <div className="flex justify-end -mt-4 -mr-4 mb-1 h-6" />
+              ) : null}
               {readme ? (
                 <MarkdownRenderer
                   content={readme}
