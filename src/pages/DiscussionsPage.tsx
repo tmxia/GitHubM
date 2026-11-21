@@ -155,11 +155,14 @@ function DiscussionComments({
       {loading ? (
         <div className="space-y-3">
           {[1, 2].map((i) => (
-            <div key={i} className="flex gap-3">
-              <Skeleton className="w-8 h-8 rounded-full bg-muted shrink-0" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-24 bg-muted" />
-                <Skeleton className="h-16 w-full bg-muted" />
+            <div key={i} className="bg-card border rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Skeleton className="w-7 h-7 rounded-full bg-muted shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0 space-y-2">
+                  <Skeleton className="h-4 w-24 bg-muted" />
+                  <Skeleton className="h-16 w-full bg-muted" />
+                </div>
+                <Skeleton className="w-7 h-7 rounded-md bg-muted shrink-0" />
               </div>
             </div>
           ))}

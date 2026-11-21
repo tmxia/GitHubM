@@ -127,8 +127,22 @@ export default function RepoDeployKeysPage() {
       </div>
 
       {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 bg-muted" />)}
+        <div className="border border-border rounded-lg bg-card divide-y divide-border overflow-hidden">
+          <div className="px-4 py-3 bg-secondary/30 flex items-center gap-3">
+            <Skeleton className="w-4 h-4 bg-muted shrink-0" />
+            <Skeleton className="h-4 w-32 bg-muted" />
+          </div>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-4 flex items-start gap-3">
+              <Skeleton className="w-8 h-8 rounded-md bg-muted shrink-0" />
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <Skeleton className="h-4 w-1/2 bg-muted" />
+                <Skeleton className="h-3 w-2/3 bg-muted" />
+                <Skeleton className="h-3 w-1/3 bg-muted" />
+              </div>
+              <Skeleton className="w-8 h-8 rounded-md bg-muted shrink-0" />
+            </div>
+          ))}
         </div>
       ) : error ? (
         <div className="text-center py-8 text-destructive">

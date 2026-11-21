@@ -160,16 +160,24 @@ export default function ActivityPage() {
         {i18n.t('最近活动')}</h1>
 
       {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex items-start gap-3 p-4 bg-card border border-border rounded-lg">
-              <Skeleton className="w-8 h-8 rounded-full bg-muted shrink-0" />
-              <div className="flex-1">
-                <Skeleton className="h-4 w-2/3 bg-muted mb-2" />
-                <Skeleton className="h-3 w-1/3 bg-muted" />
+        <div className="relative">
+          <div className="absolute left-9 top-0 bottom-0 w-px bg-border" />
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-start gap-4">
+                <div className="relative z-10 shrink-0">
+                  <Skeleton className="w-8 h-8 rounded-full bg-muted" />
+                </div>
+                <div className="flex-1 bg-card border border-border rounded-lg p-3 min-w-0">
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <Skeleton className="h-4 w-2/3 bg-muted" />
+                    <Skeleton className="h-5 w-12 bg-muted shrink-0" />
+                  </div>
+                  <Skeleton className="h-3 w-1/3 bg-muted mt-1" />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ) : events.length === 0 ? (
         <div className="py-16 text-center">

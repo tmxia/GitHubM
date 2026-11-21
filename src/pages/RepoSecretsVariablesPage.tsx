@@ -185,9 +185,30 @@ function ScopePanel({ owner, repo, scope, refreshTrigger }: { owner: string; rep
 
   if (loading) {
     return (
-      <div className="space-y-2">
-        <Skeleton className="h-20 bg-muted" />
-        <Skeleton className="h-20 bg-muted" />
+      <div className="space-y-4">
+        {[1, 2].map((i) => (
+          <div key={i} className="bg-card border border-border rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Skeleton className="w-4 h-4 bg-muted shrink-0" />
+                <Skeleton className="h-4 w-28 bg-muted" />
+              </div>
+              <Skeleton className="h-7 w-20 bg-muted" />
+            </div>
+            <div className="p-4">
+              <div className="divide-y divide-border border border-border rounded-md">
+                <div className="p-3 flex items-center gap-3">
+                  <Skeleton className="w-3.5 h-3.5 bg-muted shrink-0" />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <Skeleton className="h-4 w-1/2 bg-muted" />
+                    <Skeleton className="h-3 w-1/3 bg-muted" />
+                  </div>
+                  <Skeleton className="w-7 h-7 rounded-md bg-muted shrink-0" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
