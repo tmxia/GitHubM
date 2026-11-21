@@ -649,14 +649,14 @@ export default function RepoDetailPage() {
               <button
                 key={item.path}
                 type="button"
-                className="bg-card border border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors text-left group"
+                className="relative bg-card border border-border rounded-lg p-3 hover:bg-secondary/50 transition-colors text-left group"
                 onClick={() => navigate(`/repos/${repo.full_name}/${item.path}`)}
               >
                 <div className="flex items-center gap-2">
                   <Icon className="w-4 h-4 text-muted-foreground group-hover:text-accent transition-colors shrink-0" />
                   <span className="text-sm text-foreground group-hover:text-accent transition-colors truncate">{item.label}</span>
                   {item.count !== null && (
-                    <Badge variant="outline" className="ml-auto border-border text-muted-foreground text-xs shrink-0">
+                    <Badge variant="outline" className="absolute right-3 top-1/2 -translate-y-1/2 border-border text-muted-foreground text-xs shrink-0">
                       {item.count}
                     </Badge>
                   )}
