@@ -153,14 +153,21 @@ export default function StarredPage() {
       document.documentElement.scrollTop = y;
       document.body.scrollTop = y;
       const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-      if (Math.abs(actual - y) <= 2 || attempts >= 60) {
+      if (Math.abs(actual - y) <= 2 || attempts >= 120) {
         clearListScroll(SCROLL_KEY);
       } else {
         attempts++;
         setTimeout(tryScroll, 30);
       }
     };
-    setTimeout(tryScroll, 50);
+    // 等两帧布局回流后首次尝试，避免首帧高度不足被钳制；未到位再按 30ms 重试兜底
+    let frames = 0;
+    const rafRestore = () => {
+      frames++;
+      if (frames >= 2) tryScroll();
+      else requestAnimationFrame(rafRestore);
+    };
+    requestAnimationFrame(rafRestore);
   }, [loading, repos.length]);
 
   const handleUnstar = async (repo: GitHubRepo) => {

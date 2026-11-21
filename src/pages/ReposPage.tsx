@@ -1,7 +1,7 @@
 
 import {
    useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { lsGet, lsSet } from '@/lib/storage';
+import { lsGet, lsSet, ssGet, ssSet, ssRemove } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTaskStore } from '@/stores/taskStore';
@@ -110,7 +110,7 @@ import type { GitHubRepo, RepoSortField, SortDirection } from '@/types/types';
 import { toast } from 'sonner';
 import { useDebounce } from '@/hooks/use-debounce';
 import { pageCache } from '@/lib/page-cache';
-import { clearListScroll, readListScroll } from '@/lib/scrollRestore';
+import { saveListScroll, clearListScroll, readListScroll } from '@/lib/scrollRestore';
 import { prefetchRepoDetail } from '@/lib/repoPrefetch';
 import { copyToClipboard } from '@/lib/utils';
 import sealedbox from 'tweetnacl-sealedbox-js';
@@ -856,6 +856,16 @@ export default function ReposPage() {
   useEffect(() => {
     if (loading || repos.length === 0 || restoredRef.current) return;
     restoredRef.current = true;
+
+    const isReturning = ssGet('repos_is_returning') === '1';
+
+    if (!isReturning) {
+      window.scrollTo(0, 0);
+      clearListScroll(REPOS_SCROLL_KEY);
+      return;
+    }
+
+    ssRemove('repos_is_returning');
     const y = readListScroll(REPOS_SCROLL_KEY);
     if (y <= 0) return;
     let attempts = 0;
@@ -864,14 +874,21 @@ export default function ReposPage() {
       document.documentElement.scrollTop = y;
       document.body.scrollTop = y;
       const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-      if (Math.abs(actual - y) <= 2 || attempts >= 60) {
+      if (Math.abs(actual - y) <= 2 || attempts >= 120) {
         clearListScroll(REPOS_SCROLL_KEY);
       } else {
         attempts++;
         setTimeout(tryScroll, 30);
       }
     };
-    setTimeout(tryScroll, 50);
+    // 等两帧布局回流后首次尝试，避免首帧高度不足被钳制；未到位再按 30ms 重试兜底
+    let frames = 0;
+    const rafRestore = () => {
+      frames++;
+      if (frames >= 2) tryScroll();
+      else requestAnimationFrame(rafRestore);
+    };
+    requestAnimationFrame(rafRestore);
   }, [loading, repos.length]);
 
   useEffect(() => {
@@ -1448,12 +1465,22 @@ export default function ReposPage() {
                     role="button"
                     tabIndex={0}
                     className="cv-auto w-full p-4 hover:bg-secondary/50 transition-colors text-left group cursor-pointer"
-                    onClick={() => navigate(`/repos/${repo.full_name}`)}
+                    onClick={() => {
+                      ssSet('repos_is_returning', '1');
+                      saveListScroll(REPOS_SCROLL_KEY);
+                      navigate(`/repos/${repo.full_name}`);
+                    }}
                     onTouchStart={() => {
                       const isOwner = !!(currentUser && repo.owner.login.toLowerCase() === currentUser.login.toLowerCase());
                       prefetchRepoDetail(repo.owner.login, repo.name, isOwner);
                     }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/repos/${repo.full_name}`); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        ssSet('repos_is_returning', '1');
+                        saveListScroll(REPOS_SCROLL_KEY);
+                        navigate(`/repos/${repo.full_name}`);
+                      }
+                    }}
                   >
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
