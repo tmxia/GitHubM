@@ -205,11 +205,16 @@ export default function CommitsPage() {
         {loading ? (
           <>
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
-                <Skeleton className="w-8 h-8 rounded-full bg-muted shrink-0" />
-                <div className="flex-1">
-                  <Skeleton className="h-5 w-2/3 bg-muted mb-1.5" />
-                  <Skeleton className="h-4 w-1/3 bg-muted" />
+              <div key={i} className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="px-4 pt-3 pb-2.5 flex items-start gap-3">
+                  <Skeleton className="w-8 h-8 rounded-full bg-muted shrink-0" />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <Skeleton className="h-5 w-2/3 bg-muted" />
+                    <Skeleton className="h-4 w-1/3 bg-muted" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-1 px-3 py-2 border-t border-border/60 bg-secondary/20">
+                  <Skeleton className="h-8 w-16 bg-muted" />
                 </div>
               </div>
             ))}
