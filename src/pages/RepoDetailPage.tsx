@@ -105,13 +105,24 @@ export default function RepoDetailPage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
-  const [repo, setRepo] = useState<GitHubRepo | null>(null);
-  const [readme, setReadme] = useState<string>('');
-  const [commits, setCommits] = useState<GitHubCommit[]>([]);
-  const [languages, setLanguages] = useState<Record<string, number>>({});
-  const [starred, setStarred] = useState(false);
+  // 挂载前同步读详情缓存：从产物/子页面返回命中时首帧即渲染真实标题，避免先闪骨架再切换
+  const [bootDetail] = useState(() => {
+    if (!owner || !repoName) return null;
+    return pageCache.get<{
+      repo: GitHubRepo;
+      languages: Record<string, number>;
+      readme: string;
+      commits: GitHubCommit[];
+      starred: boolean;
+    }>(`repodetail:v2:${owner}/${repoName}`);
+  });
+  const [repo, setRepo] = useState<GitHubRepo | null>(bootDetail?.repo ?? null);
+  const [readme, setReadme] = useState<string>(bootDetail?.readme ?? '');
+  const [commits, setCommits] = useState<GitHubCommit[]>(bootDetail?.commits ?? []);
+  const [languages, setLanguages] = useState<Record<string, number>>(bootDetail?.languages ?? {});
+  const [starred, setStarred] = useState(!!bootDetail?.starred);
   const [openIssueCount, setOpenIssueCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(bootDetail == null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [starring, setStarring] = useState(false);
   const [forking, setForking] = useState(false);
