@@ -689,7 +689,7 @@ export default function ArtifactsPage() {
         <span className="text-foreground">{i18n.t('产物')}</span>
       </div>
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap min-h-8">
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
           <Package className="w-5 h-5 text-primary" />
           {i18n.t('仓库产物')}
