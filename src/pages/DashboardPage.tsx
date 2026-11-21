@@ -268,17 +268,34 @@ export default function DashboardPage() {
     rememberHomeScroll(anchorId);
     navigate(path);
   };
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
-  const [events, setEvents] = useState<GitHubEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const dashboardCacheKey = `dashboard:${user?.login ?? ''}`;
+  const dashboardCompileKey = `${dashboardCacheKey}:compile`;
+  // 挂载前同步读首页缓存（含过期快照）：从子页面返回时命中，首帧即渲染已缓存卡片，避免先闪骨架再异步回填
+  const [bootHome] = useState(() => {
+    if (!user?.login) return null;
+    return pageCache.getStale<{
+      repos: GitHubRepo[];
+      events: GitHubEvent[];
+      calendar: ContributionCalendar | null;
+      pinnedRepos: GQL_PinnedRepo[];
+      starredCount: number | null;
+    }>(dashboardCacheKey)?.data ?? null;
+  });
+  const [bootCompile] = useState<Array<{ repo: GitHubRepo; workflow?: import('@/types/types').GitHubWorkflow; run: import('@/types/types').GitHubWorkflowRun | null }> | null>(() => {
+    if (!user?.login) return null;
+    return (pageCache.getStale(dashboardCompileKey)?.data ?? null) as Array<{ repo: GitHubRepo; workflow?: import('@/types/types').GitHubWorkflow; run: import('@/types/types').GitHubWorkflowRun | null }> | null;
+  });
+  const [repos, setRepos] = useState<GitHubRepo[]>(bootHome?.repos ?? []);
+  const [events, setEvents] = useState<GitHubEvent[]>(bootHome?.events ?? []);
+  const [loading, setLoading] = useState(bootHome == null);
 
-  const [calendar, setCalendar] = useState<ContributionCalendar | null>(null);
-  const [calendarLoading, setCalendarLoading] = useState(true);
-  const [pinnedRepos, setPinnedRepos] = useState<GQL_PinnedRepo[]>([]);
-  const [pinnedLoading, setPinnedLoading] = useState(true);
-  const [starredCount, setStarredCount] = useState<number | null>(null);
-  const [compileStatus, setCompileStatus] = useState<Array<{ repo: GitHubRepo; workflow?: import('@/types/types').GitHubWorkflow; run: import('@/types/types').GitHubWorkflowRun | null }>>([]);
-  const [compileLoading, setCompileLoading] = useState(true);
+  const [calendar, setCalendar] = useState<ContributionCalendar | null>(bootHome?.calendar ?? null);
+  const [calendarLoading, setCalendarLoading] = useState(bootHome == null);
+  const [pinnedRepos, setPinnedRepos] = useState<GQL_PinnedRepo[]>(bootHome?.pinnedRepos ?? []);
+  const [pinnedLoading, setPinnedLoading] = useState(bootHome == null);
+  const [starredCount, setStarredCount] = useState<number | null>(bootHome?.starredCount ?? null);
+  const [compileStatus, setCompileStatus] = useState(bootCompile ?? []);
+  const [compileLoading, setCompileLoading] = useState(bootCompile == null);
 
   const compileStatusRef = useRef<typeof compileStatus>([]);
   useEffect(() => { compileStatusRef.current = compileStatus; }, [compileStatus]);
