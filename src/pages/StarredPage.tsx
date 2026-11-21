@@ -75,23 +75,25 @@ function sortRepos(repos: GitHubRepo[], sort: SortKey): GitHubRepo[] {
 export default function StarredPage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>(() => loadSortPref());
-  const [unstarring, setUnstarring] = useState<number | null>(null);
-
   const cacheKey = `starred:p1:${sort}`;
   const SCROLL_KEY = `starred:scroll:${sort}`;
 
+  // 挂载前同步读缓存：从详情返回时缓存命中，首帧即渲染真实列表，避免先闪骨架再异步回填
+  const [bootCache] = useState(() =>
+    pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey),
+  );
+  const [repos, setRepos] = useState<GitHubRepo[]>(bootCache?.repos ?? []);
+  const [loading, setLoading] = useState(bootCache == null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(bootCache?.hasMore ?? false);
+  const [page, setPage] = useState(bootCache?.page ?? 1);
+  const [search, setSearch] = useState('');
+  const [unstarring, setUnstarring] = useState<number | null>(null);
+
   const loadStarred = useCallback(async (p = 1, append = false, force = false) => {
     if (force) { clearApiCache(); pageCache.invalidate('starred:'); }
-    if (p === 1) setLoading(true);
-    else setLoadingMore(true);
-
+    // 首页非强制刷新：先命中缓存直接回填，避免命中时先置 loading 再复位造成抖动
     if (p === 1 && !append && !force) {
       const cached = pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey);
       if (cached) {
@@ -102,6 +104,9 @@ export default function StarredPage() {
         return;
       }
     }
+
+    if (p === 1) setLoading(true);
+    else setLoadingMore(true);
 
     try {
       const apiSort = (sort === 'updated' ? 'updated' : 'created') as 'created' | 'updated';
@@ -248,13 +253,13 @@ export default function StarredPage() {
         {loading ? (
           <div className="divide-y divide-border">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="p-4 flex gap-3">
-                <Skeleton className="w-8 h-8 rounded bg-muted shrink-0" />
-                <div className="flex-1 space-y-2">
+              <div key={i} className="p-4 flex items-start gap-3">
+                <div className="flex-1 min-w-0 space-y-2">
                   <Skeleton className="h-4 w-1/3 bg-muted" />
                   <Skeleton className="h-3 w-2/3 bg-muted" />
                   <Skeleton className="h-3 w-1/4 bg-muted" />
                 </div>
+                <Skeleton className="w-8 h-8 rounded-md bg-muted shrink-0" />
               </div>
             ))}
           </div>
