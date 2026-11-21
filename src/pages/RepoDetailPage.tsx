@@ -420,7 +420,7 @@ export default function RepoDetailPage() {
   return (
     <PullToRefresh onRefresh={handleRefresh}>
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
-      <div className="space-y-2">
+      <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <button
             type="button"
