@@ -373,15 +373,15 @@ export default function BranchesPage() {
                         </Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-                      <span className="font-mono text-[11px]">{branch.commit.sha.substring(0, 7)}</span>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                      <span className="font-mono text-[11px] min-w-0 truncate">{branch.commit.sha.substring(0, 7)}</span>
                       {branch.name !== defaultBranch && branch.ahead_by !== undefined && branch.ahead_by > 0 && (
-                        <span className="flex items-center gap-0.5 text-primary">
+                        <span className="flex items-center gap-0.5 text-primary shrink-0">
                           <ArrowUp className="w-3 h-3" />{branch.ahead_by} {i18n.t('领先')}
                         </span>
                       )}
                       {branch.name !== defaultBranch && branch.behind_by !== undefined && branch.behind_by > 0 && (
-                        <span className="flex items-center gap-0.5 text-muted-foreground">
+                        <span className="flex items-center gap-0.5 text-muted-foreground shrink-0">
                           <ArrowDown className="w-3 h-3" />{branch.behind_by} {i18n.t('落后')}
                         </span>
                       )}
