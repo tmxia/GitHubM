@@ -177,14 +177,19 @@ export async function runGeneralAgent(options: RunAgentOptions): Promise<void> {
       return;
     }
 
-    for (const call of result.toolCalls) {
-      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      onEvent({ type: 'tool_start', call });
+    const calls = result.toolCalls;
 
-      const signature = `${call.name}:${call.arguments}`;
-      const count = (repeatedCalls.get(signature) || 0) + 1;
-      repeatedCalls.set(signature, count);
+    // 批内预统计重复签名，并行场景下避免并发写 Map 竞争
+    const signatureOf = (call: V2ToolCall) => `${call.name}:${call.arguments}`;
+    for (const call of calls) {
+      const sig = signatureOf(call);
+      repeatedCalls.set(sig, (repeatedCalls.get(sig) || 0) + 1);
+    }
 
+    const runOne = async (call: V2ToolCall): Promise<ToolRunResult> => {
+      if (signal.aborted) throw new DOMException('AbortError', 'AbortError');
+
+      const count = repeatedCalls.get(signatureOf(call)) || 0;
       let outcome: ToolRunResult = { ok: false, content: '工具未执行' };
       if (count >= 3) {
         outcome = { ok: false, content: '检测到重复调用相同工具和参数，已停止重复执行。' };
@@ -222,7 +227,26 @@ export async function runGeneralAgent(options: RunAgentOptions): Promise<void> {
           }
         }
       }
+      return outcome;
+    };
 
+    for (const call of calls) onEvent({ type: 'tool_start', call });
+
+    // 整轮全为只读工具时并行执行；含写/危险工具则整轮串行，保护审批与依赖顺序。
+    const allReadOnly = calls.every((call) => toolMap.get(call.name)?.risk === 'read');
+    const outcomes: ToolRunResult[] = [];
+    if (allReadOnly) {
+      const settled = await Promise.all(calls.map((call) => runOne(call)));
+      outcomes.push(...settled);
+    } else {
+      for (const call of calls) {
+        outcomes.push(await runOne(call));
+      }
+    }
+
+    // 按原序后处理：大结果存 Artifact，回填事件与工具消息
+    calls.forEach((call, index) => {
+      const outcome = outcomes[index];
       let artifact = outcome.artifact;
       let content = outcome.content || (outcome.ok ? '（无输出）' : '（工具执行失败，未返回详情）');
       if (call.name !== 'artifact_read' && content.length > MAX_INLINE_TOOL_RESULT) {
@@ -255,7 +279,7 @@ export async function runGeneralAgent(options: RunAgentOptions): Promise<void> {
         name: call.name,
         content,
       });
-    }
+    });
     steps++;
     onSnapshot?.({ messages, steps });
   }
