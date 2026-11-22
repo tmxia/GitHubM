@@ -538,7 +538,6 @@ export default function ArtifactsPage() {
       setUploadProgress(null);
 
       setCreateOpen(false);
-      resetCreateForm();
       loadReleases(1);
       toast.success(i18n.t('发布完成'));
     } catch (e) {
@@ -695,7 +694,7 @@ export default function ArtifactsPage() {
           {i18n.t('仓库产物')}
         </h1>
         {canPush && (
-          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-8" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 h-8" onClick={() => { resetCreateForm(); setCreateOpen(true); }}>
             <Plus className="w-3.5 h-3.5 mr-1" />{i18n.t('发布新版本')}
           </Button>
         )}
@@ -741,7 +740,7 @@ export default function ArtifactsPage() {
                 <p className="text-foreground font-medium">{i18n.t('暂无 Release')}</p>
                 <p className="text-sm text-muted-foreground mt-1">{i18n.t('创建 Release 后可在此查看和下载产物')}</p>
                 {canPush && (
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 mt-4" onClick={() => setCreateOpen(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 mt-4" onClick={() => { resetCreateForm(); setCreateOpen(true); }}>
                     <Plus className="w-4 h-4 mr-2" />{i18n.t('发布新版本')}
                   </Button>
                 )}
@@ -1043,8 +1042,8 @@ export default function ArtifactsPage() {
       </AlertDialog>
     </div>
 
-      <Dialog open={createOpen} onOpenChange={(v) => { if (!publishing) { setCreateOpen(v); if (!v) resetCreateForm(); } }}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border max-h-[85vh] flex flex-col p-0 gap-0"
+      <Dialog open={createOpen} onOpenChange={(v) => { if (!publishing) setCreateOpen(v); }}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border max-h-[85vh] max-h-[85dvh] flex flex-col p-0 gap-0"
           onTouchStart={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
         >
@@ -1120,8 +1119,8 @@ export default function ArtifactsPage() {
             </div>
           </div>
 
-          <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0" >
-            <Button variant="outline" className="min-w-[80px] px-4 border-border" onClick={() => { setCreateOpen(false); resetCreateForm(); }} disabled={publishing}>{i18n.t('取消')}</Button>
+          <DialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0 shrink-0" >
+            <Button variant="outline" className="min-w-[80px] px-4 border-border" onClick={() => setCreateOpen(false)} disabled={publishing}>{i18n.t('取消')}</Button>
             <Button className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreateRelease} disabled={publishing || !newTag.trim()}>
               {publishing ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />{i18n.t('发布中...')}</> : i18n.t('发布')}
             </Button>
