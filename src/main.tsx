@@ -39,6 +39,13 @@ import { ThemeProvider } from "./contexts/ThemeContext.tsx";
     bridge?.setDownloadNotify?.(enabled);
   } catch {}
 
+  // Service Worker 离线缓存：仅生产环境 + 安全上下文注册；file:// / 本地源静默降级。
+  if (import.meta.env.PROD && 'serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+    });
+  }
+
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
   const method = (args[1]?.method || 'GET').toUpperCase();
