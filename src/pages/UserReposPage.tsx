@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ChevronRight, Globe, Lock, Star, GitFork, Clock, BookOpen,
@@ -13,6 +13,8 @@ import {
   checkIsFollowing, followUser, unfollowUser,
 } from '@/services/github';
 import type { GitHubRepo, GitHubUser } from '@/types/types';
+import { ssGet, ssSet, ssRemove } from '@/lib/storage';
+import { saveListScroll, clearListScroll, readListScroll } from '@/lib/scrollRestore';
 import i18n from '@/i18n';
 import PullToRefresh from '@/components/common/PullToRefresh';
 
@@ -28,6 +30,10 @@ export default function UserReposPage() {
   const [error, setError] = useState('');
   const [isFollowing, setIsFollowing] = useState(false);
   const [followingLoading, setFollowingLoading] = useState(false);
+
+  const USER_REPOS_SCROLL_KEY = `user-repos:scroll:${login}`;
+  const USER_REPOS_RETURNING_KEY = 'user_repos_is_returning';
+  const restoredRef = useRef(false);
 
   const loadUser = useCallback(async () => {
     if (!login) return;
@@ -81,6 +87,43 @@ export default function UserReposPage() {
     loadUser();
     loadRepos(1);
   }, [loadUser, loadRepos]);
+
+  useEffect(() => {
+    if (loading || repos.length === 0 || restoredRef.current) return;
+    restoredRef.current = true;
+
+    const isReturning = ssGet(USER_REPOS_RETURNING_KEY) === '1';
+    if (!isReturning) {
+      window.scrollTo(0, 0);
+      clearListScroll(USER_REPOS_SCROLL_KEY);
+      return;
+    }
+
+    ssRemove(USER_REPOS_RETURNING_KEY);
+    const y = readListScroll(USER_REPOS_SCROLL_KEY);
+    if (y <= 0) return;
+    let attempts = 0;
+    const tryScroll = () => {
+      window.scrollTo(0, y);
+      document.documentElement.scrollTop = y;
+      document.body.scrollTop = y;
+      const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      if (Math.abs(actual - y) <= 2 || attempts >= 120) {
+        clearListScroll(USER_REPOS_SCROLL_KEY);
+      } else {
+        attempts++;
+        setTimeout(tryScroll, 30);
+      }
+    };
+    // 等两帧布局回流后首次尝试，避免首帧高度不足被钳制；未到位再按 30ms 重试兜底
+    let frames = 0;
+    const rafRestore = () => {
+      frames++;
+      if (frames >= 2) tryScroll();
+      else requestAnimationFrame(rafRestore);
+    };
+    requestAnimationFrame(rafRestore);
+  }, [loading, repos.length, USER_REPOS_SCROLL_KEY]);
 
   return (
     <PullToRefresh onRefresh={async () => { await Promise.all([loadUser(), loadRepos(1, false)]); }}>
@@ -182,7 +225,11 @@ export default function UserReposPage() {
               key={repo.id}
               type="button"
               className="w-full p-4 hover:bg-secondary/50 transition-colors text-left group"
-              onClick={() => navigate(`/repos/${repo.full_name}`)}
+              onClick={() => {
+                ssSet(USER_REPOS_RETURNING_KEY, '1');
+                saveListScroll(USER_REPOS_SCROLL_KEY);
+                navigate(`/repos/${repo.full_name}`);
+              }}
             >
               <div className="flex items-center gap-2 flex-wrap">
                 {repo.private
