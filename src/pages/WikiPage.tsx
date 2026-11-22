@@ -9,16 +9,24 @@ import {
   Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import PullToRefresh from '@/components/common/PullToRefresh';
 import i18n from "@/i18n";
 
 export default function WikiPage() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>();
   const navigate = useNavigate();
   const [iframeError, setIframeError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const wikiUrl = `https://github.com/${owner}/${repo}/wiki`;
 
+  const handleRefresh = async () => {
+    setIframeError(false);
+    setReloadKey((k) => k + 1);
+  };
+
   return (
+    <PullToRefresh onRefresh={handleRefresh}>
     <div className="p-4 md:p-6 space-y-4 h-full flex flex-col">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap shrink-0">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -71,6 +79,7 @@ export default function WikiPage() {
               </a>
             </div>
             <iframe
+              key={reloadKey}
               src={wikiUrl}
               className="w-full flex-1 min-h-0 border-0"
               title="GitHub Wiki"
@@ -108,5 +117,6 @@ export default function WikiPage() {
         </div>
       </div>
     </div>
+    </PullToRefresh>
   );
 }

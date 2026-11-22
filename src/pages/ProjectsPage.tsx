@@ -48,6 +48,7 @@ import type { GitHubProject, GitHubProjectColumn, GitHubProjectCard } from '@/ty
 import { toast } from 'sonner';
 import i18n from "@/i18n";
 import { useRepoPermissions } from '@/hooks/use-repo-permissions';
+import PullToRefresh from '@/components/common/PullToRefresh';
 
 function KanbanColumn({
   column,
@@ -134,13 +135,21 @@ export default function ProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
+  const loadProjects = useCallback(async () => {
     if (!owner || !repo) return;
-    getRepoProjects(owner, repo)
-      .then((data) => setProjects(Array.isArray(data) ? data : []))
-      .catch((err) => { toast.error(i18n.t('加载项目列表失败（可能需要启用 Projects 功能）')); console.error(err); })
-      .finally(() => setLoading(false));
+    setLoading(true);
+    try {
+      const data = await getRepoProjects(owner, repo);
+      setProjects(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(i18n.t('加载项目列表失败（可能需要启用 Projects 功能）'));
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }, [owner, repo]);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
 
   const loadBoard = useCallback(async (project: GitHubProject) => {
     setSelectedProject(project);
@@ -161,6 +170,11 @@ export default function ProjectsPage() {
       setLoadingBoard(false);
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    await loadProjects();
+    if (selectedProject) await loadBoard(selectedProject);
+  }, [loadProjects, selectedProject, loadBoard]);
 
   const handleCreateProject = async () => {
     if (!owner || !repo || !newName.trim()) return;
@@ -223,6 +237,7 @@ export default function ProjectsPage() {
   };
 
   return (
+    <PullToRefresh onRefresh={handleRefresh}>
     <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -370,5 +385,6 @@ export default function ProjectsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </PullToRefresh>
   );
 }

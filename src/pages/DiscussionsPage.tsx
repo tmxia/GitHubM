@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
+import PullToRefresh from '@/components/common/PullToRefresh';
 import {
   gqlGetDiscussions,
   gqlGetDiscussionComments,
@@ -322,6 +323,10 @@ export default function DiscussionsPage() {
     loadDiscussions(value !== 'all' ? value : undefined);
   };
 
+  const handleRefresh = useCallback(async () => {
+    await loadDiscussions(selectedCategory !== 'all' ? selectedCategory : undefined);
+  }, [loadDiscussions, selectedCategory]);
+
   const handleCreateDiscussion = async () => {
     if (!newTitle.trim() || !newCategoryId || !repositoryId) return;
     setCreating(true);
@@ -350,6 +355,7 @@ export default function DiscussionsPage() {
   };
 
   return (
+    <PullToRefresh onRefresh={handleRefresh}>
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent transition-colors" onClick={() => navigate('/repos')}>{i18n.t('仓库')}</button>
@@ -547,5 +553,6 @@ export default function DiscussionsPage() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   );
 }
