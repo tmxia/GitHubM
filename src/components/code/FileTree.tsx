@@ -1,5 +1,5 @@
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
 import { lsGet, lsSet } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -88,7 +88,7 @@ function sortItems(items: GitHubContent[]): GitHubContent[] {
   });
 }
 
-function TreeNodeRow({
+const TreeNodeRow = memo(function TreeNodeRow({
   node,
   depth,
   isExpanded,
@@ -355,7 +355,7 @@ function TreeNodeRow({
       {isDir ? dirContextContent : fileContextContent}
     </ContextMenu>
   );
-}
+});
 
 function MoveIcon({ className }: { className?: string }) {
   return (
@@ -365,7 +365,7 @@ function MoveIcon({ className }: { className?: string }) {
   );
 }
 
-function TreeNodeList({
+const TreeNodeList = memo(function TreeNodeList({
   nodes,
   depth,
   expandedPaths,
@@ -477,7 +477,7 @@ function TreeNodeList({
       })}
     </>
   );
-}
+});
 
 export default function FileTree({
   owner,
@@ -509,6 +509,23 @@ export default function FileTree({
   const lastActivePathRef = useRef<string | undefined>(undefined);
 
   const nodeMapRef = useRef<Map<string, TreeNode>>(new Map());
+
+  // 同步最新展开态，供稳定化后的回调读取，避免回调身份随 expandedPaths 变化
+  const expandedPathsRef = useRef(expandedPaths);
+  expandedPathsRef.current = expandedPaths;
+
+  // 持有父级传入的最新回调，向下暴露恒定引用，使 memo 后的行组件跳过重渲染；
+  // 包装内部始终经 ref 调用最新父级回调，避免闭包读到旧值。
+  const propsRef = useRef({ onFileClick, onNewFile, onNewFolder, onUpload, onRename, onDelete, onMove, onDownload });
+  propsRef.current = { onFileClick, onNewFile, onNewFolder, onUpload, onRename, onDelete, onMove, onDownload };
+
+  const stableOnNewFile = useCallback((dir: string) => propsRef.current.onNewFile?.(dir), []);
+  const stableOnNewFolder = useCallback((dir: string) => propsRef.current.onNewFolder?.(dir), []);
+  const stableOnUpload = useCallback((dir: string) => propsRef.current.onUpload?.(dir), []);
+  const stableOnRename = useCallback((item: GitHubContent) => propsRef.current.onRename?.(item), []);
+  const stableOnDelete = useCallback((item: GitHubContent) => propsRef.current.onDelete?.(item), []);
+  const stableOnMove = useCallback((item: GitHubContent) => propsRef.current.onMove?.(item), []);
+  const stableOnDownload = useCallback((item: GitHubContent) => propsRef.current.onDownload?.(item), []);
 
   useEffect(() => {
     if (rootStatus !== 'loaded') return;
@@ -659,7 +676,7 @@ export default function FileTree({
   }, [activePath, rootStatus, expandedPaths]);
 
   const handleToggle = useCallback(async (path: string) => {
-    const isExpanded = expandedPaths.has(path);
+    const isExpanded = expandedPathsRef.current.has(path);
     if (isExpanded) {
       setExpandedPaths(prev => { const n = new Set(prev); n.delete(path); return n; });
       return;
@@ -683,15 +700,15 @@ export default function FileTree({
       node.children = [];
     }
     setRoots(prev => [...prev]);
-  }, [expandedPaths, loadDir]);
+  }, [loadDir]);
 
   const handleFileClick = useCallback((item: GitHubContent) => {
-    if (onFileClick) {
-      onFileClick(item);
+    if (propsRef.current.onFileClick) {
+      propsRef.current.onFileClick(item);
     } else {
       navigate(`/repos/${owner}/${repo}/code/${item.path}`);
     }
-  }, [onFileClick, navigate, owner, repo]);
+  }, [navigate, owner, repo]);
 
   const handleCopyPath = useCallback((path: string) => {
     copyToClipboard(path);
@@ -824,13 +841,13 @@ export default function FileTree({
               activePath={activePath}
               onToggle={handleToggle}
               onFileClick={handleFileClick}
-              onNewFile={onNewFile}
-              onNewFolder={onNewFolder}
-              onUpload={onUpload}
-              onRename={onRename}
-              onDelete={onDelete}
-              onMove={onMove}
-              onDownload={onDownload}
+              onNewFile={stableOnNewFile}
+              onNewFolder={stableOnNewFolder}
+              onUpload={stableOnUpload}
+              onRename={stableOnRename}
+              onDelete={stableOnDelete}
+              onMove={stableOnMove}
+              onDownload={stableOnDownload}
               onCopyPath={handleCopyPath}
               onCopyRaw={handleCopyRaw}
               onViewHistory={handleViewHistory}
