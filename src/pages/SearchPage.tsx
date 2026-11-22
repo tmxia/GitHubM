@@ -313,16 +313,23 @@ export default function SearchPage() {
   const initType  = (searchParams.get('type') as SearchType) || 'repositories';
   const initPage  = parseInt(searchParams.get('page') || '1', 10);
 
+  // 首帧缓存：从详情返回时缓存命中，首帧即渲染真实列表，避免先闪空态/骨架再异步回填
+  const persistedSortMap = loadSortMap();
+  const urlSortParam = searchParams.get('sort') as SortOption | null;
+  const bootEffectiveSort = normalizeSort(initType, urlSortParam ?? persistedSortMap[initType]);
+  const bootCacheKey = `search:${initType}:${bootEffectiveSort}:${initPage}:${initQuery.trim()}`;
+  const [bootCache] = useState(() => pageCache.get<SearchSnapshot>(bootCacheKey));
+
   const [query, setQuery]           = useState(initQuery);
   const [searchType, setSearchType] = useState<SearchType>(initType);
   const [loading, setLoading]       = useState(false);
-  const [repos, setRepos]           = useState<GitHubRepo[]>([]);
-  const [issues, setIssues]         = useState<GitHubIssue[]>([]);
-  const [users, setUsers]           = useState<GitHubUser[]>([]);
-  const [codeResults, setCodeResults] = useState<CodeSearchItem[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [searched, setSearched]     = useState(false);
-  const [currentPage, setCurrentPage] = useState(initPage);
+  const [repos, setRepos]           = useState<GitHubRepo[]>(bootCache?.repos ?? []);
+  const [issues, setIssues]         = useState<GitHubIssue[]>(bootCache?.issues ?? []);
+  const [users, setUsers]           = useState<GitHubUser[]>(bootCache?.users ?? []);
+  const [codeResults, setCodeResults] = useState<CodeSearchItem[]>(bootCache?.codeResults ?? []);
+  const [totalCount, setTotalCount] = useState(bootCache?.totalCount ?? 0);
+  const [searched, setSearched]     = useState(bootCache != null);
+  const [currentPage, setCurrentPage] = useState(bootCache?.page ?? initPage);
 
   const SEARCH_SCROLL_KEY = `search:scroll:${searchType}:${currentPage}:${query.trim()}`;
   const SEARCH_RETURNING_KEY = 'search_is_returning';
@@ -336,9 +343,8 @@ export default function SearchPage() {
 
   // 排序：按搜索类型分别记忆；URL 中的 sort 优先（用于返回/分享还原）
   const [sortByType, setSortByType] = useState<Record<SearchType, SortOption>>(() => {
-    const map = loadSortMap();
-    const urlSort = searchParams.get('sort') as SortOption | null;
-    if (urlSort) map[initType] = normalizeSort(initType, urlSort);
+    const map = { ...persistedSortMap };
+    if (urlSortParam) map[initType] = normalizeSort(initType, urlSortParam);
     return map;
   });
   const sortOption  = sortByType[searchType];
