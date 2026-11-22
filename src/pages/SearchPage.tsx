@@ -1,5 +1,5 @@
 import { withLoading } from '@/lib/loading';
-import { lsGet, lsSetJSON, lsGetJSON, lsRemove } from '@/lib/storage';
+import { lsGet, lsSetJSON, lsGetJSON, lsRemove, ssGet, ssSet, ssRemove } from '@/lib/storage';
 // 全局搜索页
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -33,6 +33,7 @@ import { Badge } from '@/components/ui/badge';
 import { UserLink } from '@/components/common/UserLink';
 import RepoCard from '@/components/repo/RepoCard';
 import { pageCache } from '@/lib/page-cache';
+import { saveListScroll, clearListScroll, readListScroll } from '@/lib/scrollRestore';
 import {
   searchRepositories,
   searchIssues,
@@ -323,6 +324,10 @@ export default function SearchPage() {
   const [searched, setSearched]     = useState(false);
   const [currentPage, setCurrentPage] = useState(initPage);
 
+  const SEARCH_SCROLL_KEY = `search:scroll:${searchType}:${currentPage}:${query.trim()}`;
+  const SEARCH_RETURNING_KEY = 'search_is_returning';
+  const restoredRef = useRef(false);
+
   // 搜索历史
   const [history, setHistory]         = useState<string[]>(() => loadHistory());
   const [showHistory, setShowHistory] = useState(false);
@@ -444,6 +449,50 @@ export default function SearchPage() {
       handleSearch(initQuery, initType, initPage);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 跳转详情前记录返回标记与当前滚动位置
+  const rememberScroll = useCallback(() => {
+    ssSet(SEARCH_RETURNING_KEY, '1');
+    saveListScroll(SEARCH_SCROLL_KEY);
+  }, [SEARCH_SCROLL_KEY]);
+
+  // 返回搜索页时恢复到上次离开的滚动位置；非返回进入则复位顶部
+  useEffect(() => {
+    if (loading || !searched || restoredRef.current) return;
+    restoredRef.current = true;
+
+    const isReturning = ssGet(SEARCH_RETURNING_KEY) === '1';
+    if (!isReturning) {
+      window.scrollTo(0, 0);
+      clearListScroll(SEARCH_SCROLL_KEY);
+      return;
+    }
+
+    ssRemove(SEARCH_RETURNING_KEY);
+    const y = readListScroll(SEARCH_SCROLL_KEY);
+    if (y <= 0) return;
+    let attempts = 0;
+    const tryScroll = () => {
+      window.scrollTo(0, y);
+      document.documentElement.scrollTop = y;
+      document.body.scrollTop = y;
+      const actual = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      if (Math.abs(actual - y) <= 2 || attempts >= 120) {
+        clearListScroll(SEARCH_SCROLL_KEY);
+      } else {
+        attempts++;
+        setTimeout(tryScroll, 30);
+      }
+    };
+    // 等两帧布局回流后首次尝试，避免首帧高度不足被钳制；未到位再按 30ms 重试兜底
+    let frames = 0;
+    const rafRestore = () => {
+      frames++;
+      if (frames >= 2) tryScroll();
+      else requestAnimationFrame(rafRestore);
+    };
+    requestAnimationFrame(rafRestore);
+  }, [loading, searched, repos.length, issues.length, users.length, codeResults.length, SEARCH_SCROLL_KEY]);
 
   // ── 全局快捷键：/ 或 Ctrl+K 唤起搜索框 ──────────────────────────────
   useEffect(() => {
@@ -731,7 +780,7 @@ export default function SearchPage() {
               <div className="space-y-2">
                 {repos.map((repo) => (
                   <SearchRepoContextMenu key={repo.id} repo={repo}>
-                    <RepoCard repo={repo} showOwner />
+                    <RepoCard repo={repo} showOwner onClick={() => { rememberScroll(); navigate(`/repos/${repo.full_name}`); }} />
                   </SearchRepoContextMenu>
                 ))}
               </div>
@@ -801,7 +850,7 @@ export default function SearchPage() {
                   key={`${item.repository.full_name}:${item.path}:${item.sha}`}
                   type="button"
                   className="w-full p-4 hover:bg-secondary/50 transition-colors text-left border-b border-border last:border-0 group"
-                  onClick={() => navigate(`/repos/${item.repository.full_name}/code/${item.path}`)}
+                  onClick={() => { rememberScroll(); navigate(`/repos/${item.repository.full_name}/code/${item.path}`); }}
                 >
                   <div className="flex items-start gap-3">
                     <Code2 className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
