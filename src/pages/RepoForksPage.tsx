@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import PullToRefresh from '@/components/common/PullToRefresh';
 import {
   Select,
   SelectContent,
@@ -70,7 +71,12 @@ export default function RepoForksPage() {
     loadForks(1, newSort);
   };
 
+  const handleRefresh = useCallback(async () => {
+    await loadForks(1, sort, false, true);
+  }, [loadForks, sort]);
+
   return (
+    <PullToRefresh onRefresh={handleRefresh}>
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
         <button type="button" className="hover:text-accent transition-colors" onClick={() => navigate('/repos')}>
@@ -100,28 +106,17 @@ export default function RepoForksPage() {
               {forks.length}{hasMore ? '+' : ''} {i18n.t('个')}</Badge>
           )}
         </h1>
-        <div className="flex items-center gap-2">
-          <Select value={sort} onValueChange={handleSortChange}>
-            <SelectTrigger className="w-32 h-8 bg-secondary border-border text-foreground text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-popover border-border">
-              <SelectItem value="newest">{i18n.t('最新')}</SelectItem>
-              <SelectItem value="oldest">{i18n.t('最早')}</SelectItem>
-              <SelectItem value="stargazers">{i18n.t('Star 数')}</SelectItem>
-              <SelectItem value="watchers">{i18n.t('Watch 数')}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="border border-border text-muted-foreground hover:bg-secondary h-8"
-            onClick={() => loadForks(1, sort, false, true)}
-            disabled={loading}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
-        </div>
+        <Select value={sort} onValueChange={handleSortChange}>
+          <SelectTrigger className="w-32 h-8 bg-secondary border-border text-foreground text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-popover border-border">
+            <SelectItem value="newest">{i18n.t('最新')}</SelectItem>
+            <SelectItem value="oldest">{i18n.t('最早')}</SelectItem>
+            <SelectItem value="stargazers">{i18n.t('Star 数')}</SelectItem>
+            <SelectItem value="watchers">{i18n.t('Watch 数')}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -234,5 +229,6 @@ export default function RepoForksPage() {
         </Button>
       )}
     </div>
+    </PullToRefresh>
   );
 }
