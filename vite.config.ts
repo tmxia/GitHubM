@@ -5,6 +5,10 @@ import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
 import path from "path";
 
+// react-markdown / 代码高亮生态的传递依赖：随 markdown 异步 chunk 加载，
+// 不进首屏 vendor 兜底桶。
+const MD_DEPS_RE = /node_modules[\\/](unified|micromark[a-z-]*|mdast-[a-z-]*|hast-[a-z-]*|vfile[a-z-]*|unist-[a-z-]*|remark-[a-z-]*|rehype-[a-z-]*|lowlight|highlight\.js|parse5|property-information|web-namespaces|zwitch|trough|bail|devlop|hastscript|markdown-table|longest-streak|space-separated-tokens|comma-separated-tokens|html-void-elements|html-url-attributes|estree-util[a-z-]*|decode-named-character-reference|ccount|escape-string-regexp|inline-style-parser|style-to-js|style-to-object|entities|xml-url-attributes|character-entities[a-z-]*|trim-lines|is-plain-obj|hast-util-[a-z-]*|mdast-util-[a-z-]*)[\\/]/;
+
 // https://vite.dev/config/
 export default defineConfig({
   // './' 使静态资源使用相对路径，确保在 GitHub Pages 子目录或 WebView file:// 下正确加载
@@ -90,10 +94,12 @@ export default defineConfig({
         // 不再受 file:// 协议限制，可以安全启用代码分割。
         manualChunks: (id) => {
           if (!id.includes("node_modules")) return;
-          if (id.includes("@codemirror") || id.includes("@uiw")) return "editor";
+          if (id.includes("@codemirror") || id.includes("@uiw") ||
+              id.includes("@lezer") || id.includes("w3c-keyname") ||
+              id.includes("style-mod") || id.includes("@marijn") || id.includes("crelt")) return "editor";
           if (id.includes("recharts") || id.includes("d3-")) return "charts";
           if (id.includes("video-react") || id.includes("video.js")) return "video";
-          if (id.includes("streamdown") || id.includes("react-markdown")) return "markdown";
+          if (id.includes("streamdown") || id.includes("react-markdown") || MD_DEPS_RE.test(id)) return "markdown";
           if (id.includes("lucide-react")) return "icons";
           if (id.includes("react-dom") || id.includes("scheduler") || /[/\\]react[/\\]/.test(id)) return "react";
           if (id.includes("@radix-ui/react-icons")) return "radix-icons";
