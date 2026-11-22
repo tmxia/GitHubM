@@ -87,10 +87,15 @@ export default function RepoForksPage() {
         <span className="text-foreground">Forks</span>
       </div>
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap min-h-9">
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
           <GitFork className="w-5 h-5 text-primary" />
-          {i18n.t('Fork 列表')}{!loading && (
+          {i18n.t('Fork 列表')}
+          {loading ? (
+            <Badge variant="outline" className="text-xs border-border text-muted-foreground font-normal">
+              <Skeleton className="h-3 w-10 bg-muted" />
+            </Badge>
+          ) : (
             <Badge variant="outline" className="text-xs border-border text-muted-foreground font-normal">
               {forks.length}{hasMore ? '+' : ''} {i18n.t('个')}</Badge>
           )}
