@@ -739,11 +739,6 @@ export default function ArtifactsPage() {
                 <Tag className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                 <p className="text-foreground font-medium">{i18n.t('暂无 Release')}</p>
                 <p className="text-sm text-muted-foreground mt-1">{i18n.t('创建 Release 后可在此查看和下载产物')}</p>
-                {canPush && (
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 mt-4" onClick={() => { resetCreateForm(); setCreateOpen(true); }}>
-                    <Plus className="w-4 h-4 mr-2" />{i18n.t('发布新版本')}
-                  </Button>
-                )}
               </div>
             ) : (
               <div className="flex flex-col gap-3">
