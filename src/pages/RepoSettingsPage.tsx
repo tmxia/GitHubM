@@ -144,6 +144,25 @@ export default function RepoSettingsPage() {
 
       const freshRepo = await getRepo(owner, repoName, { fresh: true });
       setRepo(freshRepo);
+      // 回读服务端真实值全量回填表单，避免本地输入与服务端规范化结果不一致导致下次进入/下拉刷新回弹
+      setName(freshRepo.name);
+      setDescription(freshRepo.description || '');
+      setHomepage(freshRepo.homepage || '');
+      setIsPrivate(freshRepo.private);
+      setHasIssues(freshRepo.has_issues ?? true);
+      setHasWiki(freshRepo.has_wiki ?? true);
+      setHasProjects(freshRepo.has_projects ?? true);
+      setHasDownloads(freshRepo.has_downloads ?? true);
+      setHasDiscussions(freshRepo.has_discussions ?? true);
+      setAllowAutoMerge(freshRepo.allow_auto_merge ?? false);
+      setAllowUpdateBranch(freshRepo.allow_update_branch ?? false);
+      setIsTemplate(freshRepo.is_template ?? false);
+      setAllowMerge(freshRepo.allow_merge_commit ?? true);
+      setAllowSquash(freshRepo.allow_squash_merge ?? true);
+      setAllowRebase(freshRepo.allow_rebase_merge ?? true);
+      setDeleteBranchOnMerge(freshRepo.delete_branch_on_merge ?? false);
+      setDefaultBranch(freshRepo.default_branch || 'main');
+      setIsArchived(freshRepo.archived ?? false);
       setTopics(freshRepo.topics || []);
 
       toast.success(i18n.t('仓库信息已更新'));

@@ -1996,6 +1996,7 @@ export async function updateRepo(
 ): Promise<GitHubRepo> {
   return request<GitHubRepo>(`/repos/${owner}/${repo}`, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 }
