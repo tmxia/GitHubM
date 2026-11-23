@@ -856,12 +856,12 @@ export default function CodeBrowserPage() {
       for (let i = 0; i < blobs.length; i++) {
         const f = blobs[i];
         try {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(currentBranch)}/${f.path.split('/').map(encodeURIComponent).join('/')}`;
-          const headers: Record<string, string> = {};
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-          const res = await fetch(rawUrl, { headers });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          zip.file(f.path, await res.blob());
+          // 走统一 GitHub Contents API（与读文件/重命名同一鉴权通道），避免 WebView 内
+          // 裸 fetch raw.githubusercontent.com 受鉴权/网络策略限制导致逐文件失败
+          const info = await getFileInfo(owner, repo, f.path, currentBranch);
+          const b64 = info?.content?.replace(/\n/g, '');
+          if (!b64) throw new Error('empty content');
+          zip.file(f.path, b64, { base64: true });
           ok++;
         } catch {
           fail++;
