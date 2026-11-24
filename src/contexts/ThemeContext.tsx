@@ -162,7 +162,7 @@ const toHslTriplet = (c: RGB): string => {
   return `${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}%`;
 };
 
-export const DEFAULT_ACCENT: AccentConfig = { color: '#6750a4' };  // 莫奈紫：与 Android 应用图标 / 首个莫奈色板保持一致
+export const DEFAULT_ACCENT: AccentConfig = { color: '#7c3aed' };  // 默认品牌纯紫：用户未保存强调色 / 解析失败时兜底
 
 const ACCENT_STORAGE_KEY_V2 = 'github_manager_accent_v2';
 const LEGACY_ACCENT_STORAGE_KEY = 'github_manager_accent';
