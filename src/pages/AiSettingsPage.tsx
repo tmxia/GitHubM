@@ -1,15 +1,15 @@
 // AI 设置中心 — 功能入口 + 次级配置页
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   MODEL_DEFS,
   ModelAvatar,
   getModelDef,
+  loadCustomModelSettings,
   loadModelConfig,
   loadProviderKey,
   saveModelConfig,
-  saveProviderKey,
 } from '@/components/ai/aiUtils';
 import {
   fetchModelsFromAPI,
@@ -17,6 +17,7 @@ import {
   testProviderConnection,
 } from '@/components/ai/aiProviders';
 import type { ModelConfig } from '@/components/ai/aiTypes';
+import { getModelCapabilities } from '@/ai-v2/modelCapabilities';
 import { clearArtifacts, listArtifacts } from '@/ai-v2/artifacts';
 import { clearRuns, listRuns } from '@/ai-v2/runStore';
 import { clearMemories, deleteMemory, listMemories } from '@/ai-v2/memory';
@@ -191,6 +192,7 @@ export default function AiSettingsPage() {
   const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [modelsError, setModelsError] = useState('');
   const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; name: string }>>([]);
+  const requestGeneration = useRef(0);
   const [storageVersion, setStorageVersion] = useState(0);
 
   const activeSection = SECTIONS.find(item => item.id === section);
@@ -210,6 +212,15 @@ export default function AiSettingsPage() {
     setFetchedModels([]);
   }, [section]);
 
+  useEffect(() => {
+    requestGeneration.current++;
+    setFetchedModels([]);
+    setModelsState('idle');
+    setModelsError('');
+    setTestState('idle');
+    setTestResult('');
+  }, [config.type, config.endpoint, config.api_key, config.proxy_url, section]);
+
   const go = (next: Section | '') => {
     navigate(next ? `/ai-settings/${next}` : '/ai-settings');
   };
@@ -224,7 +235,6 @@ export default function AiSettingsPage() {
       toast.error(i18n.t('请先填写接口地址'));
       return;
     }
-    if (next.api_key) saveProviderKey(next.type, next.api_key);
     saveModelConfig(next);
     setConfig(next);
     toast.success(i18n.t('设置已保存'));
@@ -232,32 +242,40 @@ export default function AiSettingsPage() {
   };
 
   const changeProvider = (type: ModelConfig['type']) => {
-    const savedKey = loadProviderKey(type);
+    const saved = loadModelConfig();
+    const savedKey = (type === saved.type && saved.api_key) || loadProviderKey(type);
+    const custom = type === 'custom' ? loadCustomModelSettings(saved) : undefined;
     setConfig(prev => ({
       ...prev,
       type,
       api_key: savedKey || undefined,
-      endpoint: type === 'custom' ? prev.endpoint : undefined,
-      model: getDefaultProviderModel(type),
+      ...custom,
+      endpoint: custom?.endpoint,
+      supportsTools: custom?.supportsTools,
+      supportsVision: custom?.supportsVision,
+      stream: custom?.stream,
+      model: custom?.model || getDefaultProviderModel(type),
     }));
     setTestState('idle');
     setTestResult('');
   };
 
   const handleTest = async () => {
-    if (!config.api_key?.trim()) {
+    if (!config.api_key?.trim() && config.type !== 'custom') {
       toast.error(i18n.t('请先填写 API Key'));
       return;
     }
     setTestState('testing');
     setTestResult('');
+    const generation = requestGeneration.current;
     const result = await testProviderConnection(
       config.type,
-      config.api_key,
+      config.api_key ?? '',
       config.endpoint,
       config.model,
       config.proxy_url,
     );
+    if (generation !== requestGeneration.current) return;
     if (result.success) {
       setTestState('success');
       setTestResult(`${i18n.t('连接成功')} (${result.elapsedMs ?? 0}ms)`);
@@ -273,13 +291,16 @@ export default function AiSettingsPage() {
       toast.error(i18n.t('请先填写 API Key'));
       return;
     }
+    const generation = requestGeneration.current;
     setModelsState('loading');
     setModelsError('');
     try {
       const models = await fetchModelsFromAPI(config.type, config.api_key ?? '', config.endpoint);
+      if (generation !== requestGeneration.current) return;
       setFetchedModels(models);
       setModelsState('success');
     } catch (error) {
+      if (generation !== requestGeneration.current) return;
       setModelsState('error');
       setModelsError((error as Error).message || i18n.t('获取失败'));
     }
@@ -367,7 +388,7 @@ export default function AiSettingsPage() {
                 key={item.id}
                 type="button"
                 onClick={() => go(item.id)}
-                className="group flex items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/5"
+                className="group flex items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/40"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary">
                   <Icon className="h-4 w-4" />
@@ -431,8 +452,10 @@ export default function AiSettingsPage() {
             </SettingRow>
           )}
 
-          {def.needKey && (
-            <SettingRow label="API Key" desc={i18n.t('Android 使用系统 Keystore 加密，Web 使用浏览器存储；不会上传到服务器。')}>
+          {(def.needKey || config.type === 'custom') && (
+            <SettingRow label="API Key" desc={config.type === 'custom'
+              ? i18n.t('免鉴权接口可留空，将直接请求自定义地址。')
+              : i18n.t('Android 使用系统 Keystore 加密，Web 使用浏览器存储；不会上传到服务器。')}>
               <div className="flex gap-2">
                 <Input
                   className="min-w-0 flex-1 px-3"
@@ -451,6 +474,32 @@ export default function AiSettingsPage() {
                 )}
               </div>
             </SettingRow>
+          )}
+
+          {config.type === 'custom' && (
+            <>
+              <SettingRow label={i18n.t('支持工具')}>
+                <Switch
+                  aria-label={i18n.t('支持工具')}
+                  checked={config.supportsTools ?? false}
+                  onCheckedChange={supportsTools => setConfig(prev => ({ ...prev, supportsTools }))}
+                />
+              </SettingRow>
+              <SettingRow label={i18n.t('支持图片')}>
+                <Switch
+                  aria-label={i18n.t('支持图片')}
+                  checked={config.supportsVision ?? getModelCapabilities('custom', config.model).supportsVision}
+                  onCheckedChange={supportsVision => setConfig(prev => ({ ...prev, supportsVision }))}
+                />
+              </SettingRow>
+              <SettingRow label={i18n.t('流式输出')}>
+                <Switch
+                  aria-label={i18n.t('流式输出')}
+                  checked={config.stream !== false}
+                  onCheckedChange={stream => setConfig(prev => ({ ...prev, stream }))}
+                />
+              </SettingRow>
+            </>
           )}
 
           <SettingRow label={i18n.t('默认模型')} desc={i18n.t('点击右侧「拉取」可直接从当前 Provider 获取可用模型，选择后保存生效。')}>
@@ -766,33 +815,9 @@ export default function AiSettingsPage() {
       <div className="mx-auto min-h-full w-full max-w-2xl px-3 py-4 sm:px-4">
         <SectionHeader title={i18n.t('工具与权限')} desc={i18n.t('当前 Agent 可以调用的能力和风险边界。')} onBack={() => go('')} />
         <div className="space-y-3">
-          <div className={cn(
-            'rounded-xl border p-4',
-            v2Settings.allowAllPermissions ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-card',
-          )}>
-            <div className="flex items-start gap-3">
-              <ShieldAlert className={cn('mt-0.5 h-4 w-4 shrink-0', v2Settings.allowAllPermissions ? 'text-destructive' : 'text-muted-foreground')} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{i18n.t('全局允许全部权限')}</p>
-                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                  {i18n.t('开启后，写操作和后续高风险工具不再逐次弹窗确认，直接执行。仅建议在你完全信任当前任务时使用。')}
-                </p>
-              </div>
-              <Switch
-                checked={v2Settings.allowAllPermissions}
-                onCheckedChange={checked => {
-                  updateV2Settings({ allowAllPermissions: checked });
-                  if (checked) toast.warning(i18n.t('已开启全局权限，写操作将不再确认'));
-                  else toast.success(i18n.t('已恢复逐次确认'));
-                }}
-              />
-            </div>
-            {v2Settings.allowAllPermissions && (
-              <p className="mt-2 rounded-md bg-destructive/10 px-2.5 py-1.5 text-[10px] text-destructive">
-                {i18n.t('当前处于全局放权状态：工具可以直接修改仓库。')}
-              </p>
-            )}
-          </div>
+          <p className="rounded-xl border border-border bg-card p-4 text-sm">
+            {i18n.t('修改仓库和合并 PR 前，每次都需要确认目标与版本。')}
+          </p>
 
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
