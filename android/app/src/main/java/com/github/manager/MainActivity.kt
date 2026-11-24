@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
     /** 当前激活的菜单项，避免重复导航 */
     private var currentNavItemId: Int = R.id.nav_home
     /** 当前底部导航栏选中色（由 notifyAccent 更新，随主题色方案变化） */
-    private var currentAccentColor: Int = Color.parseColor("#6750A4")  // 默认与 Web 端首个莫奈色板主色一致
+    private var currentAccentColor: Int = ThemeUtils.DEFAULT_BRAND_PURPLE  // 默认品牌纯紫，Web 回调后覆盖为当前主题色
     /** 当前是否为深色模式（用于 notifyAccent 确定未选中色；默认浅色） */
     private var darkTheme: Boolean = false
     /** 广播接收器是否已注册（防止 onDestroy 中 unregisterReceiver 二次崩溃） */
@@ -612,6 +612,8 @@ class MainActivity : AppCompatActivity() {
             )
             val notif = NotificationCompat.Builder(this, COMPILE_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
+                // 通知图标着色跟随当前主题强调色；未保存时由 currentAccentColor 兜底纯紫
+                .setColor(currentAccentColor)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -831,7 +833,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun applySavedAccentToSplash() {
         val hex = getSharedPreferences("gm_prefs", MODE_PRIVATE)
-            .getString("accent_hex", "#6750A4") ?: "#6750A4"  // 默认值与 Web 端首个莫奈色板主色一致
+            .getString("accent_hex", "#7c3aed") ?: "#7c3aed"  // 兜底品牌纯紫，Web 回调后覆盖为当前主题色
         try {
             val color = Color.parseColor(hex)
             val tintList = android.content.res.ColorStateList.valueOf(color)
@@ -1028,7 +1030,7 @@ class MainActivity : AppCompatActivity() {
         applySavedAccentToSplash()
         // 冷启动时同步最近任务栏卡片颜色（与主题色方案保持一致）
         val savedHexForTask = getSharedPreferences("gm_prefs", MODE_PRIVATE)
-            .getString("accent_hex", "#6750A4") ?: "#6750A4"
+            .getString("accent_hex", "#7c3aed") ?: "#7c3aed"
         applyTaskDescriptionColor(savedHexForTask)
         // 启动打字动画（与 WebView 加载并行进行）
         startSplashTypingAnimation()
@@ -1388,7 +1390,7 @@ class MainActivity : AppCompatActivity() {
                                 "coral"   to "#f0572a",
                                 "lime"    to "#65a30d",
                             )
-                            val hex = accentMap[accentId] ?: "#6750A4"
+                            val hex = accentMap[accentId] ?: "#7c3aed"
                             // 持久化，下次冷启动直接读取
                             getSharedPreferences("gm_prefs", MODE_PRIVATE)
                                 .edit().putString("accent_hex", hex).apply()

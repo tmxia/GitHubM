@@ -168,6 +168,8 @@ class DownloadService : Service() {
     private fun buildServiceNotification(text: String) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
+            // 通知图标着色跟随当前主题强调色；未保存时兜底品牌纯紫
+            .setColor(ThemeUtils.accentFromPrefs(this))
             .setContentTitle("GitHub 管理器")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_LOW)

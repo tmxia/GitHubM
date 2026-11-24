@@ -57,6 +57,8 @@ object FastDownloader {
         val notifyId = NOTIFICATION_ID_BASE + (Math.abs(safeFileName.hashCode()) % 10000)
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_download)
+            // 通知图标着色跟随当前主题强调色；未保存时兜底品牌纯紫
+            .setColor(ThemeUtils.accentFromPrefs(context))
             .setContentTitle("正在下载: $safeFileName")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

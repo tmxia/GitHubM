@@ -1,5 +1,6 @@
 package com.github.manager
 
+import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import androidx.annotation.VisibleForTesting
@@ -13,6 +14,28 @@ object ThemeUtils {
     const val UNSELECTED_DARK  = 0xFF9292A8.toInt()
     /** 浅色模式下未选中导航图标颜色（#64748B） */
     const val UNSELECTED_LIGHT = 0xFF64748B.toInt()
+
+    /** 品牌默认纯紫：未保存主题色 / 解析失败时的兜底（取代旧莫奈紫 #6750A4） */
+    const val DEFAULT_BRAND_PURPLE = 0xFF7C3AED.toInt()
+
+    /**
+     * 解析 hex 颜色字符串，失败时返回品牌默认纯紫（不抛异常）。
+     *
+     * @param hex 形如 "#7c3aed"、"#8B4CF8" 的颜色字符串，可为 null
+     * @return 解析成功的颜色 Int，否则默认纯紫
+     */
+    @VisibleForTesting
+    fun resolveAccentColor(hex: String?): Int = parseColorSafe(hex) ?: DEFAULT_BRAND_PURPLE
+
+    /**
+     * 从原生偏好读取当前主题强调色；未保存 / 非法时回退品牌默认纯紫。
+     * 供编译、下载、前台服务等各类通知 Builder 统一取色，使通知图标跟随主题色。
+     */
+    fun accentFromPrefs(context: Context): Int {
+        val hex = context.getSharedPreferences("gm_prefs", Context.MODE_PRIVATE)
+            .getString("accent_hex", null)
+        return resolveAccentColor(hex)
+    }
 
     /**
      * 解析 hex 颜色字符串，失败时返回 null（不抛异常）。

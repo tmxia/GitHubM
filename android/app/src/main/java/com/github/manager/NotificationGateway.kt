@@ -111,6 +111,8 @@ object NotificationGateway {
             )
             val notif = NotificationCompat.Builder(ctx, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
+                // 通知图标着色跟随当前主题强调色；未保存时兜底品牌纯紫
+                .setColor(ThemeUtils.accentFromPrefs(ctx))
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
