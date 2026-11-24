@@ -11,7 +11,7 @@
         <item name="android:windowSplashScreenBackground">@color/splash_bg_solid</item>
         <item name="android:windowBackground">@color/splash_bg_solid</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-        <item name="colorPrimary">#7c3aed</item>
+        <item name="colorPrimary">#6750A4</item>
         <item name="colorPrimaryVariant">#6d28d9</item>
         <item name="colorOnPrimary">#ffffff</item>
         <!-- M3 Active Indicator 填充色（API 31+ 浅色模式） -->

@@ -54,9 +54,9 @@
 
     <script>
       (function () {
-        // ── 强调色映射表（与 ThemeContext.tsx ACCENT_SCHEMES 保持同步） ──
+        // ── 旧版强调色 id 兜底映射表（仅用于首帧 FOUC；新配置存 v2 键，由 ThemeContext 迁移） ──
         var ACCENT_COLORS = {
-          purple:  { dark: '#7c3aed', light: '#6d28d9' },
+          purple:  { dark: '#9A82DB', light: '#6750A4' },
           blue:    { dark: '#1d6be3', light: '#1d4ed8' },
           green:   { dark: '#16a34a', light: '#15803d' },
           orange:  { dark: '#f97316', light: '#ea580c' },
