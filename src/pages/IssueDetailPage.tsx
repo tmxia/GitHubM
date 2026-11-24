@@ -143,11 +143,15 @@ export default function IssueDetailPage() {
     load();
   }, [owner, repo, number]);
 
-  /** 正文 + 引用块拼成最终提交内容；引用块永远排在正文之后，像 GitHub 的回复引用 */
+  /**
+   * 正文 + 引用块拼成最终提交内容。
+   * 顺序：引用块在前、回复在后（被引用的消息在上、自己的回复在下），
+   * 与 GitHub 原生引用回复语义一致；不要改回「回复在前、引用块在后」。
+   */
   const composeCommentBody = (): string => {
     const text = newComment.trim();
     if (!pendingQuote) return text;
-    return text ? `${text}\n\n${pendingQuote.block}` : pendingQuote.block.trim();
+    return text ? `${pendingQuote.block.trim()}\n\n${text}` : pendingQuote.block.trim();
   };
 
   const handleComment = async () => {

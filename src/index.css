@@ -57,6 +57,8 @@
     --info-foreground: 0 0% 100%;
     --code-bg: 220 14% 96%;
     --code-border: 0 0% 91%;
+    /* 引用块（blockquote）：中性灰底色分层，不用彩色也不用边框，靠明度差区分被引用原文 */
+    --quote-bg: 220 9% 95%;
     /* 登录页：卡片阴影（浅色，做了淡化） */
     --login-card-shadow: 6px 6px 14px rgba(163, 177, 198, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90);
     --login-cta-shadow: 0 10px 20px -14px hsl(var(--primary) / 0.60);
@@ -109,6 +111,8 @@
     --info-foreground: 0 0% 100%;
     --code-bg: 0 0% 9%;
     --code-border: 0 0% 20%;
+    /* 引用块（blockquote）：深色下中性灰，比卡片明显浅一档以分辨 */
+    --quote-bg: 0 0% 19%;
     /* 登录页：卡片阴影（深色，做了淡化） */
     --login-card-shadow: 4px 4px 12px rgba(0, 0, 0, 0.40), -4px -4px 12px rgba(255, 255, 255, 0.025);
     --login-cta-shadow: 0 10px 20px -14px hsl(var(--primary) / 0.45);
@@ -378,9 +382,11 @@
     margin-bottom: 0.25rem;
   }
 
+  /* 引用块（被引用的原文）：靠底色明度差与正文区分，不用彩色、不用边框线 */
   .markdown-body blockquote {
-    border-left: 4px solid hsl(var(--border));
-    padding-left: 1rem;
+    background: hsl(var(--quote-bg));
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
     color: hsl(var(--muted-foreground));
     margin: 1rem 0;
   }

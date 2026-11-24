@@ -15,7 +15,7 @@
 const CACHE_NAME = 'githubm-shell-v1';
 
 // 安装时预缓存壳入口与基础图标（缺失项静默跳过，不阻塞 SW 激活）。
-const PRECACHE = ['./', './index.html', './logo.svg', './favicon.png'];
+const PRECACHE = ['./', './index.html', './logo.svg'];
 
 const STATIC_EXT = /\.(?:js|css|svg|png|ico|jpg|jpeg|gif|webp|woff2?|ttf|eot)$/i;
 
