@@ -73,6 +73,7 @@ import {
   DEFAULT_ACCENT,
 } from '@/contexts/ThemeContext';
 import { MONET_PALETTES, toAccentConfig, isPaletteActive } from '@/lib/monetPalettes';
+import { SOLID_PALETTES, toSolidConfig, isSolidActive } from '@/lib/solidPalettes';
 import {
   FEATURE_FLAGS,
   getFeatureFlag,
@@ -1033,6 +1034,44 @@ const [notifyDownload, setNotifyDownload] = useState(() => {
             }}
           >
             {derived.isGradient ? t('settings.accentPreviewGradient') : t('settings.accentPreviewSolid')}
+          </div>
+          {/* 纯色预设：旧版 16 套单色板，点选即清空渐变第二色，与手动自定义纯色互补 */}
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <p className="text-xs font-medium text-muted-foreground">{t('settings.solidTitle')}</p>
+              <p className="text-[10px] text-muted-foreground/70">{t('settings.solidHint')}</p>
+            </div>
+            <div className="grid grid-cols-6 gap-1.5">
+              {SOLID_PALETTES.map((p) => {
+                const active = isSolidActive(p, accent);
+                const label = t(`settings.solid${p.id.charAt(0).toUpperCase()}${p.id.slice(1)}`);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={active}
+                    onClick={() => {
+                      setAccent(toSolidConfig(p));
+                      setAccentInput(p.color);
+                      setAccent2Input('');
+                    }}
+                    className={cn(
+                      'relative h-8 rounded-md ring-1 transition-all',
+                      active
+                        ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
+                        : 'ring-border/40 hover:scale-105 active:scale-95',
+                    )}
+                    style={{ background: p.color }}
+                  >
+                    {active && (
+                      <Check className="absolute inset-0 m-auto w-3.5 h-3.5 text-white drop-shadow" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           {/* 莫奈色板：一键应用同族双色，与上方手动输入互补 */}
           <div className="mt-3">
