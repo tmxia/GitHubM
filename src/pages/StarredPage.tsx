@@ -80,8 +80,9 @@ export default function StarredPage() {
   const SCROLL_KEY = `starred:scroll:${sort}`;
 
   // 挂载前同步读缓存：从详情返回时缓存命中，首帧即渲染真实列表，避免先闪骨架再异步回填
+  const returning = ssGet('starred_is_returning') === '1';
   const [bootCache] = useState(() =>
-    pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey),
+    pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey, { allowExpired: returning }),
   );
   const [repos, setRepos] = useState<GitHubRepo[]>(bootCache?.repos ?? []);
   const [loading, setLoading] = useState(bootCache == null);
@@ -95,7 +96,8 @@ export default function StarredPage() {
     if (force) { clearApiCache(); pageCache.invalidate('starred:'); }
     // 首页非强制刷新：先命中缓存直接回填，避免命中时先置 loading 再复位造成抖动
     if (p === 1 && !append && !force) {
-      const cached = pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey);
+      const ret = ssGet('starred_is_returning') === '1';
+      const cached = pageCache.get<{ repos: GitHubRepo[]; hasMore: boolean; page?: number }>(cacheKey, { allowExpired: ret });
       if (cached) {
         setRepos(cached.repos);
         setHasMore(cached.hasMore);
@@ -177,7 +179,7 @@ export default function StarredPage() {
       await unstarRepo(owner, name);
       setRepos((prev) => {
         const updated = prev.filter((r) => r.id !== repo.id);
-        pageCache.set(cacheKey, { repos: updated, hasMore: hasMore });
+        pageCache.set(cacheKey, { repos: updated, hasMore: hasMore, page });
         return updated;
       });
       toast.success(`已取消收藏 ${repo.full_name}`);

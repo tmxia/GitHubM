@@ -759,6 +759,8 @@ export default function ReposPage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const reposRef = useRef<GitHubRepo[]>([]);
+  reposRef.current = repos;
   const [loading, setLoading] = useState(true);
   const refreshRef = useRef<PullToRefreshRef>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -809,12 +811,14 @@ export default function ReposPage() {
     else setLoadingMore(true);
 
     const cacheKey = `repos:${sortField}:${sortDirection}:${typeFilter}:p1`;
+    // 从详情页返回时，允许恢复已过期的列表快照（含已加载到的页码），避免重新拉第一页
+    const returning = ssGet('repos_is_returning') === '1';
     if (pageNum === 1 && !append && !force) {
-      const cached = pageCache.get<{ repos: GitHubRepo[]; hasNextPage: boolean }>(cacheKey);
+      const cached = pageCache.get<{ repos: GitHubRepo[]; hasNextPage: boolean; page?: number }>(cacheKey, { allowExpired: returning });
       if (cached) {
         setRepos(cached.repos);
         setHasNextPage(cached.hasNextPage);
-        setPage(1);
+        setPage(cached.page ?? 1);
         setLoading(false);
         return;
       }
@@ -831,14 +835,15 @@ export default function ReposPage() {
         },
         { fresh: force },
       );
-      if (append) {
-        setRepos((prev) => [...prev, ...result.data]);
-      } else {
-        setRepos(result.data);
-        pageCache.set(cacheKey, { repos: result.data, hasNextPage: result.hasNextPage });
-      }
+      const merged = append ? [...reposRef.current, ...result.data] : result.data;
+      setRepos(merged);
       setHasNextPage(result.hasNextPage);
       setPage(pageNum);
+      pageCache.set(cacheKey, {
+        repos: merged,
+        hasNextPage: result.hasNextPage,
+        page: pageNum,
+      });
     } catch (err) {
       toast.error(i18n.t('加载仓库列表失败'));
       console.error(err);

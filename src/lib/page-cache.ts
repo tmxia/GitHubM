@@ -26,13 +26,14 @@ function isStorageAvailable(): boolean {
 class PageCache {
   private readonly available = isStorageAvailable();
 
-  get<T>(key: string): T | null {
+  /** 读缓存；allowExpired 为 true 时返回已过期快照（用于从详情页返回恢复列表分页），不删除条目 */
+  get<T>(key: string, { allowExpired = false }: { allowExpired?: boolean } = {}): T | null {
     if (!this.available) return null;
     try {
       const raw = localStorage.getItem(PREFIX + key);
       if (!raw) return null;
       const entry = JSON.parse(raw) as StoredEntry<T>;
-      if (Date.now() - entry.ts > entry.ttl) {
+      if (!allowExpired && Date.now() - entry.ts > entry.ttl) {
         localStorage.removeItem(PREFIX + key);
         return null;
       }
