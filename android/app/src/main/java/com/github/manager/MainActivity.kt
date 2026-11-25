@@ -394,6 +394,9 @@ class MainActivity : AppCompatActivity() {
                 currentAccentColor = color
                 // Active Indicator 透明：选中仅靠图标/文字强调色区分
                 bottomNav.itemActiveIndicatorColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+                
+                // 👇 新增：发送广播通知后台服务刷新正在显示的通知
+                sendBroadcast(android.content.Intent("com.github.manager.ACTION_THEME_CHANGED"))
             }
         }
 

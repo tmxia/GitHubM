@@ -31,6 +31,14 @@ import java.util.concurrent.ConcurrentHashMap
  *   }
  */
 class DownloadService : Service() {
+    private val themeChangeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == "com.github.manager.ACTION_THEME_CHANGED") {
+                updateServiceNotification()
+            }
+        }
+    }
+
 
     companion object {
         const val ACTION_START  = "com.github.manager.DOWNLOAD_START"
@@ -56,6 +64,13 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 👇 注册主题变化监听
+        val filter = android.content.IntentFilter("com.github.manager.ACTION_THEME_CHANGED")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(themeChangeReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(themeChangeReceiver, filter)
+        }
         createNotificationChannel()
         // 立即进入前台，否则 Android 8+ 会在 5 秒后 ANR/Kill
         try { startForeground(FOREGROUND_ID, buildServiceNotification("下载服务运行中")) } catch (e: Exception) { android.util.Log.e("HarmonyFix", "startForeground failed") }
@@ -91,6 +106,10 @@ class DownloadService : Service() {
     }
 
     override fun onDestroy() {
+                // 👇 注销监听
+        try {
+            unregisterReceiver(themeChangeReceiver)
+        } catch (e: Exception) {}
         super.onDestroy()
         serviceScope.cancel()
         releaseWakeLocks()

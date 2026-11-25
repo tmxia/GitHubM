@@ -69,6 +69,10 @@ object FastDownloader {
 
         fun updateNotification(buildAction: NotificationCompat.Builder.() -> Unit) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                // 👇 新增：每次更新通知，都重新读取最新主题色，强制覆盖大图标
+                val latestAccent = ThemeUtils.accentFromPrefs(context)
+                builder.setColor(latestAccent)
+                builder.setLargeIcon(NotificationIcons.largeIconBitmap(context, latestAccent))
                 builder.buildAction()
                 notificationManager.notify(notifyId, builder.build())
             }
