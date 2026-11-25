@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   GitPullRequest,
@@ -7,13 +7,12 @@ import {
   XCircle,
   MessageSquare,
   Send,
+  Edit2,
   ChevronRight,
   FileDiff,
   GitBranch,
   Plus,
   Minus,
-  Check,
-  X,
   AlertCircle,
   UserCheck,
   CheckCircle2,
@@ -33,8 +32,6 @@ import {
   getPullRequestFiles,
   getPullRequestComments,
   createPullRequestComment,
-  mergePullRequest,
-  updatePullRequest,
   formatRelativeTime,
 } from '@/services/github';
 import { gqlGetPRReviews } from '@/services/github-graphql';
@@ -46,18 +43,10 @@ import type {
   GQL_ReviewDecision,
 } from '@/types/types';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
+import { PullActions } from '@/components/repo/PullActions';
 import { useAuth } from '@/contexts/AuthContext';
+import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
 import { toast } from 'sonner';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import i18n from "@/i18n";
 
 function ReviewStateIcon({ state }: { state: GQL_PRReview['state'] }) {
@@ -114,6 +103,63 @@ function ReviewDecisionBanner({ decision }: { decision: GQL_ReviewDecision | nul
   return null;
 }
 
+function PullCommentComposer({ value, submitting, onChange, onSubmit }: {
+  value: string;
+  submitting: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const native = Boolean((window as Window & { AndroidBridge?: unknown }).AndroidBridge);
+  const inset = useKeyboardInset(!native);
+  const label = i18n.t('撰写评论（支持 Markdown）...');
+  const canSubmit = !submitting && !!value.trim();
+  const bottom = inset > 0 ? inset : (native ? 'env(safe-area-inset-bottom)' : 'calc(4rem + env(safe-area-inset-bottom))');
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
+    event.preventDefault();
+    if (canSubmit) onSubmit();
+  };
+
+  return (
+    <>
+      {/* 为悬浮栏预留滚动空间，保证最后一条评论可见。 */}
+      <div className="h-36" aria-hidden="true" />
+      <form
+        aria-label={i18n.t('发布评论')}
+        aria-busy={submitting}
+        className="fixed left-[var(--layout-sidebar-width,0px)] right-0 z-30 border-t border-border bg-background/95 px-4 py-2 backdrop-blur-md md:px-6"
+        style={{ bottom }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSubmit) onSubmit();
+        }}
+      >
+        <div className="mx-auto max-w-[61rem] overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+          <Textarea
+            aria-label={label}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={label}
+            className="min-h-16 resize-none rounded-none border-0 bg-transparent font-mono text-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+            rows={2}
+          />
+          <div className="flex items-center justify-end gap-2 border-t border-border bg-secondary/20 px-2 py-1.5">
+            <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:flex">
+              <Edit2 aria-hidden="true" className="h-3 w-3" />{i18n.t('Ctrl+Enter 提交')}
+            </span>
+            <Button type="submit" size="sm" className="h-9 gap-1.5 px-3" disabled={!canSubmit}>
+              {!submitting && <Send aria-hidden="true" className="h-3.5 w-3.5" />}
+              {submitting ? i18n.t('发布中...') : i18n.t('发布评论')}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </>
+  );
+}
+
 export default function PullDetailPage() {
   const { owner, repo, number } = useParams<{ owner: string; repo: string; number: string }>();
   const navigate = useNavigate();
@@ -124,9 +170,6 @@ export default function PullDetailPage() {
   const [loading, setLoading] = useState(true);
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [merging, setMerging] = useState(false);
-  const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
 
   const [reviews, setReviews] = useState<GQL_PRReview[]>([]);
   const [reviewDecision, setReviewDecision] = useState<GQL_ReviewDecision | null>(null);
@@ -144,7 +187,10 @@ export default function PullDetailPage() {
           getPullRequestFiles(owner, repo, Number(number)),
         ]);
         setPr(prData);
-        setComments(commentsData);
+        setComments((previous) => {
+          const ids = new Set(commentsData.map((comment) => comment.id));
+          return [...commentsData, ...previous.filter((comment) => !ids.has(comment.id))];
+        });
         setFiles(filesData);
       } catch (err) {
         toast.error(i18n.t('加载 PR 详情失败'));
@@ -171,54 +217,18 @@ export default function PullDetailPage() {
   }, [owner, repo, number]);
 
   const handleComment = async () => {
-    if (!owner || !repo || !number || !newComment.trim()) return;
+    const body = newComment.trim();
+    if (submitting || !owner || !repo || !number || !body) return;
     setSubmitting(true);
     try {
-      const comment = await createPullRequestComment(owner, repo, Number(number), newComment.trim());
-      setComments((prev) => [...prev, comment]);
-      setNewComment('');
+      const comment = await createPullRequestComment(owner, repo, Number(number), body);
+      setComments((prev) => prev.some(({ id }) => id === comment.id) ? prev : [...prev, comment]);
+      setNewComment((current) => (current === newComment ? '' : current));
       toast.success(i18n.t('评论已发布'));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : i18n.t('发布失败'));
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleCommentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (!submitting && newComment.trim()) handleComment();
-    }
-  };
-
-  const handleMerge = async () => {
-    if (!owner || !repo || !number) return;
-    setMerging(true);
-    try {
-      await mergePullRequest(owner, repo, Number(number), { merge_method: 'merge' });
-      toast.success(i18n.t('Pull Request 已合并！'));
-      const updated = await getPullRequest(owner, repo, Number(number));
-      setPr(updated);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : i18n.t('合并失败'));
-    } finally {
-      setMerging(false);
-    }
-  };
-
-  const handleClose = async () => {
-    if (!owner || !repo || !number || !pr) return;
-    setClosing(true);
-    try {
-      const newState = pr.state === 'open' ? 'closed' : 'open';
-      const updated = await updatePullRequest(owner, repo, Number(number), { state: newState });
-      setPr(updated);
-      toast.success(newState === 'closed' ? i18n.t('PR 已关闭') : i18n.t('PR 已重新打开'));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : i18n.t('操作失败'));
-    } finally {
-      setClosing(false);
     }
   };
 
@@ -303,43 +313,16 @@ export default function PullDetailPage() {
 
       {!reviewsLoading && <ReviewDecisionBanner decision={reviewDecision} />}
 
-      {pr.state === 'open' && (
-        <div className="flex flex-wrap gap-3 bg-card border border-border rounded-lg p-4">
-          {!pr.merged && pr.state === 'open' && (
-            <>
-              <Button
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => setMergeConfirmOpen(true)}
-                disabled={merging}
-              >
-                <GitMerge className="w-4 h-4 mr-2" />
-                {merging ? i18n.t('合并中...') : i18n.t('合并 Pull Request')}
-              </Button>
-              <Button
-                variant="outline"
-                className="border-border hover:bg-secondary"
-                onClick={handleClose}
-                disabled={closing}
-              >
-                <X className="w-4 h-4 mr-2" />
-                {i18n.t('关闭 PR')}</Button>
-            </>
-          )}
-        </div>
-      )}
-
-      {pr.state === 'closed' && !pr.merged && (
-        <div className="flex gap-3 bg-card border border-border rounded-lg p-4">
-          <Button
-            variant="outline"
-            className="border-primary text-primary hover:bg-primary/10"
-            onClick={handleClose}
-            disabled={closing}
-          >
-            <Check className="w-4 h-4 mr-2" />
-            {i18n.t('重新打开 PR')}</Button>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-3 bg-card border border-border rounded-lg p-4">
+        <PullActions
+          owner={owner ?? ''}
+          repo={repo ?? ''}
+          pr={pr}
+          repository={null}
+          login={user?.login}
+          onUpdate={setPr}
+        />
+      </div>
 
       <Tabs defaultValue="description">
         <TabsList className="bg-secondary border border-border">
@@ -390,29 +373,12 @@ export default function PullDetailPage() {
           ))}
 
           {user && (
-            <div className="bg-card border border-border rounded-lg overflow-hidden">
-              <div className="p-4 space-y-3">
-                <Textarea
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  onKeyDown={handleCommentKeyDown}
-                  placeholder={i18n.t('撰写评论（支持 Markdown）...')}
-                  className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none font-mono text-sm min-h-24"
-                  rows={4}
-                />
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">{i18n.t('Ctrl+Enter 快速提交')}</span>
-                  <Button
-                    className="bg-primary text-primary-foreground hover:bg-primary/90"
-                    onClick={handleComment}
-                    disabled={submitting || !newComment.trim()}
-                    size="sm"
-                  >
-                    {submitting ? i18n.t('发布中...') : <><Send className="w-3.5 h-3.5 mr-1.5" />{i18n.t('发布评论')}</>}
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <PullCommentComposer
+              value={newComment}
+              submitting={submitting}
+              onChange={setNewComment}
+              onSubmit={handleComment}
+            />
           )}
         </TabsContent>
 
@@ -533,33 +499,6 @@ export default function PullDetailPage() {
           ))}
         </TabsContent>
       </Tabs>
-
-      <AlertDialog open={mergeConfirmOpen} onOpenChange={setMergeConfirmOpen}>
-        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground flex items-center gap-2">
-              <GitMerge className="w-4 h-4 text-primary" />
-              {i18n.t('确认合并 Pull Request？')}</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground text-sm space-y-2">
-              <span>{i18n.t('将把分支')}</span>
-              <code className="font-mono text-foreground bg-secondary px-1.5 py-0.5 rounded text-xs">{pr.head.ref}</code>
-              <span> {i18n.t('合并到')}</span>
-              <code className="font-mono text-foreground bg-secondary px-1.5 py-0.5 rounded text-xs">{pr.base.ref}</code>
-              <span>{i18n.t('，合并后不可撤销。')}</span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex flex-row justify-end gap-3 mt-6 sm:space-x-0">
-            <AlertDialogCancel className="min-w-[80px] px-4 border-border hover:bg-secondary">{i18n.t('取消')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="min-w-[100px] px-6 bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => { setMergeConfirmOpen(false); handleMerge(); }}
-              disabled={merging}
-            >
-              <GitMerge className="w-4 h-4 mr-2" />
-              {i18n.t('确认合并')}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

@@ -367,7 +367,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div
+      className={cn(
+        'flex min-h-screen w-full bg-background',
+        collapsed ? 'lg:[--layout-sidebar-width:3.5rem]' : 'lg:[--layout-sidebar-width:14rem]'
+      )}
+    >
       <AutoTranslatorInit />
       <aside
         className={cn(

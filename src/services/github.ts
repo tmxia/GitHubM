@@ -25,6 +25,7 @@ import type {
   GitHubComment,
   GitHubPullRequest,
   GitHubCommit,
+  GitHubFile,
   GitHubBranch,
   GitHubCollaborator,
   GitHubNotification,
@@ -110,7 +111,7 @@ export function invalidateCache(urlPrefix: string): void {
   }
 }
 
-function invalidateAndBust(urlPrefix: string): void {
+export function invalidateAndBust(urlPrefix: string): void {
   invalidateCache(urlPrefix);
   cdnBustPrefixes.add(urlPrefix);
 }
@@ -748,10 +749,19 @@ export async function getPullRequests(
 export async function getPullRequest(
   owner: string,
   repo: string,
-  prNumber: number
+  prNumber: number,
+  options?: { fresh?: boolean }
 ): Promise<GitHubPullRequest> {
-  return request<GitHubPullRequest>(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+  const path = `/repos/${owner}/${repo}/pulls/${prNumber}`;
+  const url = options?.fresh ? `${path}?_t=${Date.now()}` : path;
+  return request<GitHubPullRequest>(url);
 }
+
+export function samePullRevision(left: GitHubPullRequest, right: GitHubPullRequest): boolean {
+  return left.head.sha === right.head.sha && left.base.ref === right.base.ref && left.base.sha === right.base.sha;
+}
+
+export type PullMergeMethod = 'merge' | 'squash' | 'rebase';
 
 export async function getPullRequestFiles(
   owner: string,
@@ -771,6 +781,7 @@ export async function mergePullRequest(
     commit_title?: string;
     commit_message?: string;
     merge_method?: 'merge' | 'squash' | 'rebase';
+    sha?: string;
   }
 ): Promise<{ sha: string; merged: boolean; message: string }> {
   return request<{ sha: string; merged: boolean; message: string }>(
@@ -1022,19 +1033,24 @@ export async function compareBranches(
   owner: string,
   repo: string,
   base: string,
-  head: string
+  head: string,
+  options?: { fresh?: boolean }
 ): Promise<{
   ahead_by: number;
   behind_by: number;
   status: string;
   commits: GitHubCommit[];
+  files?: GitHubFile[];
 }> {
+  const path = `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  const url = options?.fresh ? `${path}?_t=${Date.now()}` : path;
   return request<{
     ahead_by: number;
     behind_by: number;
     status: string;
     commits: GitHubCommit[];
-  }>(`/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`);
+    files?: GitHubFile[];
+  }>(url);
 }
 
 export async function getCollaborators(
@@ -2293,6 +2309,7 @@ export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface SubmitReviewParams {
   event: ReviewEvent;
   body?: string;
+  commit_id?: string;
 }
 
 export async function submitPullRequestReview(
@@ -2308,6 +2325,7 @@ export async function submitPullRequestReview(
       body: JSON.stringify({
         event: params.event,
         body: params.body ?? '',
+        ...(params.commit_id ? { commit_id: params.commit_id } : {}),
       }),
     }
   );

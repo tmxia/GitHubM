@@ -368,6 +368,20 @@ export async function gqlGetPinnedRepos(login: string): Promise<GQL_PinnedRepo[]
   return data.user.pinnedItems.nodes;
 }
 
+// ================== PR Reviews ==================
+
+export async function gqlSetPullRequestDraft(pullRequestId: string, draft: boolean): Promise<boolean> {
+  const mutation = draft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview';
+  const data = await gql<{ result: { pullRequest: { isDraft: boolean } } }>(`
+    mutation SetPullRequestDraft($pullRequestId: ID!) {
+      result: ${mutation}(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { isDraft }
+      }
+    }
+  `, { pullRequestId });
+  return data.result.pullRequest.isDraft;
+}
+
 export async function gqlGetPRReviews(
   owner: string,
   repo: string,

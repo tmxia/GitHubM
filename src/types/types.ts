@@ -63,6 +63,7 @@ export interface GitHubRepo {
   } | null;
   permissions?: {
     admin: boolean;
+    maintain?: boolean;
     push: boolean;
     pull: boolean;
   };
@@ -139,6 +140,7 @@ export interface GitHubComment {
 
 export interface GitHubPullRequest {
   id: number;
+  node_id?: string;
   number: number;
   title: string;
   body: string | null;
@@ -173,6 +175,7 @@ export interface GitHubPullRequest {
     repo: GitHubRepo;
   };
   mergeable: boolean | null;
+  mergeable_state?: string;
   draft: boolean;
 }
 
