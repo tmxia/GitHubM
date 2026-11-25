@@ -611,9 +611,11 @@ class MainActivity : AppCompatActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val notif = NotificationCompat.Builder(this, COMPILE_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setSmallIcon(R.drawable.ic_notification)
                 // 通知图标着色跟随当前主题强调色；未保存时由 currentAccentColor 兜底纯紫
                 .setColor(currentAccentColor)
+                // 主动提供主题色大图，覆盖系统回退的旧 launcher 缓存图标
+                .setLargeIcon(NotificationIcons.largeIconBitmap(this, currentAccentColor))
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))

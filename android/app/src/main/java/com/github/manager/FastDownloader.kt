@@ -55,10 +55,13 @@ object FastDownloader {
         }
 
         val notifyId = NOTIFICATION_ID_BASE + (Math.abs(safeFileName.hashCode()) % 10000)
+        val accent = ThemeUtils.accentFromPrefs(context)
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_notification)
             // 通知图标着色跟随当前主题强调色；未保存时兜底品牌纯紫
-            .setColor(ThemeUtils.accentFromPrefs(context))
+            .setColor(accent)
+            // 主动提供主题色大图，覆盖系统回退的旧 launcher 缓存图标
+            .setLargeIcon(NotificationIcons.largeIconBitmap(context, accent))
             .setContentTitle("正在下载: $safeFileName")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
@@ -267,7 +270,7 @@ object FastDownloader {
                     setContentText("点击打开")
                     setProgress(0, 0, false)
                     setOngoing(false)
-                    setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    setSmallIcon(R.drawable.ic_notification)
                     setContentIntent(pendingIntent)
                     setAutoCancel(true)
                 }
@@ -296,7 +299,7 @@ object FastDownloader {
                 setContentText("网络问题，再次点击下载可继续: ${e.message}")
                 setProgress(0, 0, false)
                 setOngoing(false)
-                setSmallIcon(android.R.drawable.stat_sys_warning)
+                setSmallIcon(R.drawable.ic_notification)
                 setContentIntent(resumePendingIntent)
                 setAutoCancel(true)
             }
