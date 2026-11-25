@@ -55,6 +55,8 @@ object FastDownloader {
         }
 
         val notifyId = NOTIFICATION_ID_BASE + (Math.abs(safeFileName.hashCode()) % 10000)
+        var currentNotifyId = notifyId
+        var lastAccent = -1 // 记录上一次的颜色
         val accent = ThemeUtils.accentFromPrefs(context)
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)
@@ -74,7 +76,17 @@ object FastDownloader {
                 builder.setColor(latestAccent)
                 builder.setLargeIcon(NotificationIcons.largeIconBitmap(context, latestAccent))
                 builder.buildAction()
-                notificationManager.notify(notifyId, builder.build())
+                
+                // 👇 核心破缓存：如果颜色变了，强制取消旧通知并更换全新的 ID
+                if (lastAccent != latestAccent) {
+                    notificationManager.cancel(currentNotifyId)
+                    if (lastAccent != -1) {
+                        // 利用当前颜色的哈希值作为新 ID 偏移量，确保每次变色 ID 都不同
+                        currentNotifyId = notifyId + (latestAccent and 0xFFFFFF)
+                    }
+                    lastAccent = latestAccent
+                }
+                notificationManager.notify(currentNotifyId, builder.build())
             }
         }
 
@@ -266,7 +278,7 @@ object FastDownloader {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val pendingIntent = PendingIntent.getActivity(context, notifyId, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val pendingIntent = PendingIntent.getActivity(context, currentNotifyId, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
             if (notifyDownloadDone) {
                 updateNotification {
@@ -279,7 +291,7 @@ object FastDownloader {
                     setAutoCancel(true)
                 }
             } else {
-                notificationManager.cancel(notifyId)
+                notificationManager.cancel(currentNotifyId)
             }
 
             withContext(Dispatchers.Main) {
@@ -296,7 +308,7 @@ object FastDownloader {
                 putExtra("token", originalToken)
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
-            val resumePendingIntent = PendingIntent.getActivity(context, notifyId, resumeIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val resumePendingIntent = PendingIntent.getActivity(context, currentNotifyId, resumeIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
             updateNotification {
                 setContentTitle("下载暂停: $safeFileName")
