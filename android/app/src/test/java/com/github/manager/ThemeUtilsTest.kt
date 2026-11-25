@@ -135,4 +135,55 @@ class ThemeUtilsTest {
     fun `空字符串isValidHexColor返回false`() {
         assertFalse(ThemeUtils.isValidHexColor(""))
     }
+
+    // ── resolveAccentColor 历史莫奈紫残留归一 ────────────────────────
+
+    @Test
+    fun `旧莫奈紫6750A4归一为品牌纯紫`() {
+        assertEquals(ThemeUtils.DEFAULT_BRAND_PURPLE, ThemeUtils.resolveAccentColor("#6750A4"))
+    }
+
+    @Test
+    fun `上游旧默认8461B8归一为品牌纯紫`() {
+        assertEquals(ThemeUtils.DEFAULT_BRAND_PURPLE, ThemeUtils.resolveAccentColor("#8461B8"))
+    }
+
+    @Test
+    fun `莫奈副色9A82DB归一为品牌纯紫`() {
+        assertEquals(ThemeUtils.DEFAULT_BRAND_PURPLE, ThemeUtils.resolveAccentColor("#9A82DB"))
+    }
+
+    @Test
+    fun `品牌纯紫保持不变`() {
+        assertEquals(
+            ThemeUtils.parseColorSafe("#7c3aed"),
+            ThemeUtils.resolveAccentColor("#7c3aed")
+        )
+    }
+
+    @Test
+    fun `其他合法主题色保持原样跟随`() {
+        assertEquals(
+            ThemeUtils.parseColorSafe("#16a34a"),
+            ThemeUtils.resolveAccentColor("#16a34a")
+        )
+    }
+
+    @Test
+    fun `null颜色兜底品牌纯紫`() {
+        assertEquals(ThemeUtils.DEFAULT_BRAND_PURPLE, ThemeUtils.resolveAccentColor(null))
+    }
+
+    @Test
+    fun `非法颜色字符串兜底品牌纯紫`() {
+        assertEquals(ThemeUtils.DEFAULT_BRAND_PURPLE, ThemeUtils.resolveAccentColor("not-a-color"))
+    }
+
+    @Test
+    fun `isLegacyMonetPurple识别历史莫奈紫且忽略alpha`() {
+        assertTrue(ThemeUtils.isLegacyMonetPurple(0xFF6750A4.toInt()))
+        assertTrue(ThemeUtils.isLegacyMonetPurple(0x806750A4.toInt()))
+        assertFalse(ThemeUtils.isLegacyMonetPurple(0xFF7C3AED.toInt()))
+        assertFalse(ThemeUtils.isLegacyMonetPurple(0xFF16A34A.toInt()))
+    }
 }

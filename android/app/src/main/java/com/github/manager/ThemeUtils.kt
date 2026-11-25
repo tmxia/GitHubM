@@ -19,13 +19,34 @@ object ThemeUtils {
     const val DEFAULT_BRAND_PURPLE = 0xFF7C3AED.toInt()
 
     /**
-     * 解析 hex 颜色字符串，失败时返回品牌默认纯紫（不抛异常）。
+     * 旧版本遗留的莫奈紫系默认 / 废弃色（按 RGB 比对，忽略 alpha）。
+     *
+     * 早期版本与上游默认曾把这些莫奈紫写入 gm_prefs/accent_hex；升级后偏好未被覆盖时，
+     * 原生通知取色会把脏残留当成当前主题色直接采用，导致默认纯紫主题下通知图标仍呈莫奈紫。
+     * 命中这些历史脏值时回退品牌纯紫；其余合法用户主题色保持原样跟随。
+     */
+    private val LEGACY_MONET_PURPLES = setOf(
+        0x6750A4, // M3 默认莫奈紫（截图实测残留值）
+        0x8461B8, // 上游旧默认强调色
+        0x9A82DB, // 莫奈板副色
+    )
+
+    /** 判断颜色是否为历史遗留莫奈紫脏值（按 RGB 比对，忽略 alpha 通道） */
+    @VisibleForTesting
+    fun isLegacyMonetPurple(color: Int): Boolean =
+        (color and 0xFFFFFF) in LEGACY_MONET_PURPLES
+
+    /**
+     * 解析 hex 颜色字符串，失败或命中历史莫奈紫残留时返回品牌默认纯紫（不抛异常）。
      *
      * @param hex 形如 "#7c3aed"、"#8B4CF8" 的颜色字符串，可为 null
-     * @return 解析成功的颜色 Int，否则默认纯紫
+     * @return 解析成功且非残留脏值的颜色 Int，否则默认纯紫
      */
     @VisibleForTesting
-    fun resolveAccentColor(hex: String?): Int = parseColorSafe(hex) ?: DEFAULT_BRAND_PURPLE
+    fun resolveAccentColor(hex: String?): Int {
+        val color = parseColorSafe(hex) ?: return DEFAULT_BRAND_PURPLE
+        return if (isLegacyMonetPurple(color)) DEFAULT_BRAND_PURPLE else color
+    }
 
     /**
      * 从原生偏好读取当前主题强调色；未保存 / 非法时回退品牌默认纯紫。
