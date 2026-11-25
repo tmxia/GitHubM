@@ -392,7 +392,7 @@ export async function gqlGetPRReviews(
               }
             }
           }
-          reviews(first: 50, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
+          reviews(last: 50, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
             nodes {
               id
               databaseId

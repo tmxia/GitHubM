@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { runGeneralAgent, toAgentHistory } from '@/ai-v2/agent';
 import { verifyGitHubWrite } from '@/ai-v2/tools/github';
+import { createTaskMemory, recordTaskActivity, scopedTaskHistory, taskMemoryScope } from '@/ai-v2/taskMemory';
 import type { AgentCheckpoint, AgentEvent, ApprovalRequest, ArtifactMeta, RepoContext, UiChatMessage, UiToolRun } from '@/ai-v2/types';
 import { readArtifact } from '@/ai-v2/artifacts';
 import { appendRunEvent, clearRunSnapshot, clearRunSnapshots, finishRun, latestRunSnapshot, resumeRun, runBinding, saveRunSnapshot, startRun } from '@/ai-v2/runStore';
@@ -42,6 +43,7 @@ import AiExecutionPanel from '@/components/ai/AiExecutionPanel';
 import { ConversationTurnView, buildTurns } from '@/components/ai/ChatTurn';
 import type { ConversationTurn } from '@/components/ai/ChatTurn';
 import { deriveSessionTitle } from '@/ai-v2/sessionTitle';
+import { createSessionMarkdown } from '@/ai-v2/sessionExport';
 import { extractPdfText, MAX_PDF_BYTES } from '@/ai-v2/pdf';
 import RepoSelector from '@/components/ai/RepoSelector';
 import {
@@ -75,6 +77,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { triggerBlobDownload } from '@/lib/blobDownload';
 import { toast } from 'sonner';
 import i18n from '@/i18n';
 import {
@@ -86,6 +89,7 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
+  Download,
   Eye,
   FileText,
   GitBranch,
@@ -708,15 +712,19 @@ function SessionList({
   sessions,
   activeId,
   streaming,
+  exportingId,
   onSelect,
   onRename,
+  onExport,
   onDelete,
 }: {
   sessions: V2Session[];
   activeId: string;
   streaming: boolean;
+  exportingId: string | null;
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onExport: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -797,8 +805,21 @@ function SessionList({
                     </button>
                     <button
                       type="button"
+                      onClick={() => onExport(session.id)}
+                      disabled={!!exportingId || (streaming && session.id === activeId)}
+                      aria-busy={exportingId === session.id}
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                      title={i18n.t('导出对话为 Markdown')}
+                      aria-label={i18n.t('导出对话为 Markdown')}
+                    >
+                      {exportingId === session.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Download className="h-3 w-3" />}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => onDelete(session.id)}
-                      disabled={streaming}
+                      disabled={streaming || exportingId === session.id}
                       className="shrink-0 rounded p-1 opacity-100 hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
                       title={i18n.t('删除对话')}
                     >
@@ -946,6 +967,12 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
   const [branchDialogOpen, setBranchDialogOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const sessionExportRef = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    sessionExportRef.current?.abort();
+    sessionExportRef.current = null;
+  }, [user?.login]);
   const [contextDialogOpen, setContextDialogOpen] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
@@ -1070,6 +1097,7 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
 
   useEffect(() => {
     hydratedRef.current = false;
+    setExportingId(null);
     setSessionLoading(Boolean(user?.login));
     loadedSessionsRef.current = new Set();
     queuedMessagesRef.current.clear();
@@ -1478,7 +1506,7 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
       await sessionWritesRef.current;
       if (sessionWriteFailure.current) return false;
     }
-    return saveRunSnapshot(user.login, {
+    const saved = await saveRunSnapshot(user.login, {
       ...snapshot,
       runId,
       assistantId,
@@ -1488,7 +1516,21 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
       capabilities: runCapabilitiesRef.current,
       savedAt: new Date().toISOString(),
     });
-  }, [user?.login]);
+    if (!saved || !snapshot.taskMemory) return saved;
+    const taskProgress = snapshot.taskMemory.progress;
+    if (snapshot.finished) {
+      flushSync(() => {
+        flushStreamDelta();
+        patchAssistant(assistantId, { taskProgress });
+      });
+      pendingSessionSaveRef.current?.();
+      await sessionWritesRef.current;
+      if (sessionWriteFailure.current) return false;
+    } else {
+      patchAssistant(assistantId, { taskProgress });
+    }
+    return true;
+  }, [flushStreamDelta, patchAssistant, user?.login]);
 
   const addAttachment = useCallback((attachment: UiAttachment) => {
     setPendingAttachments(prev => {
@@ -1627,9 +1669,11 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
       const displayText = text || `${i18n.t('请查看附件')}：${attachments.map(item => item.path || item.name).join('、')}`;
       if (controller.signal.aborted) return;
       const now = new Date().toISOString();
+      const scope = taskMemoryScope(repoContext);
       const userMessage: UiChatMessage = {
         id: makeId('user'),
         role: 'user',
+        taskScope: scope,
         content: displayText,
         modelContent,
         attachments: attachments.length ? attachments : undefined,
@@ -1639,6 +1683,7 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
       const assistantMessage: UiChatMessage = {
         id: assistantId,
         role: 'assistant',
+        taskScope: scope,
         content: '',
         reasoning: '',
         tools: [],
@@ -1651,14 +1696,15 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
       const targetId = options?.editTargetId ?? editTargetId ?? undefined;
       const targetIndex = targetId ? messages.findIndex(message => message.id === targetId) : -1;
       const baseMessages = targetIndex >= 0 ? messages.slice(0, targetIndex) : messages;
-      const historyMessages = await hydrateMessageImages(baseMessages.slice(-20));
+      const scopeHistory = scopedTaskHistory(baseMessages, scope);
+      // 大图只为最近消息回填，较早的文字与任务记录仍可进入上下文。
+      const historyMessages = await hydrateMessageImages(scopeHistory.slice(-20));
       if (controller.signal.aborted) return;
-      const previousHistory = toAgentHistory(historyMessages.map(message => ({
-        role: message.role,
-        content: message.content,
-        modelContent: message.modelContent,
-        attachments: message.attachments,
-      })));
+      const previousHistory = toAgentHistory([
+        ...scopeHistory.slice(0, -20).map(({ role, content }) => ({ role, content })),
+        ...historyMessages,
+      ]);
+      const taskMemory = createTaskMemory(baseMessages, userText, repoContext);
       const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       runCapabilitiesRef.current = [];
       startRun({
@@ -1691,6 +1737,7 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
           repo: repoContext || undefined,
           config: effectiveConfig,
           history,
+          taskMemory,
           currentUserContent: modelContent,
           currentUserText: userText,
           contextBudget: Math.min(v2Settings.contextBudget, modelCapabilities.contextWindow),
@@ -1727,6 +1774,7 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
                 runId,
                 config: { ...CLOUDFLARE_FALLBACK_CONFIG, proxy_url: fallbackProxy },
                 history,
+                taskMemory,
                 currentUserContent: modelContent,
                 currentUserText: userText,
                 contextBudget: Math.min(v2Settings.contextBudget, modelCapabilities.contextWindow),
@@ -1814,15 +1862,25 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
         ...snapshot,
         writeInFlight: false,
         pendingWrite: undefined,
+        taskMemory: snapshot.taskMemory ? recordTaskActivity({
+          ...snapshot.taskMemory,
+          progress: {
+            ...snapshot.taskMemory.progress,
+            pending: snapshot.taskMemory.progress.pending?.filter(item => item.id !== pending.callId),
+          },
+        }, {
+          id: pending.callId, name: pending.tool, arguments: JSON.stringify(pending.verification),
+        }, true, resultText) : undefined,
         completedWrites: [...(snapshot.completedWrites || []), pending.id],
         messages: snapshot.messages.map(message => message.tool_call_id === pending.callId
           ? { ...message, content: resultText }
           : message),
       };
       if (!await saveRunSnapshot(user.login, verified)) throw new Error('无法保存核对结果');
-      if (snapshot.assistantId) patchTool(snapshot.assistantId, pending.callId, {
-        status: 'done', content: resultText, endedAt: Date.now(),
-      });
+      if (snapshot.assistantId) {
+        patchTool(snapshot.assistantId, pending.callId, { status: 'done', content: resultText, endedAt: Date.now() });
+        if (verified.taskMemory) patchAssistant(snapshot.assistantId, { taskProgress: verified.taskMemory.progress });
+      }
       setResumableSnapshot(current => current?.runId === snapshot.runId ? verified : current);
       toast.success(i18n.t('已核对远端写入结果'));
     } catch (error) {
@@ -1869,6 +1927,10 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
         repo: repoContext || undefined,
         config: effectiveConfig,
         history: [],
+        taskMemory: snapshot.taskMemory || createTaskMemory(
+          messages.slice(0, messages.findIndex(message => message.id === assistantId) + 1),
+          snapshot.title, repoContext,
+        ),
         resumeMessages: snapshot.messages,
         resumeSteps: snapshot.steps,
         resumeToolCalls: snapshot.toolCalls,
@@ -1996,6 +2058,38 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
     toast.success(i18n.t('对话已重命名'));
   };
 
+  const handleExportSession = async (id: string) => {
+    const login = user?.login;
+    const session = sessions.find(item => item.id === id);
+    if (!login || !session || !hydratedRef.current || sessionExportRef.current || (streaming && id === activeId)) return;
+
+    const exportController = new AbortController();
+    sessionExportRef.current = exportController;
+    setExportingId(id);
+    try {
+      // 未打开的会话在列表中只有元信息。直接读取消息分片，避免切换会话。
+      const history = loadedSessionsRef.current.has(id)
+        ? session.messages
+        : await loadSessionMessages(login, id);
+      if (exportController.signal.aborted) return;
+
+      const file = createSessionMarkdown(session, history);
+      if (!file) {
+        toast.info(i18n.t('该对话没有可导出的消息'));
+        return;
+      }
+      await triggerBlobDownload(file.blob, file.filename);
+      if (!exportController.signal.aborted && !isAndroid) toast.success(i18n.t('已发起下载'));
+    } catch {
+      if (!exportController.signal.aborted) toast.error(i18n.t('导出失败，请稍后重试'));
+    } finally {
+      if (sessionExportRef.current === exportController) {
+        sessionExportRef.current = null;
+        if (!exportController.signal.aborted) setExportingId(null);
+      }
+    }
+  };
+
   const handleDeleteSession = async (id: string) => {
     if (streaming) return;
     const target = sessions.find(session => session.id === id);
@@ -2105,8 +2199,10 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
             sessions={sessions}
             activeId={activeSession?.id || ''}
             streaming={streaming}
+            exportingId={exportingId}
             onSelect={handleSelectSession}
             onRename={handleRenameSession}
+            onExport={handleExportSession}
             onDelete={handleDeleteSession}
           />
         </div>
@@ -2178,6 +2274,20 @@ export default function AiAssistantV2Page({ visible = true, compactKeyboard = fa
                 <X className="h-3 w-3" />
               </button>
             </div>
+          )}
+          {resumableSnapshot && resumableSnapshot.sessionId === activeId && resumableSnapshot.taskMemory && !streaming && (
+            <details className="mx-2 mt-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+              <summary className="cursor-pointer font-medium">{i18n.t('已保存的任务进度')}</summary>
+              <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto break-words text-muted-foreground">
+                <p className="whitespace-pre-wrap">{resumableSnapshot.taskMemory.goal}</p>
+                {resumableSnapshot.taskMemory.progress.activity.slice(-3).map((item, index) => (
+                  <p key={`${item.tool}-${index}`}>{item.ok ? '✓' : '×'} {item.tool} {item.target}</p>
+                ))}
+                {resumableSnapshot.taskMemory.progress.pending?.map(item => (
+                  <p key={item.id}>{i18n.t('待执行')} · {item.title}</p>
+                ))}
+              </div>
+            </details>
           )}
           {resumableSnapshot && resumableSnapshot.sessionId === activeId && !streaming && (
             <div className="mx-2 mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs sm:mx-3">
@@ -2657,8 +2767,10 @@ const args = approvalRequest.arguments as Record<string, unknown>;
               sessions={sessions}
               activeId={activeSession?.id || ''}
               streaming={streaming}
+              exportingId={exportingId}
               onSelect={handleSelectSession}
               onRename={handleRenameSession}
+              onExport={handleExportSession}
               onDelete={handleDeleteSession}
             />
           </div>
