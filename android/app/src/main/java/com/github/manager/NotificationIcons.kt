@@ -24,6 +24,7 @@ object NotificationIcons {
      * @return 渲染成功返回位图；任何异常返回 null，调用方回退系统默认行为。
      */
     fun largeIconBitmap(context: Context, accentColor: Int): Bitmap? = runCatching {
+    android.util.Log.d("GM_ICON", "Drawing largeIcon with color: #${Integer.toHexString(accentColor)}")
         val size = dp(context, 64f)
         val radius = dp(context, 16f).toFloat()
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

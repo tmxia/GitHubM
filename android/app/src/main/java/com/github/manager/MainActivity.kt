@@ -397,6 +397,8 @@ class MainActivity : AppCompatActivity() {
                 
                 // 👇 新增：发送广播通知后台服务刷新正在显示的通知
                 sendBroadcast(android.content.Intent("com.github.manager.ACTION_THEME_CHANGED"))
+                // 💥 暴力清理：取消所有可能残留的旧通知，迫使系统重新用新颜色构建
+                androidx.core.app.NotificationManagerCompat.from(this@MainActivity).cancelAll()
             }
         }
 
