@@ -32,12 +32,14 @@ export interface GitHubRepo {
     html_url: string;
     name: string;
     owner: { login: string };
+    default_branch?: string;
   };
   source?: {
     full_name: string;
     html_url: string;
     name: string;
     owner: { login: string };
+    default_branch?: string;
   };
   html_url: string;
   clone_url: string;

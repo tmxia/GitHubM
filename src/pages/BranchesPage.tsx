@@ -5,6 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   GitBranch,
   GitCommit,
+  GitPullRequest,
   Code2,
   Star,
   Plus,
@@ -389,7 +390,7 @@ export default function BranchesPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-end gap-1 px-3 py-2 border-t border-border bg-secondary/20">
+              <div className="flex flex-wrap items-center justify-end gap-1 px-3 py-2 border-t border-border bg-secondary/20">
                 <Button
                   variant="ghost" size="sm"
                   className={CARD_ACTION_BUTTON_CLASS}
@@ -406,6 +407,16 @@ export default function BranchesPage() {
                 >
                   <GitCommit className="w-3.5 h-3.5" />{i18n.t('提交')}
                 </Button>
+                {branch.name !== defaultBranch && branch.ahead_by !== undefined && branch.ahead_by > 0 && (
+                  <Button
+                    variant="ghost" size="sm"
+                    className={CARD_ACTION_BUTTON_CLASS}
+                    title={i18n.t('新建 PR')}
+                    onClick={() => navigate(`/repos/${owner}/${repo}/pulls/new?head=${encodeURIComponent(branch.name)}`)}
+                  >
+                    <GitPullRequest className="w-3.5 h-3.5" />{i18n.t('新建 PR')}
+                  </Button>
+                )}
                 {canAdmin && branch.name !== defaultBranch && (
                   <Button
                     variant="ghost" size="sm"

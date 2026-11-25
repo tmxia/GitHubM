@@ -8,6 +8,7 @@ const IssuesPage = lazy(() => import('./pages/IssuesPage'));
 const NewIssuePage = lazy(() => import('./pages/NewIssuePage'));
 const IssueDetailPage = lazy(() => import('./pages/IssueDetailPage'));
 const PullsPage = lazy(() => import('./pages/PullsPage'));
+const NewPullPage = lazy(() => import('./pages/NewPullPage'));
 const PullDetailPage = lazy(() => import('./pages/PullDetailPage'));
 const CodeBrowserPage = lazy(() => import('./pages/CodeBrowserPage'));
 const CommitsPage = lazy(() => import('./pages/CommitsPage'));
@@ -69,6 +70,7 @@ export const routes: RouteConfig[] = [
   { name: i18n.t('新建 Issue'), path: '/repos/:owner/:repo/issues/new', element: <NewIssuePage /> },
   { name: i18n.t('Issue 详情'), path: '/repos/:owner/:repo/issues/:number', element: <IssueDetailPage /> },
   { name: 'Pull Requests', path: '/repos/:owner/:repo/pulls', element: <PullsPage /> },
+  { name: i18n.t('新建 PR'), path: '/repos/:owner/:repo/pulls/new', element: <NewPullPage /> },
   { name: i18n.t('PR 详情'), path: '/repos/:owner/:repo/pulls/:number', element: <PullDetailPage /> },
   { name: 'PR Diff', path: '/repos/:owner/:repo/pulls/:number/diff', element: <PrDiffPage /> },
   { name: i18n.t('代码浏览'), path: '/repos/:owner/:repo/code/*', element: <CodeBrowserPage /> },

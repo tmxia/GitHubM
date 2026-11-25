@@ -38,6 +38,7 @@ import {
   getPullRequestReviewComments,
   createPullRequestReviewComment,
   submitPullRequestReview,
+  samePullRevision,
   type ReviewEvent,
 } from '@/services/github';
 import type { GitHubPullRequest, GitHubFile, GitHubComment } from '@/types/types';
@@ -544,9 +545,18 @@ export default function PrDiffPage() {
     if (!owner || !repo || !number || !reviewDialog) return;
     setSubmittingReview(true);
     try {
+      const latest = await getPullRequest(owner, repo, Number(number), { fresh: true }).catch(() => null);
+      if (latest && pr && !samePullRevision(pr, latest)) {
+        toast.error(i18n.t('分支已有更新，请刷新变更后再评审'));
+        setSubmittingReview(false);
+        return;
+      }
+      const commitSha = latest?.head.sha ?? pr?.head.sha;
+      if (latest) setPr(latest);
       await submitPullRequestReview(owner, repo, Number(number), {
         event: reviewDialog,
         body: reviewBody.trim(),
+        ...(commitSha ? { commit_id: commitSha } : {}),
       });
       const labels: Record<ReviewEvent, string> = {
         APPROVE: i18n.t('已批准 PR'),

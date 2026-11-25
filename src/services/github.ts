@@ -127,6 +127,12 @@ function consumeCacheBust(url: string): string {
   return url;
 }
 
+/** fresh（no-store）旁路：附加时间戳绕过 CDN 与内存缓存，独立请求不共享 in-flight。 */
+function freshRequestUrl(url: string): string {
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}_t=${Date.now()}`;
+}
+
 export function clearApiCache(): void {
   apiCache.clear();
   cdnBustPrefixes.clear();
@@ -247,12 +253,15 @@ async function request<T>(
 
   if (method === 'GET') {
     const cacheKey = buildCacheKey(url);
+    const fresh = options.cache === 'no-store';
 
-    const cached = getCached<T>(cacheKey);
-    if (cached !== null) return cached;
+    if (!fresh) {
+      const cached = getCached<T>(cacheKey);
+      if (cached !== null) return cached;
+    }
 
-    const fetchUrl = consumeCacheBust(url);
-    return getOrCreateInFlight<T>(cacheKey, async () => {
+    const fetchUrl = fresh ? freshRequestUrl(url) : consumeCacheBust(url);
+    const execute = async () => {
       const response = await fetchWithRetry(fetchUrl, {
         ...options,
         headers: { ...buildHeaders(), ...options.headers },
@@ -278,9 +287,10 @@ async function request<T>(
       }
       if (response.status === 204) return undefined as T;
       const data = await response.json() as T;
-      setCached(cacheKey, data);
+      if (!fresh) setCached(cacheKey, data);
       return data;
-    });
+    };
+    return fresh || options.signal ? execute() : getOrCreateInFlight<T>(cacheKey, execute);
   }
 
   const response = await fetchWithRetry(url, {
@@ -336,12 +346,15 @@ async function requestWithPagination<T>(
 
   if (method === 'GET') {
     const cacheKey = buildCacheKey(url);
+    const fresh = options.cache === 'no-store';
 
-    const cached = getCached<{ data: T[]; hasNextPage: boolean }>(cacheKey);
-    if (cached !== null) return cached;
+    if (!fresh) {
+      const cached = getCached<{ data: T[]; hasNextPage: boolean }>(cacheKey);
+      if (cached !== null) return cached;
+    }
 
-    const fetchUrl = consumeCacheBust(url);
-    return getOrCreateInFlight<{ data: T[]; hasNextPage: boolean }>(cacheKey, async () => {
+    const fetchUrl = fresh ? freshRequestUrl(url) : consumeCacheBust(url);
+    const execute = async () => {
       const response = await fetchWithRetry(fetchUrl, {
         ...options,
         headers: { ...buildHeaders(), ...options.headers },
@@ -360,9 +373,10 @@ async function requestWithPagination<T>(
       const linkHeader = response.headers.get('Link');
       const links = linkHeader ? parseLinkHeader(linkHeader) : {};
       const result = { data, hasNextPage: !!links.next };
-      setCached(cacheKey, result);
+      if (!fresh) setCached(cacheKey, result);
       return result;
-    });
+    };
+    return fresh || options.signal ? execute() : getOrCreateInFlight(cacheKey, execute);
   }
 
   const response = await fetchWithRetry(url, {
@@ -720,6 +734,7 @@ export async function getPullRequests(
     page?: number;
     base?: string;
     head?: string;
+    fresh?: boolean;
   } = {},
   opts: { fresh?: boolean } = {}
 ): Promise<{ data: GitHubPullRequest[]; hasNextPage: boolean }> {
@@ -739,10 +754,11 @@ export async function getPullRequests(
   });
   if (params.base) queryParams.set('base', params.base);
   if (params.head) queryParams.set('head', params.head);
-  if (opts.fresh) queryParams.set('_t', String(Date.now()));
 
+  const fresh = opts.fresh || params.fresh;
   return requestWithPagination<GitHubPullRequest>(
-    `/repos/${owner}/${repo}/pulls?${queryParams.toString()}`
+    `/repos/${owner}/${repo}/pulls?${queryParams.toString()}`,
+    fresh ? { cache: 'no-store' } : undefined
   );
 }
 
@@ -753,8 +769,7 @@ export async function getPullRequest(
   options?: { fresh?: boolean }
 ): Promise<GitHubPullRequest> {
   const path = `/repos/${owner}/${repo}/pulls/${prNumber}`;
-  const url = options?.fresh ? `${path}?_t=${Date.now()}` : path;
-  return request<GitHubPullRequest>(url);
+  return request<GitHubPullRequest>(path, options?.fresh ? { cache: 'no-store' } : undefined);
 }
 
 export function samePullRevision(left: GitHubPullRequest, right: GitHubPullRequest): boolean {
@@ -792,6 +807,33 @@ export async function mergePullRequest(
       headers: { 'Content-Type': 'application/json' },
     }
   );
+}
+
+/** 创建 Pull Request（支持同仓库与跨 fork 提向父仓库）。 */
+export async function createPullRequest(
+  owner: string,
+  repo: string,
+  params: {
+    title: string;
+    head: string;
+    head_repo?: string;
+    base: string;
+    body?: string;
+    draft?: boolean;
+  }
+): Promise<GitHubPullRequest> {
+  return request<GitHubPullRequest>(`/repos/${owner}/${repo}/pulls`, {
+    method: 'POST',
+    body: JSON.stringify({
+      title: params.title,
+      head: params.head,
+      ...(params.head_repo ? { head_repo: params.head_repo } : {}),
+      base: params.base,
+      body: params.body ?? '',
+      draft: params.draft ?? false,
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 export async function updatePullRequest(
@@ -1043,14 +1085,13 @@ export async function compareBranches(
   files?: GitHubFile[];
 }> {
   const path = `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
-  const url = options?.fresh ? `${path}?_t=${Date.now()}` : path;
   return request<{
     ahead_by: number;
     behind_by: number;
     status: string;
     commits: GitHubCommit[];
     files?: GitHubFile[];
-  }>(url);
+  }>(path, options?.fresh ? { cache: 'no-store' } : undefined);
 }
 
 export async function getCollaborators(

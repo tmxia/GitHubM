@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { lsGet, lsSet } from '@/lib/storage';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -9,8 +9,11 @@ import {
   MessageSquare,
   ChevronRight,
   GitBranch,
+  Plus,
+  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -53,6 +56,7 @@ export default function PullsPage() {
   const [page, setPage] = useState(1);
   const [stateFilter, setStateFilter] = useState<PrState>('open');
   const [sortField, setSortField] = useState<'created' | 'updated' | 'popularity' | 'long-running'>(() => loadPullsSortPref());
+  const [numberQuery, setNumberQuery] = useState('');
 
   const loadPulls = useCallback(async (pageNum = 1, append = false, force = false) => {
     if (!owner || !repo) return;
@@ -79,7 +83,11 @@ export default function PullsPage() {
         page: pageNum,
       }, { fresh: force });
       if (append) {
-        setPulls((prev) => [...prev, ...result.data]);
+        setPulls((prev) => {
+          const byId = new Map(prev.map((p) => [p.id, p]));
+          for (const p of result.data) byId.set(p.id, p);
+          return [...byId.values()];
+        });
       } else {
         setPulls(result.data);
         pageCache.set(cacheKey, { pulls: result.data, hasNextPage: result.hasNextPage });
@@ -97,6 +105,14 @@ export default function PullsPage() {
   useEffect(() => {
     loadPulls(1);
   }, [loadPulls]);
+
+  const pullsPath = `/repos/${owner}/${repo}/pulls`;
+  const pullNumber = numberQuery.trim().replace(/^#/, '');
+  const canJump = /^[1-9]\d*$/.test(pullNumber) && Number.isSafeInteger(Number(pullNumber));
+  const jumpToPull = (event: FormEvent) => {
+    event.preventDefault();
+    if (canJump) navigate(`${pullsPath}/${pullNumber}`);
+  };
 
   const getPrIcon = (pr: GitHubPullRequest) => {
     if (pr.merged_at || pr.merged) return <GitMerge className="w-4 h-4 text-chart-4 shrink-0" />;
@@ -131,6 +147,9 @@ export default function PullsPage() {
 
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-foreground">Pull Requests</h1>
+        <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shrink-0" onClick={() => navigate(`${pullsPath}/new`)}>
+          <Plus className="w-4 h-4 mr-1.5" />{i18n.t('新建 PR')}
+        </Button>
       </div>
 
       <div className="flex gap-3 bg-card border border-border rounded-lg p-3">
@@ -163,6 +182,11 @@ export default function PullsPage() {
           </Select>
         </div>
       </div>
+
+      <form onSubmit={jumpToPull} className="flex items-center gap-2">
+        <Input value={numberQuery} onChange={(event) => setNumberQuery(event.target.value)} inputMode="numeric" placeholder={i18n.t('输入 PR 编号，例如 #123')} aria-label={i18n.t('PR 编号')} className="min-w-0" />
+        <Button type="submit" variant="outline" disabled={!canJump} className="shrink-0 gap-1.5"><ArrowRight className="h-4 w-4" />{i18n.t('打开 PR')}</Button>
+      </form>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         {loading ? (
