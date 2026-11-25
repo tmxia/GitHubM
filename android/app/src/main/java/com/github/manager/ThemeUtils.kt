@@ -40,12 +40,12 @@ object ThemeUtils {
     /**
      * 解析 hex 颜色字符串，失败时返回 null（不抛异常）。
      *
-     * @param hex 形如 "#7c3aed"、"#8B4CF8" 的颜色字符串
-     * @return 解析成功的颜色 Int，格式非法时返回 null
+     * @param hex 形如 "#7c3aed"、"#8B4CF8" 的颜色字符串，可为 null
+     * @return 解析成功的颜色 Int，格式非法 / 为 null 时返回 null
      */
     @VisibleForTesting
-    fun parseColorSafe(hex: String): Int? = runCatching {
-        Color.parseColor(hex)
+    fun parseColorSafe(hex: String?): Int? = runCatching {
+        Color.parseColor(hex ?: "")
     }.getOrNull()
 
     /**
